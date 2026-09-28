@@ -1,0 +1,191 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>A · Fluent Mica 云母</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-font-smoothing:antialiased}
+  body{
+    font-family:"Segoe UI Variable Text","Microsoft YaHei UI",sans-serif;
+    background:
+      radial-gradient(1200px 700px at 15% 0%, #2b4a6f 0%, transparent 60%),
+      radial-gradient(900px 600px at 90% 90%, #3d2f5e 0%, transparent 55%),
+      linear-gradient(160deg,#16202e,#0d1420);
+    min-height:100vh;display:flex;align-items:center;justify-content:center;gap:48px;padding:40px;
+  }
+  .panel{
+    background:rgba(248,249,251,.86);
+    backdrop-filter:blur(30px) saturate(1.4);
+    border:1px solid rgba(255,255,255,.55);
+    outline:1px solid rgba(0,0,0,.08);
+    border-radius:12px;
+    box-shadow:0 24px 70px rgba(0,0,0,.5);
+    color:#1b1b1f;
+    display:flex;flex-direction:column;overflow:hidden;
+  }
+  .single{width:340px;height:500px}
+  .dual{width:680px;height:500px}
+  /* ---- title bar ---- */
+  .titlebar{display:flex;align-items:center;justify-content:space-between;padding:10px 12px 8px}
+  .seg{display:flex;background:rgba(0,0,0,.06);border-radius:8px;padding:3px;gap:2px}
+  .seg button{border:0;background:transparent;font:600 12.5px/1 inherit;font-family:inherit;color:#5b5b60;padding:6px 16px;border-radius:6px;cursor:pointer}
+  .seg button.active{background:#fff;color:#1b1b1f;box-shadow:0 1px 3px rgba(0,0,0,.12),0 0 0 1px rgba(0,0,0,.04)}
+  .win-actions{display:flex;gap:2px}
+  .win-actions button{width:30px;height:28px;border:0;background:transparent;border-radius:6px;color:#5b5b60;font-size:13px;cursor:pointer}
+  .win-actions button:hover{background:rgba(0,0,0,.07)}
+  /* ---- calendar ---- */
+  .cal{flex:1;display:flex;flex-direction:column;padding:2px 14px 0;min-width:0}
+  .cal-head{display:flex;align-items:baseline;justify-content:space-between;padding:4px 4px 10px}
+  .cal-title{font-size:17px;font-weight:600;letter-spacing:.2px}
+  .cal-title small{font-size:11px;font-weight:500;color:#8a8a90;margin-left:6px}
+  .cal-nav{display:flex;align-items:center;gap:4px}
+  .cal-nav button{border:0;background:transparent;color:#5b5b60;width:26px;height:24px;border-radius:6px;font-size:14px;cursor:pointer}
+  .cal-nav button:hover{background:rgba(0,0,0,.07)}
+  .cal-nav .today-btn{width:auto;padding:0 10px;font:600 11.5px/1 inherit;font-family:inherit;color:#0067c0}
+  .cal-nav .today-btn:hover{background:rgba(0,103,192,.1)}
+  .week-row{display:grid;grid-template-columns:repeat(7,1fr);padding:0 2px 6px}
+  .week-row span{text-align:center;font-size:10.5px;color:#8a8a90;font-weight:600}
+  .week-row span.we{color:#c94f4f}
+  .grid{flex:1;display:grid;grid-template-columns:repeat(7,1fr);grid-auto-rows:1fr;padding:0 2px}
+  .cell{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:8px;cursor:pointer}
+  .cell:hover{background:rgba(0,0,0,.055)}
+  .cell .d{font-size:13.5px;font-weight:500;height:22px;line-height:22px;min-width:22px;text-align:center;border-radius:50%}
+  .cell.dim .d{color:#b4b4ba}
+  .cell.we .d{color:#c94f4f}
+  .cell.dim.we .d{color:#dcb0b0}
+  .cell.today .d{background:#0067c0;color:#fff;font-weight:700}
+  .cell .sub{font-size:9px;color:#9a9aa0;height:12px;line-height:12px;letter-spacing:.2px}
+  .cell .sub.fest{color:#0067c0;font-weight:600}
+  .cell .badge{position:absolute;top:2px;right:3px;font-size:8.5px;font-weight:700;padding:0 3px;border-radius:4px;line-height:13px}
+  .cell .badge.off{background:#fde7e6;color:#c42b1c}
+  .cell .badge.work{background:rgba(0,0,0,.07);color:#77777d}
+  .cell .dot{position:absolute;bottom:3px;width:4px;height:4px;border-radius:50%;background:#0067c0}
+  .cal-foot{padding:9px 4px 10px;font-size:10.5px;color:#9a9aa0;text-align:center;border-top:1px solid rgba(0,0,0,.05);margin:4px 8px 0}
+  /* ---- todo ---- */
+  .todo{flex:1;display:flex;flex-direction:column;min-width:0;border-left:1px solid rgba(0,0,0,.07);background:rgba(255,255,255,.35)}
+  .todo-head{display:flex;align-items:baseline;justify-content:space-between;padding:12px 16px 8px}
+  .todo-head b{font-size:14px}
+  .todo-head span{font-size:11px;color:#8a8a90}
+  .todo-list{flex:1;overflow:hidden;padding:0 8px;list-style:none}
+  .todo-list li{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer}
+  .todo-list li:hover{background:rgba(0,0,0,.05)}
+  .cb{width:16px;height:16px;border-radius:50%;border:1.5px solid #9a9aa0;flex:none;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;transition:.15s}
+  li:hover .cb{border-color:#0067c0}
+  .cb.on{background:#0067c0;border-color:#0067c0}
+  .tx{flex:1;font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .due{font-size:10px;color:#0067c0;background:rgba(0,103,192,.1);padding:2px 7px;border-radius:10px;flex:none}
+  .due.late{color:#c42b1c;background:#fde7e6}
+  li.done .tx{color:#a8a8ae;text-decoration:line-through}
+  li.done .due{visibility:hidden}
+  .todo-add{margin:6px 10px 10px;padding:9px 12px;border:1px dashed rgba(0,0,0,.18);border-radius:8px;color:#8a8a90;font-size:12px;text-align:center;cursor:pointer}
+  .todo-add:hover{border-color:#0067c0;color:#0067c0;background:rgba(0,103,192,.05)}
+  .dual-body{flex:1;display:flex;min-height:0}
+</style>
+</head>
+<body>
+
+<!-- 单栏：日历 tab -->
+<div class="panel single">
+  <div class="titlebar">
+    <div class="seg">
+      <button class="active">日历</button>
+      <button>待办</button>
+    </div>
+    <div class="win-actions">
+      <button title="展开双栏">⧉</button>
+      <button title="关闭">✕</button>
+    </div>
+  </div>
+  <div class="cal">
+    <div class="cal-head">
+      <div class="cal-title">2026年9月<small>农历 八月</small></div>
+      <div class="cal-nav"><button>‹</button><button class="today-btn">今天</button><button>›</button></div>
+    </div>
+    <div class="week-row"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span class="we">六</span><span class="we">日</span></div>
+    <div class="grid" data-cal></div>
+  </div>
+  <div class="cal-foot">滚轮切换月份 · 点「今天」快速返回</div>
+</div>
+
+<!-- 双栏：日历 + 待办 -->
+<div class="panel dual">
+  <div class="titlebar">
+    <div class="seg">
+      <button class="active">日历</button>
+      <button class="active">待办</button>
+    </div>
+    <div class="win-actions">
+      <button title="收起为单栏" style="color:#0067c0">⧉</button>
+      <button title="关闭">✕</button>
+    </div>
+  </div>
+  <div class="dual-body">
+    <div class="cal">
+      <div class="cal-head">
+        <div class="cal-title">2026年9月<small>农历 八月</small></div>
+        <div class="cal-nav"><button>‹</button><button class="today-btn">今天</button><button>›</button></div>
+      </div>
+      <div class="week-row"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span class="we">六</span><span class="we">日</span></div>
+      <div class="grid" data-cal></div>
+      <div class="cal-foot">滚轮切换月份</div>
+    </div>
+    <div class="todo">
+      <div class="todo-head"><b>待办清单</b><span>3 项未完成</span></div>
+      <ul class="todo-list">
+        <li><span class="cb"></span><span class="tx">整理 Q3 复盘文档</span><span class="due late">逾期 2 天</span></li>
+        <li><span class="cb"></span><span class="tx">给妈妈回电话</span><span class="due">今天</span></li>
+        <li><span class="cb"></span><span class="tx">国庆出游订酒店</span><span class="due">9月30日</span></li>
+        <li class="done"><span class="cb on">✓</span><span class="tx">缴纳水电费</span><span class="due"></span></li>
+        <li class="done"><span class="cb on">✓</span><span class="tx">周报已提交</span><span class="due"></span></li>
+      </ul>
+      <div class="todo-add">＋ 双击空白处新建待办</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const HOLIDAYS={
+  '2026-09-25':{n:'中秋',off:1},
+  '2026-10-01':{n:'国庆',off:1},'2026-10-02':{n:'休',off:1},'2026-10-03':{n:'休',off:1},
+  '2026-10-04':{n:'休',off:1},'2026-10-05':{n:'休',off:1},'2026-10-06':{n:'休',off:1},'2026-10-07':{n:'休',off:1},
+};
+const WORKDAYS={'2026-09-26':1,'2026-10-10':1};
+const TODOS={'2026-09-28':1,'2026-09-30':1,'2026-10-09':1};
+const TODAY='2026-09-28';
+function pad(n){return String(n).padStart(2,'0')}
+function build(grid){
+  const y=2026,m=8;
+  const first=new Date(y,m,1);
+  const offset=(first.getDay()+6)%7;
+  const daysIn=new Date(y,m+1,0).getDate();
+  const prevDays=new Date(y,m,0).getDate();
+  for(let i=0;i<42;i++){
+    const dnum=i-offset+1;
+    let dy,dm,dd,dim=false;
+    if(dnum<1){dm=m-1;dd=prevDays+dnum;dim=true}
+    else if(dnum>daysIn){dm=m+1;dd=dnum-daysIn;dim=true}
+    else{dm=m;dd=dnum}
+    const d=new Date(y,dm,dd); dy=d.getFullYear();dm=d.getMonth();dd=d.getDate();
+    const key=`${dy}-${pad(dm+1)}-${pad(dd)}`;
+    const wd=d.getDay();
+    const cell=document.createElement('div');
+    cell.className='cell'+(dim?' dim':'')+((wd===0||wd===6)?' we':'')+(key===TODAY?' today':'');
+    let html=`<span class="d">${dd}</span>`;
+    const h=HOLIDAYS[key];
+    if(h){
+      html+=`<span class="badge off">休</span>`;
+      html+=`<span class="sub fest">${h.n}</span>`;
+    }else if(WORKDAYS[key]){
+      html+=`<span class="badge work">班</span><span class="sub"></span>`;
+    }else{
+      html+=`<span class="sub"></span>`;
+    }
+    if(TODOS[key])html+=`<span class="dot"></span>`;
+    cell.innerHTML=html;
+    grid.appendChild(cell);
+  }
+}
+document.querySelectorAll('[data-cal]').forEach(build);
+</script>
+</body>
+</html>

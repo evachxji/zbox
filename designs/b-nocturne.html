@@ -1,0 +1,178 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>B · 深夜书桌 Nocturne</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-font-smoothing:antialiased}
+  body{
+    font-family:"Microsoft YaHei UI","Segoe UI",sans-serif;
+    background:
+      radial-gradient(1000px 600px at 80% 10%, #233042 0%, transparent 55%),
+      radial-gradient(800px 500px at 10% 90%, #2c2337 0%, transparent 50%),
+      linear-gradient(150deg,#12151c,#0a0c11);
+    min-height:100vh;display:flex;align-items:center;justify-content:center;gap:48px;padding:40px;
+  }
+  .num{font-family:"Bahnschrift","Consolas",sans-serif}
+  .panel{
+    background:linear-gradient(180deg,rgba(30,32,40,.94),rgba(22,24,30,.96));
+    backdrop-filter:blur(28px);
+    border:1px solid rgba(255,255,255,.09);
+    border-radius:16px;
+    box-shadow:0 30px 80px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.06);
+    color:#e8e6e1;
+    display:flex;flex-direction:column;overflow:hidden;
+  }
+  .single{width:344px;height:500px}
+  .dual{width:688px;height:500px}
+  /* titlebar */
+  .titlebar{display:flex;align-items:center;justify-content:space-between;padding:14px 16px 6px}
+  .tabs{display:flex;gap:18px}
+  .tabs button{border:0;background:none;font:600 13px/1 inherit;font-family:inherit;color:#7d7a72;padding:4px 0;cursor:pointer;position:relative}
+  .tabs button.active{color:#f0ede6}
+  .tabs button.active::after{content:"";position:absolute;left:0;right:0;bottom:-3px;height:2px;border-radius:2px;background:#e8a33d}
+  .win-actions{display:flex;gap:2px}
+  .win-actions button{width:28px;height:26px;border:0;background:none;border-radius:6px;color:#7d7a72;font-size:12px;cursor:pointer}
+  .win-actions button:hover{background:rgba(255,255,255,.08);color:#e8e6e1}
+  /* calendar */
+  .cal{flex:1;display:flex;flex-direction:column;padding:0 16px;min-width:0}
+  .cal-head{display:flex;align-items:flex-end;justify-content:space-between;padding:6px 2px 12px;border-bottom:1px solid rgba(255,255,255,.07);margin-bottom:10px}
+  .cal-title{display:flex;align-items:baseline;gap:10px}
+  .cal-title .big{font-family:"Bahnschrift",sans-serif;font-size:34px;font-weight:600;letter-spacing:.5px;line-height:1;color:#f0ede6}
+  .cal-title .cn{font-size:13px;color:#a39e93;letter-spacing:2px}
+  .cal-title .cn b{display:block;font-size:10px;color:#6d6a62;font-weight:400;letter-spacing:1px;margin-top:3px}
+  .cal-nav{display:flex;align-items:center;gap:6px;padding-bottom:4px}
+  .cal-nav button{border:1px solid rgba(255,255,255,.12);background:none;color:#a39e93;width:26px;height:24px;border-radius:6px;font-size:13px;cursor:pointer}
+  .cal-nav button:hover{border-color:#e8a33d;color:#e8a33d}
+  .cal-nav .today-btn{width:auto;padding:0 10px;font:600 11px/1 inherit;font-family:inherit;color:#e8a33d;border-color:rgba(232,163,61,.4)}
+  .week-row{display:grid;grid-template-columns:repeat(7,1fr);padding:0 0 8px}
+  .week-row span{text-align:center;font-size:10px;color:#6d6a62;letter-spacing:2px}
+  .grid{flex:1;display:grid;grid-template-columns:repeat(7,1fr);grid-auto-rows:1fr}
+  .cell{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:10px;cursor:pointer;gap:1px}
+  .cell:hover{background:rgba(255,255,255,.06)}
+  .cell .d{font-family:"Bahnschrift",sans-serif;font-size:16px;font-weight:500;height:24px;line-height:24px;min-width:24px;text-align:center;border-radius:8px}
+  .cell.dim .d{color:#4c4a45}
+  .cell.we .d{color:#8f8b81}
+  .cell.dim.we .d{color:#454340}
+  .cell.today .d{background:#e8a33d;color:#1a1610;font-weight:700}
+  .cell .sub{font-size:9px;height:12px;line-height:12px;color:#6d6a62}
+  .cell .sub.fest{color:#e8a33d}
+  .cell .badge{position:absolute;top:3px;right:4px;font-size:8px;font-weight:700;padding:0 4px;border-radius:8px;line-height:13px;border:1px solid}
+  .cell .badge.off{color:#e8a33d;border-color:rgba(232,163,61,.45)}
+  .cell .badge.work{color:#6d6a62;border-color:rgba(255,255,255,.15)}
+  .cell .dot{position:absolute;bottom:4px;width:4px;height:4px;border-radius:50%;background:#e8a33d}
+  .cal-foot{padding:10px 2px 12px;font-size:10px;color:#5d5a53;letter-spacing:1px;text-align:center}
+  /* todo */
+  .todo{flex:1;display:flex;flex-direction:column;min-width:0;border-left:1px solid rgba(255,255,255,.07)}
+  .todo-head{display:flex;align-items:baseline;justify-content:space-between;padding:16px 18px 10px}
+  .todo-head b{font-size:14px;letter-spacing:1px}
+  .todo-head span{font-family:"Bahnschrift",sans-serif;font-size:11px;color:#e8a33d}
+  .todo-list{flex:1;overflow:hidden;padding:0 10px;list-style:none}
+  .todo-list li{display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:9px;cursor:pointer}
+  .todo-list li:hover{background:rgba(255,255,255,.05)}
+  .cb{width:17px;height:17px;border-radius:6px;border:1.5px solid #6d6a62;flex:none;display:flex;align-items:center;justify-content:center;font-size:10px;color:#1a1610;transition:.15s}
+  li:hover .cb{border-color:#e8a33d}
+  .cb.on{background:#e8a33d;border-color:#e8a33d;font-weight:700}
+  .tx{flex:1;font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .due{font-family:"Bahnschrift",sans-serif;font-size:10px;color:#a39e93;flex:none;letter-spacing:.5px}
+  .due.late{color:#e06666}
+  li.done .tx{color:#57554f;text-decoration:line-through}
+  li.done .due{visibility:hidden}
+  .todo-add{margin:8px 12px 12px;padding:10px;border:1px dashed rgba(255,255,255,.15);border-radius:9px;color:#6d6a62;font-size:12px;text-align:center;cursor:pointer;letter-spacing:1px}
+  .todo-add:hover{border-color:rgba(232,163,61,.5);color:#e8a33d}
+  .dual-body{flex:1;display:flex;min-height:0}
+</style>
+</head>
+<body>
+
+<div class="panel single">
+  <div class="titlebar">
+    <div class="tabs"><button class="active">日历</button><button>待办</button></div>
+    <div class="win-actions"><button title="展开双栏">⧉</button><button title="关闭">✕</button></div>
+  </div>
+  <div class="cal">
+    <div class="cal-head">
+      <div class="cal-title">
+        <span class="big">09</span>
+        <span class="cn">九月 · 2026<b>农历乙巳年 八月</b></span>
+      </div>
+      <div class="cal-nav"><button>‹</button><button class="today-btn">今日</button><button>›</button></div>
+    </div>
+    <div class="week-row"><span>MON</span><span>TUE</span><span>WED</span><span>THU</span><span>FRI</span><span>SAT</span><span>SUN</span></div>
+    <div class="grid" data-cal></div>
+  </div>
+  <div class="cal-foot">SCROLL TO TRAVEL · CLICK 今日 TO RETURN</div>
+</div>
+
+<div class="panel dual">
+  <div class="titlebar">
+    <div class="tabs"><button class="active">日历</button><button class="active">待办</button></div>
+    <div class="win-actions"><button title="收起为单栏" style="color:#e8a33d">⧉</button><button title="关闭">✕</button></div>
+  </div>
+  <div class="dual-body">
+    <div class="cal">
+      <div class="cal-head">
+        <div class="cal-title">
+          <span class="big">09</span>
+          <span class="cn">九月 · 2026<b>农历乙巳年 八月</b></span>
+        </div>
+        <div class="cal-nav"><button>‹</button><button class="today-btn">今日</button><button>›</button></div>
+      </div>
+      <div class="week-row"><span>MON</span><span>TUE</span><span>WED</span><span>THU</span><span>FRI</span><span>SAT</span><span>SUN</span></div>
+      <div class="grid" data-cal></div>
+      <div class="cal-foot">SCROLL TO TRAVEL</div>
+    </div>
+    <div class="todo">
+      <div class="todo-head"><b>待办清单</b><span>03 OPEN</span></div>
+      <ul class="todo-list">
+        <li><span class="cb"></span><span class="tx">整理 Q3 复盘文档</span><span class="due late">D-2</span></li>
+        <li><span class="cb"></span><span class="tx">给妈妈回电话</span><span class="due">TODAY</span></li>
+        <li><span class="cb"></span><span class="tx">国庆出游订酒店</span><span class="due">09.30</span></li>
+        <li class="done"><span class="cb on">✓</span><span class="tx">缴纳水电费</span><span class="due"></span></li>
+        <li class="done"><span class="cb on">✓</span><span class="tx">周报已提交</span><span class="due"></span></li>
+      </ul>
+      <div class="todo-add">+ 双击空白处新建待办</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const HOLIDAYS={
+  '2026-09-25':{n:'中秋',off:1},
+  '2026-10-01':{n:'国庆',off:1},'2026-10-02':{n:'假期',off:1},'2026-10-03':{n:'假期',off:1},
+  '2026-10-04':{n:'假期',off:1},'2026-10-05':{n:'假期',off:1},'2026-10-06':{n:'假期',off:1},'2026-10-07':{n:'假期',off:1},
+};
+const WORKDAYS={'2026-09-26':1,'2026-10-10':1};
+const TODOS={'2026-09-28':1,'2026-09-30':1,'2026-10-09':1};
+const TODAY='2026-09-28';
+function pad(n){return String(n).padStart(2,'0')}
+function build(grid){
+  const y=2026,m=8;
+  const offset=(new Date(y,m,1).getDay()+6)%7;
+  const daysIn=new Date(y,m+1,0).getDate();
+  const prevDays=new Date(y,m,0).getDate();
+  for(let i=0;i<42;i++){
+    const dnum=i-offset+1;
+    let dd,dim=false,dt;
+    if(dnum<1){dt=new Date(y,m-1,prevDays+dnum);dim=true}
+    else if(dnum>daysIn){dt=new Date(y,m+1,dnum-daysIn);dim=true}
+    else{dt=new Date(y,m,dnum)}
+    dd=dt.getDate();
+    const key=`${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dd)}`;
+    const wd=dt.getDay();
+    const cell=document.createElement('div');
+    cell.className='cell'+(dim?' dim':'')+((wd===0||wd===6)?' we':'')+(key===TODAY?' today':'');
+    let html=`<span class="d">${pad(dd)}</span>`;
+    const h=HOLIDAYS[key];
+    if(h){html+=`<span class="badge off">休</span><span class="sub fest">${h.n}</span>`}
+    else if(WORKDAYS[key]){html+=`<span class="badge work">班</span><span class="sub"></span>`}
+    else{html+=`<span class="sub"></span>`}
+    if(TODOS[key])html+=`<span class="dot"></span>`;
+    cell.innerHTML=html;
+    grid.appendChild(cell);
+  }
+}
+document.querySelectorAll('[data-cal]').forEach(build);
+</script>
+</body>
+</html>

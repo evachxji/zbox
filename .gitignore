@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+
+# 自检截图与设计稿渲染图（不上传仓库）
+designs/verify/
+designs/*.png
+
+/_*.log
