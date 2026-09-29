@@ -1,6 +1,10 @@
-﻿# Zviber 桌面悬浮面板
+﻿<p align="center">
+  <img src="assets/icon.png" width="96" alt="Zviber">
+</p>
 
-「格子」风格的桌面悬浮小面板：**日历 + 待办**，Win7 / Win10 / Win11 通用。
+# Zviber 桌面日历面板
+
+「格子」风格的 Windows 桌面日历面板：**日历 + 待办** 一体的悬浮小面板，Win7 / Win10 / Win11 通用。
 
 ## 功能
 
