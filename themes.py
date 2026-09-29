@@ -55,12 +55,16 @@ QFrame#dayCell[we="true"] QLabel#dayNum { color: #8f8b81; }
 QFrame#dayCell[dim="true"][we="true"] QLabel#dayNum { color: #454340; }
 QFrame#dayCell[sel="true"] { background: rgba(232,163,61,36); }
 QFrame#dayCell[sel="true"] QLabel#dayNum { color: #e8a33d; }
-QFrame#dayCell[today="true"] QLabel#dayNum { background: #e8a33d; color: #1a1610; font-weight: 700; }
+QFrame#dayCell[today="true"] { background: #e8a33d; }
+QFrame#dayCell[today="true"]:hover { background: #f2b45a; }
+QFrame#dayCell[today="true"] QLabel#dayNum { color: #1a1610; font-weight: 700; }
+QFrame#dayCell[today="true"] QLabel#daySub { color: rgba(26,22,16,190); }
 QLabel#daySub { color: #6d6a62; font: 9px "%CN%"; }
 QLabel#daySub[fest="true"] { color: #e8a33d; }
-QLabel#badge { border-radius: 3px; }
-QLabel#badge[kind="off"] { background: #e05252; }
-QLabel#badge[kind="work"] { background: #6d6a62; }
+/* 休息日角标：贴右上角的红色直角三角形（仿 Excel 批注标记）。
+   三角形状由 app._CornerBadge 用 QPainter 画，这里只负责给颜色。 */
+#badge[kind="off"] { color: #e05252; }
+#badge[kind="work"] { color: #6d6a62; }
 QFrame#todoPane { border-left: 1px solid rgba(255,255,255,18); }
 QLabel#todoTitle { color: #f0ede6; font: 600 14px "%CN%"; }
 QLabel#todoCount { color: #e8a33d; font: 600 11px "%NUM%"; }
@@ -99,12 +103,16 @@ QWidget#settingsPanel {
 }
 QLabel#setTitle { color: #f0ede6; font: 600 13px "%CN%"; }
 QLabel#setLabel { color: #6d6a62; font: 12px "%CN%"; }
+QLabel#setUrl {
+    color: #e8a33d; background: rgba(255,255,255,16); border-radius: 6px;
+    font: 11px "%NUM%"; padding: 5px 8px;
+}
 QFrame#setSep { background: rgba(255,255,255,16); border: none; margin: 2px 0px; }
 QWidget#settingsPanel QRadioButton, QWidget#settingsPanel QCheckBox {
     color: #e8e6e1; font: 12.5px "%CN%"; spacing: 6px; background: transparent;
 }
 QWidget#settingsPanel QRadioButton::indicator {
-    width: 13px; height: 13px; border-radius: 8px;
+    width: 13px; height: 13px; border-radius: 7px;
     border: 1.5px solid #6d6a62; background: transparent;
 }
 QWidget#settingsPanel QCheckBox::indicator {
@@ -114,29 +122,51 @@ QWidget#settingsPanel QCheckBox::indicator {
 QWidget#settingsPanel QRadioButton::indicator:hover, QWidget#settingsPanel QCheckBox::indicator:hover {
     border-color: #e8a33d;
 }
-QWidget#settingsPanel QRadioButton::indicator:checked, QWidget#settingsPanel QCheckBox::indicator:checked {
+QWidget#settingsPanel QRadioButton::indicator:checked {
+    border-color: #e8a33d; image: url("%ICON_DIR%/dot_dark.png");
+}
+QWidget#settingsPanel QCheckBox::indicator:checked {
     background: #e8a33d; border-color: #e8a33d;
+    image: url("%ICON_DIR%/tick_dark.png");
 }
 QWidget#timeField {
     background: rgba(255,255,255,10); border: 1px solid rgba(255,255,255,30); border-radius: 8px;
 }
-QWidget#timeField QTimeEdit {
+QWidget#timeField[hov="true"] { border-color: rgba(232,163,61,120); }
+QWidget#timeField[focus="true"] { border-color: #e8a33d; background: rgba(232,163,61,16); }
+QWidget#timeField QLineEdit {
     background: transparent; border: none; color: #f0ede6; font: 600 13px "%NUM%";
-    padding: 3px 0px 3px 8px; selection-background-color: rgba(232,163,61,90);
+    padding: 4px 0px 4px 9px; selection-background-color: rgba(232,163,61,90);
 }
-QToolButton#timeStep {
-    background: transparent; border: none; border-radius: 3px;
-    color: #6d6a62; font: 7px "%CN%"; padding: 0px;
+QToolButton#timeBtn { background: transparent; border: none; border-radius: 5px; }
+QToolButton#timeBtn:hover { background: rgba(255,255,255,16); }
+QFrame#timePopup { background: #23252d; border: 1px solid rgba(255,255,255,30); border-radius: 10px; }
+QListWidget#timeCol {
+    background: transparent; border: none; outline: none; padding: 0px 3px;
+    color: #8d8a82; font: 600 12.5px "%NUM%";
 }
-QToolButton#timeStep:hover { background: rgba(255,255,255,16); color: #e8a33d; }
+QListWidget#timeCol[sep="true"] { border-left: 1px solid rgba(255,255,255,18); }
+QListWidget#timeCol::item { height: 28px; border-radius: 6px; }
+QListWidget#timeCol::item:hover { background: rgba(255,255,255,14); color: #e8e6e1; }
+QListWidget#timeCol::item:selected { background: rgba(232,163,61,40); color: #f2b45a; }
 QPushButton#setBtn {
     background: rgba(255,255,255,8); border: 1px solid rgba(255,255,255,28); border-radius: 8px;
     color: #e8e6e1; font: 12px "%CN%"; padding: 6px 12px;
 }
 QPushButton#setBtn:hover { border-color: rgba(232,163,61,130); color: #e8a33d; }
 QPushButton#setBtn:pressed { background: rgba(232,163,61,30); }
-QLabel#todoDue { color: #a39e93; font: 10px "%NUM%"; background: transparent; letter-spacing: 0.5px; }
-QLabel#todoDue[late="true"] { color: #e06666; }
+QPushButton#setSave {
+    background: #e8a33d; border: none; border-radius: 8px;
+    color: #1a1610; font: 600 12px "%CN%"; padding: 6px 20px;
+}
+QPushButton#setSave:hover { background: #f2b45a; }
+QPushButton#setSave:pressed { background: #d18f2e; }
+/* 截止日期 tag（仿 Element 标签：圆角浅底 + 同色字） */
+QLabel#todoDue {
+    color: #a39e93; background: rgba(255,255,255,14); border-radius: 8px;
+    font: 10px "%CN%"; padding: 2px 7px;
+}
+QLabel#todoDue[late="true"] { color: #e06666; background: rgba(224,102,102,30); }
 QToolButton#todoDateBtn {
     background: transparent; border: none; border-radius: 6px; color: #8d8a82; font: 11px "%CN%";
 }
@@ -207,12 +237,16 @@ QFrame#dayCell[we="true"] QLabel#dayNum { color: #c94f4f; }
 QFrame#dayCell[dim="true"][we="true"] QLabel#dayNum { color: #dcb0b0; }
 QFrame#dayCell[sel="true"] { background: rgba(0,103,192,22); }
 QFrame#dayCell[sel="true"] QLabel#dayNum { color: #0067c0; }
-QFrame#dayCell[today="true"] QLabel#dayNum { background: #0067c0; color: #ffffff; font-weight: 700; }
+QFrame#dayCell[today="true"] { background: #0067c0; }
+QFrame#dayCell[today="true"]:hover { background: #1a77cc; }
+QFrame#dayCell[today="true"] QLabel#dayNum { color: #ffffff; font-weight: 700; }
+QFrame#dayCell[today="true"] QLabel#daySub { color: rgba(255,255,255,210); }
 QLabel#daySub { color: #9a9aa0; font: 9px "%CN%"; }
 QLabel#daySub[fest="true"] { color: #0067c0; font-weight: 600; }
-QLabel#badge { border-radius: 3px; }
-QLabel#badge[kind="off"] { background: #c42b1c; }
-QLabel#badge[kind="work"] { background: #a9a9af; }
+/* 休息日角标：贴右上角的红色直角三角形（仿 Excel 批注标记）。
+   三角形状由 app._CornerBadge 用 QPainter 画，这里只负责给颜色。 */
+#badge[kind="off"] { color: #c42b1c; }
+#badge[kind="work"] { color: #a9a9af; }
 QFrame#todoPane { border-left: 1px solid rgba(0,0,0,16); background: #f0f1f4; }
 QLabel#todoTitle { color: #1b1b1f; font: 600 14px "%CN%"; }
 QLabel#todoCount { color: #8a8a90; font: 11px "%CN%"; }
@@ -250,12 +284,16 @@ QWidget#settingsPanel {
 }
 QLabel#setTitle { color: #1b1b1f; font: 600 13px "%CN%"; }
 QLabel#setLabel { color: #8a8a90; font: 12px "%CN%"; }
+QLabel#setUrl {
+    color: #0067c0; background: rgba(0,0,0,6); border-radius: 6px;
+    font: 11px "%NUM%"; padding: 5px 8px;
+}
 QFrame#setSep { background: rgba(0,0,0,16); border: none; margin: 2px 0px; }
 QWidget#settingsPanel QRadioButton, QWidget#settingsPanel QCheckBox {
     color: #1b1b1f; font: 12.5px "%CN%"; spacing: 6px; background: transparent;
 }
 QWidget#settingsPanel QRadioButton::indicator {
-    width: 13px; height: 13px; border-radius: 8px;
+    width: 13px; height: 13px; border-radius: 7px;
     border: 1.5px solid #9a9aa0; background: #ffffff;
 }
 QWidget#settingsPanel QCheckBox::indicator {
@@ -265,27 +303,45 @@ QWidget#settingsPanel QCheckBox::indicator {
 QWidget#settingsPanel QRadioButton::indicator:hover, QWidget#settingsPanel QCheckBox::indicator:hover {
     border-color: #0067c0;
 }
-QWidget#settingsPanel QRadioButton::indicator:checked, QWidget#settingsPanel QCheckBox::indicator:checked {
+QWidget#settingsPanel QRadioButton::indicator:checked {
+    border-color: #0067c0; image: url("%ICON_DIR%/dot_light.png");
+}
+QWidget#settingsPanel QCheckBox::indicator:checked {
     background: #0067c0; border-color: #0067c0;
+    image: url("%ICON_DIR%/tick_light.png");
 }
 QWidget#timeField {
     background: #ffffff; border: 1px solid rgba(0,0,0,30); border-radius: 8px;
 }
-QWidget#timeField QTimeEdit {
+QWidget#timeField[hov="true"] { border-color: rgba(0,103,192,140); }
+QWidget#timeField[focus="true"] { border-color: #0067c0; background: rgba(0,103,192,10); }
+QWidget#timeField QLineEdit {
     background: transparent; border: none; color: #1b1b1f; font: 600 13px "%NUM%";
-    padding: 3px 0px 3px 8px; selection-background-color: rgba(0,103,192,60);
+    padding: 4px 0px 4px 9px; selection-background-color: rgba(0,103,192,60);
 }
-QToolButton#timeStep {
-    background: transparent; border: none; border-radius: 3px;
-    color: #9a9aa0; font: 7px "%CN%"; padding: 0px;
+QToolButton#timeBtn { background: transparent; border: none; border-radius: 5px; }
+QToolButton#timeBtn:hover { background: rgba(0,0,0,12); }
+QFrame#timePopup { background: #ffffff; border: 1px solid rgba(0,0,0,30); border-radius: 10px; }
+QListWidget#timeCol {
+    background: transparent; border: none; outline: none; padding: 0px 3px;
+    color: #9a9aa0; font: 600 12.5px "%NUM%";
 }
-QToolButton#timeStep:hover { background: rgba(0,0,0,14); color: #0067c0; }
+QListWidget#timeCol[sep="true"] { border-left: 1px solid rgba(0,0,0,20); }
+QListWidget#timeCol::item { height: 28px; border-radius: 6px; }
+QListWidget#timeCol::item:hover { background: rgba(0,0,0,10); color: #1b1b1f; }
+QListWidget#timeCol::item:selected { background: rgba(0,103,192,26); color: #0067c0; }
 QPushButton#setBtn {
     background: #ffffff; border: 1px solid rgba(0,0,0,30); border-radius: 8px;
     color: #1b1b1f; font: 12px "%CN%"; padding: 6px 12px;
 }
 QPushButton#setBtn:hover { border-color: #0067c0; color: #0067c0; background: rgba(0,103,192,13); }
 QPushButton#setBtn:pressed { background: rgba(0,103,192,26); }
+QPushButton#setSave {
+    background: #0067c0; border: none; border-radius: 8px;
+    color: #ffffff; font: 600 12px "%CN%"; padding: 6px 20px;
+}
+QPushButton#setSave:hover { background: #1a77cc; }
+QPushButton#setSave:pressed { background: #0059a6; }
 QLabel#todoDue {
     color: #0067c0; background: rgba(0,103,192,26); border-radius: 8px;
     font: 10px "%CN%"; padding: 2px 7px;
@@ -314,16 +370,20 @@ QCalendarWidget QHeaderView::section { background: #ffffff; color: #8a8a90; bord
 }
 
 THEMES = {'nocturne': NOCTURNE, 'mica': MICA}
-THEME_ORDER = ['nocturne', 'mica']  # 默认第一个（深色）
+THEME_ORDER = ['nocturne', 'mica']  # 实际主题，默认第一个（深色）
+AUTO = 'auto'  # 伪主题：跟随系统「应用模式」，由 app.resolve_theme() 解析成上面之一
+THEME_CHOICES = THEME_ORDER + [AUTO]  # 设置窗口的主题选项顺序
 
 
 _PX_RE = None
 
 
-def build_qss(key, cn_font, num_font, scale=1.0):
-    """生成主题 QSS，并按 DPI 缩放比放大所有 px 尺寸（分数 px，渲染无拉伸、文字锐利）。"""
+def build_qss(key, cn_font, num_font, scale=1.0, icon_dir=''):
+    """生成主题 QSS，并按 DPI 缩放比放大所有 px 尺寸（分数 px，渲染无拉伸、文字锐利）。
+    %ICON_DIR% 为 checkbox/radio 指示器图标目录（正斜杠路径，运行时由 app 生成）。"""
     global _PX_RE
     qss = THEMES[key]['qss'].replace('%CN%', cn_font).replace('%NUM%', num_font)
+    qss = qss.replace('%ICON_DIR%', icon_dir)
     if abs(scale - 1.0) > 1e-6:
         if _PX_RE is None:
             import re

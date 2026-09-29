@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """Zviber 悬浮面板入口：单实例 + 系统托盘 + 节假日联网更新/离线导入。
 用法：pythonw main.pyw        启动并显示
       pythonw main.pyw --toggle   已运行则切换显隐（供桌面右键菜单调用）
@@ -12,13 +12,14 @@ from datetime import date, timedelta
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QIcon, QCursor
 from PyQt5.QtNetwork import QLocalServer, QLocalSocket
-from PyQt5.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QAction, QActionGroup, QFileDialog
+from PyQt5.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QFileDialog
 
 import app as ui
+import installer
 import sysutil
-from themes import THEMES, THEME_ORDER
+from themes import THEME_ORDER
 
-IPC_KEY = 'zviber-panel-v1'
+IPC_KEY = sysutil.IPC_KEY
 
 
 def notify_existing():
@@ -51,6 +52,10 @@ def main():
     qapp = QApplication(sys.argv)
     qapp.setApplicationName('ZviberPanel')
 
+    installer.sync_context_menu()  # 右键菜单只属于已安装的程序，未安装时清掉残留
+    if installer.maybe_install():
+        return 0  # exe 安装包：安装/卸载/取消后退出
+
     if notify_existing():
         return 0  # 已有实例在运行，转发 toggle 后退出
 
@@ -76,16 +81,28 @@ def main():
         if reason == QSystemTrayIcon.Trigger:
             panel.toggle_visible()
         elif reason == QSystemTrayIcon.Context:
-            # 每次右键重建菜单，保证勾选状态最新
-            build_menu(panel, hstore, cfg, tray, qapp, True).exec_(QCursor.pos())
+            menu = QMenu()
+            menu.addAction('显示 / 隐藏', panel.toggle_visible)
+            menu.addAction('设置', open_settings)
+            menu.addSeparator()
+            if installer.is_installed():
+                menu.addAction('卸载 Zviber', lambda: _uninstall(qapp))
+            menu.addAction('退出', qapp.quit)
+            menu.exec_(QCursor.pos())
 
     tray.activated.connect(on_tray)
     tray.show()
+    settings_dlg = []  # 非模态：留住引用，且已开着就不再叠一个
     def open_settings():
-        ui.SettingsDialog(panel,
-                          lambda: _fetch_holidays(tray, hstore, panel),
-                          lambda: _import_holidays(tray, hstore, panel),
-                          lambda: _reset_holidays(tray, hstore, panel)).exec_()
+        if settings_dlg and settings_dlg[0].isVisible():
+            settings_dlg[0].raise_()
+            settings_dlg[0].activateWindow()
+            return
+        dlg = ui.SettingsDialog(panel,
+                                lambda: _fetch_holidays(tray, hstore, panel),
+                                lambda: _import_holidays(tray, hstore, panel))
+        settings_dlg[:] = [dlg]
+        dlg.show()
 
     panel.settingsRequested.connect(open_settings)
 
@@ -116,58 +133,29 @@ def _grab_screen(panel, qapp):
 
 def _on_ipc(server, panel):
     sock = server.nextPendingConnection()
+    data = b''
     if sock:
         sock.waitForReadyRead(300)
+        data = bytes(sock.readAll())
         sock.deleteLater()
-    panel.toggle_visible()
+    if data == b'quit':
+        QApplication.instance().quit()  # 卸载程序请求退出
+    else:
+        panel.toggle_visible()
 
 
-def build_menu(panel, hstore, cfg, tray, qapp, with_visibility):
-    """托盘右键菜单。"""
-    menu = QMenu()
-    if with_visibility:
-        menu.addAction('显示 / 隐藏', panel.toggle_visible)
-        menu.addSeparator()
+def _uninstall(qapp):
+    from PyQt5.QtWidgets import QMessageBox
+    r = QMessageBox.question(None, '卸载 Zviber',
+                             '将移除右键菜单、开机自启并删除程序文件，\n'
+                             '待办与配置数据（%APPDATA%\\ZviberPanel）保留。确定卸载？')
+    if r == QMessageBox.Yes:
+        if installer.is_all_users_install() and not installer.is_admin():
+            installer.relaunch_elevated(['--uninstall'])  # HKLM 清理需管理员权限
+        else:
+            installer.uninstall()
+        qapp.quit()
 
-    tm = menu.addMenu('主题')
-    g = QActionGroup(tm)
-    for key in THEME_ORDER:
-        a = QAction(THEMES[key]['name'], tm, checkable=True)
-        a.setChecked(key == panel._theme)
-        a.triggered.connect(lambda _=False, k=key: panel.apply_theme(k))
-        g.addAction(a)
-        tm.addAction(a)
-
-    dual = QAction('双栏显示（日历 + 待办）', menu, checkable=True)
-    dual.setChecked(panel._dual)
-    dual.triggered.connect(lambda on: panel.set_dual(on))
-    menu.addAction(dual)
-
-    tm2 = menu.addMenu('下班倒计时')
-    for key, label, presets in (('off_noon', '午休时间', ['11:30', '12:00', '12:30', '13:00']),
-                                ('off_evening', '下班时间', ['17:00', '17:30', '18:00', '18:30', '19:00'])):
-        sub = tm2.addMenu(label)
-        g2 = QActionGroup(sub)
-        cur = cfg.data.get(key)
-        for p in presets:
-            a = QAction(p, sub, checkable=True)
-            a.setChecked(p == cur)
-            a.triggered.connect(lambda _=False, k=key, v=p: cfg.set(k, v))
-            g2.addAction(a)
-            sub.addAction(a)
-
-    hm = menu.addMenu('节假日数据')
-    hm.addAction('联网更新（今年与明年）', lambda: _fetch_holidays(tray, hstore, panel))
-    hm.addAction('从 JSON 文件导入…', lambda: _import_holidays(tray, hstore, panel))
-    hm.addAction('恢复内置数据', lambda: _reset_holidays(tray, hstore, panel))
-
-    auto = QAction('开机自动启动', menu, checkable=True)
-    auto.setChecked(bool(sysutil.autostart_get()))
-    auto.triggered.connect(lambda on: sysutil.autostart_set() if on else sysutil.autostart_remove())
-    menu.addAction(auto)
-    menu.addSeparator()
-    menu.addAction('退出', qapp.quit)
-    return menu
 
 def _fetch_holidays(tray, hstore, panel):
     from PyQt5.QtWidgets import QApplication
@@ -182,24 +170,26 @@ def _fetch_holidays(tray, hstore, panel):
                          QSystemTrayIcon.Warning, 4000)
 
 
+_import_dlg = []  # 引导窗口是非模态的，要留住引用
+
+
 def _import_holidays(tray, hstore, panel):
-    path, _ = QFileDialog.getOpenFileName(None, '选择从 jiejiariapi.com 下载的节假日 JSON', '',
-                                          'JSON 文件 (*.json)')
-    if not path:
-        return
-    try:
-        with open(path, 'r', encoding='utf-8') as f:
-            n = hstore.import_api_json(f.read())
-        panel.refresh_holidays()
-        tray.showMessage('节假日数据', '导入成功，共 %d 条' % n, QSystemTrayIcon.Information, 3000)
-    except Exception as e:
-        tray.showMessage('节假日数据', '导入失败：%s' % e, QSystemTrayIcon.Warning, 4000)
+    """先弹引导窗口说明去哪下载，用户选定文件后再解析导入。"""
+    def pick():
+        path, _ = QFileDialog.getOpenFileName(None, '选择节假日 JSON（数据源页面另存的文件）', '',
+                                              'JSON 文件 (*.json)')
+        if not path:
+            return
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                n = hstore.import_api_json(f.read())
+            panel.refresh_holidays()
+            tray.showMessage('节假日数据', '导入成功，共 %d 条' % n, QSystemTrayIcon.Information, 3000)
+        except Exception as e:
+            tray.showMessage('节假日数据', '导入失败：%s' % e, QSystemTrayIcon.Warning, 4000)
 
-
-def _reset_holidays(tray, hstore, panel):
-    hstore.reset()
-    panel.refresh_holidays()
-    tray.showMessage('节假日数据', '已恢复为内置官方数据', QSystemTrayIcon.Information, 2500)
+    _import_dlg[:] = [ui.HolidayImportDialog(panel, pick)]
+    _import_dlg[0].show()
 
 
 def _self_shot(shot_dir, panel, cfg, tstore, qapp):

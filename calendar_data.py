@@ -115,7 +115,10 @@ class HolidayStore(object):
         return n
 
     def fetch_year(self, year, timeout=10):
-        with urllib.request.urlopen(API_URL % year, timeout=timeout) as r:
+        # timor.tech 对没有 User-Agent 的请求一律回 403，必须显式带上
+        req = urllib.request.Request(API_URL % year,
+                                     headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             return self.import_api_json(r.read().decode('utf-8'))
 
     def reset(self):

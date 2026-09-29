@@ -1,8 +1,15 @@
-__pycache__/
+﻿__pycache__/
 *.pyc
+
+# 构建产物（exe 安装包）
+build/
+dist/
+*.spec
+_build_icon.ico
 
 # 自检截图与设计稿渲染图（不上传仓库）
 designs/verify/
 designs/*.png
 
 /_*.log
+_build_manifest.xml

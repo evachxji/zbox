@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """Zviber 桌面悬浮面板：日历 + 待办。PyQt5，兼容 Win7/10/11、Python 3.8+。"""
 import ctypes
 import json
@@ -6,18 +6,18 @@ import os
 import sys
 from datetime import date, datetime, timedelta
 
-from PyQt5.QtCore import (Qt, QTimer, QSize, QPoint, QPointF, QRectF, QDate, QTime,
+from PyQt5.QtCore import (Qt, QTimer, QSize, QPoint, QPointF, QRectF, QDate, QTime, QUrl,
                           pyqtSignal, QEvent, QPropertyAnimation, QEasingCurve)
 from PyQt5.QtGui import (QFont, QFontDatabase, QPainter, QColor, QPixmap, QIcon, QPainterPath,
-                         QRegion, QPen)
+                         QRegion, QPen, QLinearGradient, QDesktopServices)
 from PyQt5.QtWidgets import (QWidget, QFrame, QLabel, QToolButton, QVBoxLayout, QHBoxLayout,
                              QGridLayout, QStackedLayout, QListWidget,
                              QListWidgetItem, QLineEdit, QMenu, QApplication, QDialog,
-                             QFormLayout, QCheckBox, QRadioButton, QTimeEdit, QPushButton, QCalendarWidget)
+                             QFormLayout, QCheckBox, QRadioButton, QPushButton, QCalendarWidget)
 
 import calendar_data as cd
 import sysutil
-from themes import THEMES, THEME_ORDER, build_qss
+from themes import THEMES, THEME_ORDER, THEME_CHOICES, AUTO, build_qss
 
 SHADOW = 0  # 不透明窗口：无边距，圆角由 DWM/遮罩实现
 SINGLE_W, DUAL_W, PANEL_H = 344, 700, 428
@@ -49,34 +49,78 @@ def pick_fonts():
     return cn, num
 
 
-def make_icon():
-    pm = QPixmap(64, 64)
-    pm.fill(Qt.transparent)
-    p = QPainter(pm)
-    p.setRenderHint(QPainter.Antialiasing)
-    p.setPen(Qt.NoPen)
-    p.setBrush(QColor('#1e2028'))
-    p.drawRoundedRect(2, 2, 60, 60, 15, 15)
-    p.setBrush(QColor('#e8a33d'))
-    p.drawRoundedRect(6, 6, 52, 52, 12, 12)
-    p.setPen(QColor('#1a1610'))
-    p.setFont(QFont('Arial', 24, QFont.Bold))
-    p.drawText(pm.rect(), Qt.AlignCenter, str(date.today().day))
-    p.end()
-    return QIcon(pm)
+def make_icon(sizes=(16, 24, 32, 48, 64)):
+    """托盘/菜单图标：深靛底 + 白色横杠 + 琥珀斜杠的极简 Z"""
+    icon = QIcon()
+    for s in sizes:       # 逐尺寸矢量绘制，托盘小尺寸不糊
+        pm = QPixmap(s, s)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.scale(s / 64.0, s / 64.0)      # 设计稿基于 64x64 虚拟坐标
+        bg = QLinearGradient(0, 0, 64, 64)
+        bg.setColorAt(0, QColor('#262b45'))
+        bg.setColorAt(1, QColor('#161a2b'))
+        p.setPen(Qt.NoPen)
+        p.setBrush(bg)
+        p.drawRoundedRect(QRectF(2, 2, 60, 60), 15, 15)
+        p.setPen(QPen(QColor('#f5f6fa'), 5.5, Qt.SolidLine, Qt.FlatCap))
+        p.drawLine(QPointF(18, 20), QPointF(46, 20))
+        p.drawLine(QPointF(18, 44), QPointF(46, 44))
+        g = QLinearGradient(46, 20, 18, 44)   # 斜杠：琥珀渐变
+        g.setColorAt(0, QColor('#ffc531'))
+        g.setColorAt(1, QColor('#ff7a18'))
+        pen = QPen(QColor('#f5f6fa'), 5.5, Qt.SolidLine, Qt.FlatCap)
+        pen.setBrush(g)
+        p.setPen(pen)
+        p.drawLine(QPointF(46, 20), QPointF(18, 44))
+        p.end()
+        icon.addPixmap(pm)
+    return icon
+
+
+
+
+def _indicator_icons():
+    """设置窗口 checkbox 对勾 / radio 圆点：矢量绘制到运行数据目录供 QSS image 引用
+    （QSS 的 data URI 支持不稳定，文件路径最可靠）。每次启动重绘，DPI 变化尺寸自动跟随。"""
+    scale = ui_scale()
+    box = sc(13)                       # 与 QSS 中 indicator 边长一致
+    d = os.path.join(sysutil.appdata_dir(), 'icons')
+    os.makedirs(d, exist_ok=True)
+    for name, kind, color in (('tick_dark', 'tick', '#1a1610'), ('tick_light', 'tick', '#ffffff'),
+                              ('dot_dark', 'dot', '#e8a33d'), ('dot_light', 'dot', '#0067c0')):
+        pm = QPixmap(int(round(box * scale)), int(round(box * scale)))
+        pm.setDevicePixelRatio(scale)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing)
+        if kind == 'tick':
+            pen = QPen(QColor(color))
+            pen.setWidthF(box * 0.16)
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
+            p.setPen(pen)
+            p.drawLine(QPointF(box * 0.24, box * 0.56), QPointF(box * 0.44, box * 0.74))
+            p.drawLine(QPointF(box * 0.44, box * 0.74), QPointF(box * 0.80, box * 0.28))
+        else:
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(color))
+            p.drawEllipse(QPointF(box / 2.0, box / 2.0), box * 0.26, box * 0.26)
+        p.end()
+        pm.save(os.path.join(d, name + '.png'))
+    return d.replace('\\', '/')
 
 
 DUE_ICON_COLORS = {'nocturne': '#8d8a82', 'mica': '#8a8a90'}
+ACCENT_COLORS = {'nocturne': '#e8a33d', 'mica': '#0067c0'}   # 与主题强调色一致（同 _indicator_icons）
 
-
-def _dbg(msg):
-    """临时调试：记录日期按钮点击链路。定位完成后移除。"""
-    try:
-        p = os.path.join(os.environ.get('APPDATA', '.'), 'ZviberPanel', 'debug_due.log')
-        with open(p, 'a', encoding='utf-8') as f:
-            f.write('%s %s\n' % (datetime.now().strftime('%H:%M:%S.%f')[:-3], msg))
-    except Exception:
-        pass
+# 固定按钮三档：0 未固定（可拖动、置顶）→ 1 钉在桌面（不可移动、可被覆盖）→ 2 始终置顶（不可移动）
+PIN_TIPS = (
+    '未固定（可拖动）\n点击：钉在桌面，不可移动、可被其它窗口覆盖',
+    '已钉在桌面（不可移动、可被其它窗口覆盖）\n点击：始终显示在最上层',
+    '已始终置顶（不可移动）\n点击：取消固定',
+)
 
 
 def make_cal_icon(color):
@@ -98,33 +142,75 @@ def make_cal_icon(color):
     return QIcon(pm)
 
 
-def due_chip(due_str, theme_key):
-    """截止日期 -> (标签文本, 是否逾期)，展现形式对齐 designs/ 三套风格稿。"""
+def make_clock_icon(color):
+    """时间框右侧的时钟小图标（对齐 make_cal_icon 的画法，emoji 在 Win7 上不可靠）。"""
+    s = sc(16)
+    pm = QPixmap(s, s)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    pen = QPen(QColor(color))
+    pen.setWidthF(max(1.0, 1.3 * ui_scale()))
+    p.setPen(pen)
+    m = s / 16.0
+    p.drawEllipse(QRectF(2 * m, 2 * m, 12 * m, 12 * m))
+    p.drawLine(QPointF(8 * m, 8 * m), QPointF(8 * m, 4.8 * m))    # 分针
+    p.drawLine(QPointF(8 * m, 8 * m), QPointF(11 * m, 9.6 * m))   # 时针
+    p.end()
+    return QIcon(pm)
+
+
+def make_pin_icon(color, filled=False):
+    """固定按钮的图钉（画法对齐 make_cal_icon）：空心 = 钉在桌面，实心 = 始终置顶。"""
+    s = sc(16)
+    pm = QPixmap(s, s)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    col = QColor(color)
+    m = s / 16.0
+    pen = QPen(col)
+    pen.setWidthF(max(1.0, 1.3 * ui_scale()))
+    pen.setJoinStyle(Qt.RoundJoin)
+    p.setPen(pen)
+    head = QRectF(4 * m, 3 * m, 8 * m, 3 * m)        # 钉帽
+    body = QRectF(6 * m, 6 * m, 4 * m, 3.5 * m)      # 钉身
+    p.setBrush(col if filled else Qt.NoBrush)
+    p.drawRoundedRect(head, 1 * m, 1 * m)
+    p.drawRoundedRect(body, 0.8 * m, 0.8 * m)
+    p.setBrush(Qt.NoBrush)
+    p.drawLine(QPointF(8 * m, 9.5 * m), QPointF(8 * m, 13 * m))   # 针尖
+    p.end()
+    return QIcon(pm)
+
+
+def fmt_due_date(d):
+    """截止日期统一显示成 M-d（如 10-9）：行内 tag 与编辑器按钮共用这一处格式，避免两边不一致。"""
+    return '%d-%d' % (d.month, d.day)
+
+
+def due_chip(due_str):
+    """截止日期 -> (标签文本, 是否逾期)。
+    一周内报还剩天数、逾期报逾期天数、今天报今天，更远只报日期。"""
     try:
         d = datetime.strptime(due_str, '%Y-%m-%d').date()
     except Exception:
         return None, False
     delta = (d - date.today()).days
-    if theme_key == 'nocturne':
-        if delta < 0:
-            return ('D%d' % delta, True)
-        if delta == 0:
-            return ('TODAY', False)
-        return (d.strftime('%m.%d'), False)
     if delta < 0:
-        return ('逾期 %d 天' % -delta if theme_key == 'mica' else '逾期%d天' % -delta, True)
+        return ('逾期 %d 天' % -delta, True)
     if delta == 0:
         return ('今天', False)
-    if theme_key == 'mica':
-        return ('%d月%d日' % (d.month, d.day), False)
-    return ('%d.%d' % (d.month, d.day), False)
+    if delta <= 7:
+        return ('还剩 %d 天' % delta, False)
+    return (fmt_due_date(d), False)
 
 
 class Config(object):
     def __init__(self, path):
         self.path = path
-        self.data = {'theme': THEME_ORDER[0], 'dual': False, 'tab': 0, 'pos': None,
-                     'off_noon': '12:00', 'off_evening': '18:00'}
+        self.data = {'theme': THEME_ORDER[0], 'dual': False, 'tab': 0, 'pos': None, 'pin': 0,
+                     'off_noon': '12:00-13:00', 'off_evening': '18:00'}
         self.load()
 
     def load(self):
@@ -133,7 +219,7 @@ class Config(object):
                 self.data.update(json.load(f))
         except Exception:
             pass
-        if self.data.get('theme') not in THEMES:
+        if self.data.get('theme') not in THEME_CHOICES:
             self.data['theme'] = THEME_ORDER[0]
 
     def save(self):
@@ -152,6 +238,13 @@ class Config(object):
         self.save()
 
 
+def resolve_theme(key):
+    """用户选择 → 实际主题名：auto 跟随系统「应用模式」（浅色用 mica，深色用 nocturne）。"""
+    if key == AUTO:
+        return 'mica' if sysutil.system_uses_light_theme() else 'nocturne'
+    return key
+
+
 # ---------------- 日历 ----------------
 
 # 日历数字字体：Qt 用 pixelSize + weight 精确控制，对齐 Win11 日历（字形高 21px / Medium）
@@ -160,6 +253,26 @@ _NUM_FONT = {'name': None, 'size': 19, 'weight': 50}
 
 def set_num_font(name):
     _NUM_FONT['name'] = name
+
+
+class _CornerBadge(QWidget):
+    """休息日角标：贴格子右上角的直角三角形（仿 Excel 批注标记）。
+    形状用 QPainter 画，颜色取主题 QSS 给的 color —— QSS 的 border / 渐变都画不出可靠的三角。"""
+
+    def __init__(self, parent=None):
+        super(_CornerBadge, self).__init__(parent)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+
+    def paintEvent(self, e):
+        w, h = self.width(), self.height()
+        path = QPainterPath()
+        path.moveTo(0, 0)
+        path.lineTo(w, 0)
+        path.lineTo(w, h)
+        path.closeSubpath()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.fillPath(path, self.palette().color(self.foregroundRole()))
 
 
 class DayCell(QFrame):
@@ -181,9 +294,9 @@ class DayCell(QFrame):
         self.sub = QLabel(self)
         self.sub.setObjectName('daySub')
         self.sub.setAlignment(Qt.AlignCenter)
-        self.badge = QLabel(self)
+        self.badge = _CornerBadge(self)
         self.badge.setObjectName('badge')
-        self.badge.setFixedSize(sc(6), sc(6))
+        self.badge.setFixedSize(sc(7), sc(7))
         self.badge.hide()
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, sc(2), 0, sc(2))
@@ -198,7 +311,7 @@ class DayCell(QFrame):
     def resizeEvent(self, e):
         super(DayCell, self).resizeEvent(e)
         w = self.badge.width()
-        self.badge.setGeometry(self.width() - w - sc(4), sc(4), w, w)
+        self.badge.setGeometry(self.width() - w, 0, w, w)  # 贴右上角：Excel 批注标记的位置
 
     def set_day(self, d, dim, store, sel=False):
         today = date.today()
@@ -216,7 +329,6 @@ class DayCell(QFrame):
         # 红点 = 休息日：法定节假日，或非调休的双休日；调休上班日（班）不标
         off = (kind == 'off') or (d.weekday() >= 5 and kind != 'work')
         if off:
-            self.badge.setText('')
             self.badge.setProperty('kind', 'off')
             self.badge.show()
         else:
@@ -430,22 +542,31 @@ class CalendarWidget(QWidget):
             self.sub.style().polish(self.sub)
 
     def _countdown_text(self, t):
-        """距离下一个下班节点（午休/晚上）的倒计时，休息日不显示。"""
+        """距离下一个节点的倒计时：午休前→距午休，午休区间内→距上班（午休结束），之后→距下班。
+        休息日不显示。"""
         _, kind = self.store.info(t)
         if kind == 'off' or (t.weekday() >= 5 and kind != 'work'):
             return '今天休息'
         now = datetime.now()
-        for key, label, dflt in (('off_noon', '午休', '12:00'), ('off_evening', '下班', '18:00')):
-            try:
-                hh, mm = (self.cfg.data.get(key) or dflt).split(':')
-                target = now.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
-            except Exception:
-                continue
-            if target > now:
-                secs = (target - now).seconds
-                total_min = -(-secs // 60)  # 向上取整
-                return '距%s %d:%02d' % (label, total_min // 60, total_min % 60)
-        return '今天已下班'
+
+        def at(hhmm):
+            return now.replace(hour=int(hhmm[:2]), minute=int(hhmm[3:]), second=0, microsecond=0)
+
+        noon_a, noon_b = parse_noon_range(self.cfg.data.get('off_noon')) or NOON_DEFAULT
+        noon_a = at(noon_a)
+        noon_b = at(noon_b)
+        off = parse_time_text(self.cfg.data.get('off_evening') or '18:00')
+        off = at(off) if off else None
+        if now < noon_a:
+            target, label = noon_a, '午休'
+        elif noon_b > noon_a and now < noon_b:   # 区间反了就跳过「上班」这一档
+            target, label = noon_b, '上班'
+        elif off is not None and now < off:
+            target, label = off, '下班'
+        else:
+            return '今天已下班'
+        total_min = -(-(target - now).seconds // 60)  # 向上取整
+        return '距%s %d:%02d' % (label, total_min // 60, total_min % 60)
 
     def set_theme(self, key):
         self.theme_key = key
@@ -492,7 +613,11 @@ class CalendarWidget(QWidget):
             self._pages = {-1: gone, 0: self._pages[-1], 1: self._pages[0]}
             gone.build(self._pages[0].start - timedelta(days=42), self._selected, self._dim_month)
         if self._panning:
-            self.viewport.pixmaps[n] = _page_pixmap(gone)
+            # 页面编号整体挪了一位，位图缓存必须跟着换位；只补新段会让画面错开一整段
+            pm = _page_pixmap(gone)
+            px = self.viewport.pixmaps
+            self.viewport.pixmaps = ({-1: px[0], 0: px[1], 1: pm} if n > 0
+                                     else {-1: pm, 0: px[-1], 1: px[0]})
 
     def _select_day(self, d):
         """单击日期：记录选中并刷新现有格子的选中态（滚动/重建后由 build 保持）。"""
@@ -699,6 +824,15 @@ class TodoList(QListWidget):
     emptyDoubleClicked = pyqtSignal()
     itemEditRequested = pyqtSignal(int)
 
+    def __init__(self, parent=None):
+        super(TodoList, self).__init__(parent)
+        self.on_resize = None   # 行宽变化时重算各条高度（文字换行后行高不固定）
+
+    def resizeEvent(self, e):
+        super(TodoList, self).resizeEvent(e)
+        if self.on_resize:
+            self.on_resize()
+
     def mouseDoubleClickEvent(self, e):
         li = self.itemAt(e.pos())
         if li is None:
@@ -762,6 +896,46 @@ class DuePopup(QFrame):
         super(DuePopup, self).closeEvent(e)
 
 
+class TimePickerPopup(QFrame):
+    """时间选择弹层：时/分两列滚动列表（仿 Element 时间选择器）。Qt.Popup，点外侧自动关闭。"""
+
+    def __init__(self, parent, current, on_pick):
+        super(TimePickerPopup, self).__init__(parent, Qt.Popup | Qt.WindowStaysOnTopHint)
+        self.setObjectName('timePopup')
+        self._on_pick = on_pick
+        cur = QTime.fromString(current, 'HH:mm')
+        if not cur.isValid():
+            cur = QTime(12, 0)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(sc(6), sc(6), sc(6), sc(6))
+        lay.setSpacing(0)
+        self._cols = []
+        for i, (n, row) in enumerate(((24, cur.hour()), (60, cur.minute()))):
+            lst = QListWidget(self)
+            lst.setObjectName('timeCol')
+            if i == 1:
+                lst.setProperty('sep', True)   # 分钟列带左侧分隔线
+            lst.setVerticalScrollMode(QListWidget.ScrollPerPixel)
+            for v in range(n):
+                it = QListWidgetItem('%02d' % v, lst)
+                it.setTextAlignment(Qt.AlignCenter)
+            lst.setCurrentRow(row)
+            lst.setFixedSize(sc(52), sc(28) * 6 + sc(10))
+            lay.addWidget(lst)
+            self._cols.append(lst)
+        self._cols[1].itemClicked.connect(self._minute_picked)  # 点小时仅选中，点分钟即提交
+
+    def showEvent(self, e):
+        super(TimePickerPopup, self).showEvent(e)
+        for lst in self._cols:   # 显示后把当前值滚到中间
+            lst.scrollToItem(lst.currentItem(), QListWidget.PositionAtCenter)
+
+    def _minute_picked(self, it):
+        h = self._cols[0].currentRow()
+        self._on_pick(QTime(max(h, 0), self._cols[1].row(it)))
+        self.close()
+
+
 class TodoWidget(QWidget):
     def __init__(self, store, parent=None):
         super(TodoWidget, self).__init__(parent)
@@ -792,6 +966,7 @@ class TodoWidget(QWidget):
 
         self.list = TodoList()
         self.list.setObjectName('todoList')
+        self.list.on_resize = self._sync_row_heights
         self.list.setSpacing(sc(3))
         self.list.setFrameShape(QFrame.NoFrame)
         self.list.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -839,12 +1014,13 @@ class TodoWidget(QWidget):
         lay.addWidget(cb)
         tx = QLabel(it['text'])
         tx.setObjectName('todoText')
+        tx.setWordWrap(True)   # 文本长时占多行（高度由 _sync_row_heights 汇报给列表）
         f = tx.font()
         f.setStrikeOut(it['done'])
         tx.setFont(f)
         lay.addWidget(tx, 1)
         if it.get('due') and not it['done']:
-            text, late = due_chip(it['due'], self.theme_key)
+            text, late = due_chip(it['due'])
             if text:
                 dl = QLabel(text)
                 dl.setObjectName('todoDue')
@@ -862,7 +1038,37 @@ class TodoWidget(QWidget):
             li.setSizeHint(QSize(10, sc(36)))
             self.list.addItem(li)
             self.list.setItemWidget(li, self._make_row(it))
+        self._sync_row_heights()
         self._update_count()
+
+    def _sync_row_heights(self):
+        """按当前行宽重算每条的高度：文字换行后可能占多行，item 的 sizeHint 必须跟着长高，
+        否则列表会把行压扁、文字被裁。编辑器行的高度由 _open_editor 定，跳过。
+        跑两遍：第一遍定出的新高度可能让滚动条出现/消失，行宽随之变化，第二遍按最终宽度重算。"""
+        if self.list.viewport().width() <= 0:
+            return
+        for _ in range(2):
+            self._apply_row_heights()
+
+    def _apply_row_heights(self):
+        """按各行当前实得的宽度重算高度并写回 item。
+        列表情景下 item 几何是延迟摆的，先 doItemsLayout() 让它按新行宽摆好，
+        再问文字标签「这个宽度下你要多高」——按别人的宽度估算会少算一行。"""
+        self.list.doItemsLayout()
+        editor = getattr(self, '_editor', None)   # 首次布局早于 rebuild()，属性可能还没有
+        edit_li = editor[0] if editor else None
+        for i in range(self.list.count()):
+            li = self.list.item(i)
+            row = self.list.itemWidget(li)
+            lay = row.layout() if row is not None else None
+            if li is edit_li or lay is None:
+                continue
+            tx = row.findChild(QLabel, 'todoText')
+            m = lay.contentsMargins()
+            h = (tx.heightForWidth(tx.width()) if tx is not None else 0) + m.top() + m.bottom()
+            h = max(h, sc(36))
+            if li.sizeHint().height() != h:
+                li.setSizeHint(QSize(10, h))
 
     def _toggle(self, item_id, checked):
         self.store.toggle(item_id, checked)
@@ -916,17 +1122,17 @@ class TodoWidget(QWidget):
         ed.setPlaceholderText('输入待办，回车保存，Esc 取消')
         ed.installEventFilter(self)
         ed.returnPressed.connect(lambda: self._commit(li, ed, item_id))
-        ed.editingFinished.connect(lambda: self._commit(li, ed, item_id))
+        # ????? eventFilter ???????????????????? clicked ??????
         hl.addWidget(ed, 1)
         btn = QToolButton()
         btn.setObjectName('todoDateBtn')
-        btn.setFocusPolicy(Qt.NoFocus)   # 不抢焦点，避免触发编辑框的失焦提交
+        btn.setFocusPolicy(Qt.NoFocus)   # 不接受焦点：弹层关闭后焦点交还编辑框（失焦提交由延迟兜底拦截）
         btn.setCursor(Qt.PointingHandCursor)
         btn.setToolTip('设置截止时间')
         btn.setFixedSize(sc(32), sc(30))
         btn.setIcon(make_cal_icon(DUE_ICON_COLORS.get(self.theme_key, '#8a8a90')))
         btn.setIconSize(QSize(sc(17), sc(17)))
-        btn.clicked.connect(lambda: (_dbg('date btn CLICKED'), self._pick_due(btn)))
+        btn.clicked.connect(lambda: self._pick_due(btn))
         hl.addWidget(btn)
         old_w = self.list.itemWidget(li)
         if old_w is not None:  # 替换前先移除并隐藏旧行，避免残留重影
@@ -945,7 +1151,7 @@ class TodoWidget(QWidget):
             try:
                 d = datetime.strptime(self._edit_due, '%Y-%m-%d').date()
                 self._due_btn.setIcon(QIcon())
-                self._due_btn.setText('%d/%d' % (d.month, d.day))
+                self._due_btn.setText(fmt_due_date(d))
                 self._due_btn.setFixedWidth(sc(46))
                 return
             except Exception:
@@ -953,9 +1159,7 @@ class TodoWidget(QWidget):
         self._due_btn.setText('')
 
     def _pick_due(self, btn):
-        _dbg('_pick_due enter: editing=%s picking=%s' % (self._editing, getattr(self, '_picking', None)))
         if not self._editing or getattr(self, '_picking', False):
-            _dbg('_pick_due EARLY RETURN')
             return
         self._picking = True
         pop = DuePopup(self, self._edit_due, self._due_picked, self._popup_closed)
@@ -967,8 +1171,6 @@ class TodoWidget(QWidget):
         x = min(pos.x(), ag.right() - pop.width() - sc(4))
         y = min(pos.y(), ag.bottom() - pop.height() - sc(4))
         pop.move(x, max(y, ag.top()))
-        _dbg('popup shown: visible=%s pos=(%d,%d) size=%dx%d btnGlobal=%s' % (
-            pop.isVisible(), x, y, pop.width(), pop.height(), pos))
 
     def _due_picked(self, d):
         if not self._editing:
@@ -978,7 +1180,6 @@ class TodoWidget(QWidget):
         self._refresh_due_btn()
 
     def _popup_closed(self):
-        _dbg('popup closed')
         self._picking = False
         if getattr(self, '_just_picked', False):
             # 刚选了日期：保持编辑态，焦点交还输入框继续编辑
@@ -1009,12 +1210,15 @@ class TodoWidget(QWidget):
     def _commit_current(self):
         if not self._editing or not getattr(self, '_editor', None):
             return
+        if QApplication.mouseButtons() != Qt.NoButton:
+            # 鼠标仍按着：点击链路（如日期按钮）尚未走完，等抬起后再判，
+            # 否则 0ms 兜底会在 clicked 之前触发，误提交并销毁编辑器
+            QTimer.singleShot(60, self._commit_current)
+            return
         li, ed, item_id = self._editor
         self._commit(li, ed, item_id)
 
     def _commit(self, li, ed, item_id):
-        _dbg('_commit: editing=%s picking=%s text=%r' % (
-            self._editing, getattr(self, '_picking', None), ed.text()[:20]))
         if not self._editing or ed.property('cancelled') or getattr(self, '_picking', False):
             return
         self._editing = False
@@ -1063,15 +1267,159 @@ def round_corners(win):
         pass
 
 
+def parse_time_text(text):
+    """把时间输入框里的自由文本解析成 'HH:mm'，解析不了返回 None。
+    中文冒号按英文冒号处理（中文输入法下常打出「：」）；允许省前导零与时/分之间的冒号：
+    '9' → 09:00，'930' → 09:30，'9:30' / '9：30' → 09:30。全角数字也认（int 能直接解析）。"""
+    s = (text or '').strip().replace('：', ':')
+    if ':' in s:
+        parts = s.split(':')
+        if len(parts) != 2:
+            return None
+        hh, mm = parts
+    elif len(s) <= 2:
+        hh, mm = s, '0'
+    elif len(s) <= 4:
+        hh, mm = s[:-2], s[-2:]
+    else:
+        return None
+    if not (hh.isdigit() and mm.isdigit()):
+        return None
+    h, m = int(hh), int(mm)
+    if h > 23 or m > 59:
+        return None
+    return '%02d:%02d' % (h, m)
+
+
+NOON_DEFAULT = ('12:00', '13:00')   # 午休区间默认值（开始, 结束）
+
+
+def parse_noon_range(text):
+    """午休区间文本 -> (开始, 结束) 的 'HH:mm' 二元组，解析不了返回 None。
+    分隔符宽松（- ~ ～ — － 都认）；只给一个时间时按旧版单值处理，结束 = 开始 + 1 小时。"""
+    s = (text or '').strip()
+    for sep in ('～', '~', '—', '－', '–'):
+        s = s.replace(sep, '-')
+    parts = [p for p in s.split('-') if p.strip()]
+    if not parts:
+        return None
+    start = parse_time_text(parts[0])
+    if start is None:
+        return None
+    if len(parts) > 1:
+        end = parse_time_text(parts[1])
+        return (start, end) if end else None
+    total = (int(start[:2]) * 60 + int(start[3:]) + 60) % 1440   # 旧配置只存了开始点
+    return start, '%02d:%02d' % (total // 60, total % 60)
+
+
+class HolidayImportDialog(QDialog):
+    """导入节假日 JSON 的引导窗口：先告诉用户去哪拿数据，再选文件。
+    文件选择 / 解析 / 托盘通知都由入口的 on_pick 负责，本窗口只管引导。"""
+
+    def __init__(self, panel, on_pick):
+        super(HolidayImportDialog, self).__init__(panel)
+        self.setObjectName('settingsDlg')
+        self.setWindowTitle('导入节假日数据')
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setWindowModality(Qt.NonModal)  # 与设置窗口一致：不阻塞面板
+        self._drag = None
+        url = cd.API_URL % date.today().year
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        card = QWidget()
+        card.setObjectName('settingsPanel')
+        root.addWidget(card)
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(sc(16), sc(6), sc(14), sc(14))
+        lay.setSpacing(sc(9))
+
+        # 标题栏（可拖动）
+        self.titlebar = QFrame()
+        self.titlebar.setFixedHeight(sc(34))
+        tb = QHBoxLayout(self.titlebar)
+        tb.setContentsMargins(0, 0, 0, 0)
+        title = QLabel('导入节假日数据')
+        title.setObjectName('setTitle')
+        tb.addWidget(title)
+        tb.addStretch(1)
+        close = QToolButton()
+        close.setObjectName('closeBtn')
+        close.setText('✕')
+        close.setFixedSize(sc(28), sc(24))
+        close.setToolTip('关闭')
+        close.clicked.connect(self.close)
+        tb.addWidget(close)
+        lay.addWidget(self.titlebar)
+
+        def note(text):
+            lb = QLabel(text)
+            lb.setObjectName('setLabel')
+            lb.setWordWrap(True)
+            lay.addWidget(lb)
+
+        note('本程序导入的是「年份 JSON」，与内置数据同源，共三步：')
+        note('① 用浏览器打开下面的网址，把页面内容另存为 .json 文件\n'
+             '（网址末尾是年份，要别的年份直接改它）')
+
+        self.url = QLabel(url)
+        self.url.setObjectName('setUrl')
+        self.url.setTextInteractionFlags(Qt.TextSelectableByMouse)  # 方便复制
+        lay.addWidget(self.url)
+
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, sc(4))
+        open_btn = QPushButton('打开网址')
+        open_btn.setObjectName('setBtn')
+        open_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(url)))
+        row.addWidget(open_btn)
+        row.addStretch(1)
+        lay.addLayout(row)
+
+        note('② 回到这里，选择刚保存的文件即可导入')
+        row2 = QHBoxLayout()
+        pick = QPushButton('选择文件…')
+        pick.setObjectName('setBtn')
+        pick.clicked.connect(lambda: (self.close(), on_pick()))
+        row2.addWidget(pick)
+        row2.addStretch(1)
+        lay.addLayout(row2)
+
+        note('内网无法访问上述网址时，可用 jiejiariapi.com 的同格式接口。')
+        self.setFixedWidth(sc(388))
+
+    # 无边框窗口：拖标题栏移动
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton and e.pos().y() < self.titlebar.height():
+            self._drag = e.globalPos() - self.frameGeometry().topLeft()
+            e.accept()
+        else:
+            super(HolidayImportDialog, self).mousePressEvent(e)
+
+    def mouseMoveEvent(self, e):
+        if self._drag is not None and e.buttons() & Qt.LeftButton:
+            self.move(e.globalPos() - self._drag)
+            e.accept()
+        else:
+            super(HolidayImportDialog, self).mouseMoveEvent(e)
+
+    def mouseReleaseEvent(self, e):
+        self._drag = None
+        super(HolidayImportDialog, self).mouseReleaseEvent(e)
+
+
 class SettingsDialog(QDialog):
     """齿轮按钮弹出的无边框设置窗口，样式跟随当前主题（themes.py #settingsPanel 区段）。
-    on_fetch/on_import/on_reset 为节假日数据回调（由入口提供，以便复用托盘通知）。
+    on_fetch/on_import 为节假日数据回调（由入口提供，以便复用托盘通知）。
     改动即时生效并写入 config.json。"""
-    def __init__(self, panel, on_fetch, on_import, on_reset):
+    def __init__(self, panel, on_fetch, on_import):
         super(SettingsDialog, self).__init__(panel)
         self.setObjectName('settingsDlg')
         self.setWindowTitle('设置')
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        # QDialog 默认 ApplicationModal，会连面板一起冻结；设置窗口开着时面板仍可拖拽 / 点日历
+        self.setWindowModality(Qt.NonModal)
         self._drag = None
         cfg = panel.cfg
 
@@ -1116,8 +1464,8 @@ class SettingsDialog(QDialog):
         # 主题
         theme_row = QHBoxLayout()
         theme_row.setSpacing(sc(14))
-        for key in THEME_ORDER:
-            r = QRadioButton(THEMES[key]['name'])
+        for key in THEME_CHOICES:
+            r = QRadioButton('跟随系统' if key == AUTO else THEMES[key]['name'])
             r.setChecked(key == panel._theme)
             r.toggled.connect(lambda on, k=key: panel.apply_theme(k) if on else None)
             theme_row.addWidget(r)
@@ -1130,34 +1478,87 @@ class SettingsDialog(QDialog):
         dual.toggled.connect(panel.set_dual)
         form.addRow(row_label('双栏'), dual)
 
-        # 下班倒计时（时间选择器，存 HH:mm 与旧配置兼容）
-        for key, label, dflt in (('off_noon', '午休时间', '12:00'), ('off_evening', '下班时间', '18:00')):
-            te = QTimeEdit()
-            te.setDisplayFormat('HH:mm')
-            te.setButtonSymbols(QTimeEdit.NoButtons)  # QSS 下原生箭头不渲染，用自建步进按钮
-            t = QTime.fromString(cfg.data.get(key) or dflt, 'HH:mm')
-            te.setTime(t if t.isValid() else QTime.fromString(dflt, 'HH:mm'))
-            te.timeChanged.connect(lambda qt, k=key: cfg.set(k, qt.toString('HH:mm')))
+        # 下班倒计时（自由文本输入 + 时钟弹层）
+        # 用 QLineEdit 而非 QTimeEdit：QTimeEdit 是按时/分分段校验的，全选后直接打字会被
+        # 校验器拒掉（要么必须先选中某一段，要么根本打不进冒号）
+        self._time_rows = []
+
+        def time_field(text):
+            """一个时间输入框 + 时钟按钮，返回 (外框, 输入框)。外框顺带接好 hover/焦点描边。"""
+            ed = QLineEdit(text)
             field = QWidget()
             field.setObjectName('timeField')
-            field.setFocusProxy(te)
+            field.setFocusProxy(ed)
+            field.setFixedSize(sc(96), sc(30))
             fb = QHBoxLayout(field)
             fb.setContentsMargins(0, 0, sc(3), 0)
             fb.setSpacing(0)
-            fb.addWidget(te, 1)
-            steps = QVBoxLayout()
-            steps.setSpacing(0)
-            for arrow, fn in (('▲', te.stepUp), ('▼', te.stepDown)):
-                b = QToolButton()
-                b.setObjectName('timeStep')
-                b.setText(arrow)
-                b.setFixedSize(sc(16), sc(13))
-                b.setCursor(Qt.PointingHandCursor)
-                b.clicked.connect(fn)
-                steps.addWidget(b)
-            fb.addLayout(steps)
-            field.setFixedWidth(sc(96))
-            form.addRow(row_label(label), field)
+            fb.addWidget(ed, 1)
+            btn = QToolButton()
+            btn.setObjectName('timeBtn')
+            btn.setIcon(make_clock_icon(DUE_ICON_COLORS.get(resolve_theme(panel._theme), '#8a8a90')))
+            btn.setIconSize(QSize(sc(14), sc(14)))
+            btn.setFixedSize(sc(24), sc(24))
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setToolTip('选择时间')
+            btn.clicked.connect(lambda _=False, e=ed, b=btn: self._pick_time(e, b))
+            fb.addWidget(btn)
+            ed.installEventFilter(self)    # hover/focus 态同步到外框描边
+            btn.installEventFilter(self)
+            self._time_rows.append((ed, btn, field))
+            return field, ed
+
+        def commit_single(ed, key, dflt, normalize):
+            """单值框：输入过程中即时落盘；normalize（失焦/回车）时归一化，解析不了回退上次的值。"""
+            v = parse_time_text(ed.text())
+            if v is None:
+                if not normalize:
+                    return
+                v = cfg.data.get(key) or dflt
+            cfg.set(key, v)
+            if normalize and ed.text() != v:
+                ed.setText(v)
+
+        def commit_noon(finishing=None):
+            """午休两个框合并成一个 'HH:mm-HH:mm' 落盘；finishing 是失焦的那个框，
+            它解析不了就退回已存区间的对应端，避免半截输入把整个区间写坏。"""
+            a, b = parse_time_text(noon_a.text()), parse_time_text(noon_b.text())
+            if finishing is not None:
+                cur = parse_noon_range(cfg.data.get('off_noon')) or NOON_DEFAULT
+                a, b = a or cur[0], b or cur[1]
+            if not (a and b):
+                return
+            cfg.set('off_noon', '%s-%s' % (a, b))
+            if finishing is not None:
+                for ed, v in ((noon_a, a), (noon_b, b)):
+                    if ed.text() != v:
+                        ed.setText(v)
+
+        # 午休：开始 – 结束
+        rng = parse_noon_range(cfg.data.get('off_noon')) or NOON_DEFAULT
+        noon_row = QWidget()
+        rb = QHBoxLayout(noon_row)
+        rb.setContentsMargins(0, 0, 0, 0)
+        rb.setSpacing(sc(6))
+        f_a, noon_a = time_field(rng[0])
+        f_b, noon_b = time_field(rng[1])
+        dash = QLabel('–')
+        dash.setObjectName('setLabel')     # 借用表单标签的弱化色
+        rb.addWidget(f_a)
+        rb.addWidget(dash)
+        rb.addWidget(f_b)
+        rb.addStretch(1)
+        form.addRow(row_label('午休时间'), noon_row)
+        noon_a.textChanged.connect(lambda _t: commit_noon())
+        noon_b.textChanged.connect(lambda _t: commit_noon())
+        noon_a.editingFinished.connect(lambda: commit_noon(noon_a))
+        noon_b.editingFinished.connect(lambda: commit_noon(noon_b))
+
+        # 下班
+        evening_row, evening = time_field(parse_time_text(cfg.data.get('off_evening') or '18:00') or '18:00')
+        form.addRow(row_label('下班时间'), evening_row)
+        evening.textChanged.connect(lambda _t: commit_single(evening, 'off_evening', '18:00', False))
+        evening.editingFinished.connect(lambda: commit_single(evening, 'off_evening', '18:00', True))
 
         # 开机自启
         auto = QCheckBox('登录 Windows 后自动启动')
@@ -1172,12 +1573,24 @@ class SettingsDialog(QDialog):
         form.addRow(sep)
         holiday_row = QHBoxLayout()
         holiday_row.setSpacing(sc(8))
-        for text, fn in (('联网更新', on_fetch), ('导入 JSON…', on_import), ('恢复内置', on_reset)):
+        for text, fn in (('联网更新', on_fetch), ('导入 JSON…', on_import)):
             b = QPushButton(text)
             b.setObjectName('setBtn')
             b.clicked.connect(fn)
             holiday_row.addWidget(b)
         form.addRow(row_label('节假日'), holiday_row)
+
+        # 保存按钮（改动即时生效，点击即确认并关闭）
+        save_row = QHBoxLayout()
+        save_row.setContentsMargins(0, sc(12), sc(4), 0)
+        save_row.addStretch(1)
+        save = QPushButton('保存')
+        save.setObjectName('setSave')
+        save.setCursor(Qt.PointingHandCursor)
+        save.setDefault(True)
+        save.clicked.connect(self.accept)
+        save_row.addWidget(save)
+        lay.addLayout(save_row)
 
         # 默认停靠在主面板上方右对齐，溢出屏幕上方则改到下方
         self.adjustSize()
@@ -1188,6 +1601,40 @@ class SettingsDialog(QDialog):
         if y < ag.top():
             y = min(geo.bottom() + sc(8), ag.bottom() - self.height())
         self.move(x, y)
+
+    def _pick_time(self, te, anchor):
+        """在时间输入框下方弹出时/分选择层，选中的时间写回输入框（textChanged 即落盘）。"""
+        old = getattr(self, '_time_pop', None)
+        if old is not None and old.isVisible():   # 弹层已开时再点时钟按钮 = 收起
+            old.close()
+            return
+        pop = TimePickerPopup(self, parse_time_text(te.text()) or '12:00',
+                              lambda qt, e=te: e.setText(qt.toString('HH:mm')))
+        self._time_pop = pop   # 持有引用，避免 PyQt 包装层被 GC 回收
+        pop.show()
+        pop.raise_()           # 设置窗是置顶 Tool 窗，确保弹层压在其上
+        pos = anchor.mapToGlobal(QPoint(0, anchor.height() + sc(4)))
+        ag = QApplication.primaryScreen().availableGeometry()
+        x = min(pos.x(), ag.right() - pop.width() - sc(4))
+        y = min(pos.y(), ag.bottom() - pop.height() - sc(4))
+        pop.move(max(x, ag.left()), max(y, ag.top()))
+
+    def eventFilter(self, obj, ev):
+        """时间输入框的 hover/焦点态同步到外框，驱动描边与底色变化。"""
+        for te, btn, field in getattr(self, '_time_rows', []):
+            if obj is te or obj is btn:
+                t = ev.type()
+                if t == QEvent.Enter or t == QEvent.Leave:
+                    hov = field.underMouse() or te.underMouse() or btn.underMouse()
+                    field.setProperty('hov', 'true' if hov else 'false')
+                elif t == QEvent.FocusIn or t == QEvent.FocusOut:
+                    field.setProperty('focus', 'true' if te.hasFocus() else 'false')
+                else:
+                    break
+                field.style().unpolish(field)
+                field.style().polish(field)
+                break
+        return super(SettingsDialog, self).eventFilter(obj, ev)
 
     def showEvent(self, e):
         super(SettingsDialog, self).showEvent(e)
@@ -1316,6 +1763,7 @@ class FloatingPanel(QWidget):
         # 不用 WA_TranslucentBackground：分层窗口禁用 ClearType，文字灰糊。
         # 不透明窗口 + Win11 DWM 圆角（Win7/10 降级为圆角遮罩），文字锐利度对齐系统组件。
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self._pin = 0   # 固定档位，稍后由 set_pin 按配置恢复（见「固定」一节）
         self.setObjectName('panelRoot')
 
         root = QVBoxLayout(self)
@@ -1344,7 +1792,7 @@ class FloatingPanel(QWidget):
         self.tab_box.setObjectName('tabBox')
         bx = QHBoxLayout(self.tab_box)
         bx.setContentsMargins(sc(3), sc(3), sc(3), sc(3))
-        bx.setSpacing(sc(6 if cfg.theme == 'nocturne' else 2))
+        bx.setSpacing(sc(6 if resolve_theme(cfg.theme) == 'nocturne' else 2))
         self.tabs = []
         for i, name in enumerate(['日历', '待办']):
             b = QToolButton()
@@ -1357,6 +1805,12 @@ class FloatingPanel(QWidget):
         tb.addWidget(self.tab_box)
         tb.addStretch(1)
 
+        self.btn_pin = QToolButton()
+        self.btn_pin.setObjectName('iconBtn')
+        self.btn_pin.setFixedSize(sc(30), sc(26))
+        self.btn_pin.setIconSize(QSize(sc(14), sc(14)))
+        self.btn_pin.clicked.connect(self._cycle_pin)
+        tb.addWidget(self.btn_pin)
         self.btn_settings = QToolButton()
         self.btn_settings.setObjectName('iconBtn')
         self.btn_settings.setText('⚙')
@@ -1374,9 +1828,9 @@ class FloatingPanel(QWidget):
         pl.addWidget(self.titlebar)
 
         # 内容：单栏（堆叠）/ 双栏（并排）
-        self.cal = CalendarWidget(hstore, cfg, cfg.theme)
+        self.cal = CalendarWidget(hstore, cfg, resolve_theme(cfg.theme))
         self.todo = TodoWidget(tstore)
-        self.todo.set_theme(cfg.theme)
+        self.todo.set_theme(resolve_theme(cfg.theme))
 
         self.single_stack = _SlideStack()
         self.single_page = QWidget()
@@ -1400,7 +1854,9 @@ class FloatingPanel(QWidget):
 
         self._dual = None  # None 而非 False：避免 set_dual 的“无变化短路”跳过首次布局/定尺寸
         self._theme = cfg.theme
+        self._icon_dir = _indicator_icons()
         self.apply_theme(cfg.theme, save=False)
+        self.set_pin(cfg.pin or 0, save=False)   # 恢复上次的固定档位
         if cfg.dual:
             self.set_dual(True, save=False)
         else:
@@ -1434,10 +1890,6 @@ class FloatingPanel(QWidget):
             self.cal.show()
             self.todo.show()
             self.content.setCurrentWidget(self.dual_page)
-            for b in self.tabs:
-                b.setProperty('active', 'true')
-                b.style().unpolish(b)
-                b.style().polish(b)
         else:
             self.dual_box.removeWidget(self.cal)
             self.dual_box.removeWidget(self.todo)
@@ -1446,17 +1898,53 @@ class FloatingPanel(QWidget):
             self.todo.set_solo(True)
             self.content.setCurrentWidget(self.single_page)
             self.set_tab(self.single_stack.currentIndex() if self.single_stack.currentWidget() in (self.cal, self.todo) else 0, save=False)
+        self.tab_box.setVisible(not dual)  # 双栏已同屏显示日历 + 待办，tab 栏没有意义
         self.setFixedSize(sc(DUAL_W if dual else SINGLE_W), sc(PANEL_H))
         self._clamp_to_screen()
         if save:
             self.cfg.set('dual', dual)
 
+    # --- 固定 ---
+    def _cycle_pin(self):
+        self.set_pin(self._pin + 1)
+
+    def set_pin(self, state, save=True):
+        """三档循环：0 未固定（可拖动、置顶）→ 1 钉在桌面（不可移动、可被其它窗口覆盖）
+        → 2 始终置顶（不可移动）。切换档位要改窗口标志，而改标志会销毁并重建原生窗口，
+        所以这里自己负责按原位置、原显隐状态重新 show（showEvent 会重贴圆角）。"""
+        try:
+            self._pin = int(state) % 3
+        except (TypeError, ValueError):
+            self._pin = 0
+        flags = Qt.FramelessWindowHint | Qt.Tool
+        if self._pin != 1:
+            flags |= Qt.WindowStaysOnTopHint    # 「钉在桌面」这一档不置顶，才会被别的窗口盖住
+        pos, was_visible = self.pos(), self.isVisible()
+        self.setWindowFlags(flags)
+        self.move(pos)
+        if was_visible:
+            self.show()
+        self._refresh_pin_icon()
+        self.btn_pin.setToolTip(PIN_TIPS[self._pin])
+        if save:
+            self.cfg.set('pin', self._pin)
+
+    def _refresh_pin_icon(self):
+        """图钉配色跟着主题走：未固定用弱化色，钉住用强调色，实心表示始终置顶。"""
+        real = resolve_theme(self._theme)
+        if self._pin == 0:
+            self.btn_pin.setIcon(make_pin_icon(DUE_ICON_COLORS.get(real, '#8a8a90')))
+        else:
+            self.btn_pin.setIcon(make_pin_icon(ACCENT_COLORS.get(real, '#e8a33d'), self._pin == 2))
+
     # --- 主题 ---
     def apply_theme(self, key, save=True):
-        self._theme = key
-        QApplication.instance().setStyleSheet(build_qss(key, self.cn_font, self.num_font, ui_scale()))
-        self.cal.set_theme(key)
-        self.todo.set_theme(key)
+        self._theme = key  # 用户选择，可能是 auto
+        real = resolve_theme(key)
+        QApplication.instance().setStyleSheet(build_qss(real, self.cn_font, self.num_font, ui_scale(), self._icon_dir))
+        self.cal.set_theme(real)
+        self.todo.set_theme(real)
+        self._refresh_pin_icon()
         if save:
             self.cfg.set('theme', key)
 
@@ -1493,7 +1981,9 @@ class FloatingPanel(QWidget):
         self.move(x, y)
 
     def mousePressEvent(self, e):
-        if e.button() == Qt.LeftButton and e.pos().y() < SHADOW + self.titlebar.height():
+        # 固定后不可移动（固定档位由标题栏的图钉按钮切换）
+        if e.button() == Qt.LeftButton and not self._pin \
+                and e.pos().y() < SHADOW + self.titlebar.height():
             self._drag = e.globalPos() - self.frameGeometry().topLeft()
             e.accept()
         else:
@@ -1531,7 +2021,8 @@ class FloatingPanel(QWidget):
             self._today = date.today()
             self.cal.refresh()
             self.todo.rebuild()
-
+        if self._theme == AUTO and self.cal.theme_key != resolve_theme(AUTO):
+            self.apply_theme(AUTO, save=False)  # 系统「应用模式」改了，跟着切
 
 
 
