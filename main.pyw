@@ -5,21 +5,134 @@
 自检：设置环境变量 ZVIBER_SHOT=<目录> 启动，自动导出两主题截图后退出。
 """
 import os
+import re
 import sys
-from datetime import date, timedelta
+import time
+from datetime import date, datetime, timedelta
 
 
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QIcon, QCursor
+from PyQt5.QtCore import Qt, QTimer, QThread, QUrl, pyqtSignal
+from PyQt5.QtGui import QIcon, QCursor, QDesktopServices
 from PyQt5.QtNetwork import QLocalServer, QLocalSocket
 from PyQt5.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QFileDialog
 
 import app as ui
+import calendar_data as cd
 import installer
 import sysutil
 from themes import THEME_ORDER
 
 IPC_KEY = sysutil.IPC_KEY
+
+_worker = []   # 当前后台抓取线程：留引用防 GC，也用来判断是否已在抓
+
+
+class _HolidayWorker(QThread):
+    """后台抓节假日：只下载 + 解析，结果交回主线程合并（绝不跨线程改 store）。
+    groups 是若干组候选 (名称, URL)：每组按顺序试，取第一个成功的。
+    save_dir 非空时（导入窗「下载并导入」），抓到的原始 JSON 存一份到该目录。"""
+
+    done = pyqtSignal(object)   # {'off': {}, 'work': set(), 'hit': [源名], 'err': '失败原因'}
+
+    def __init__(self, groups, parent=None, save_dir=None):
+        super(_HolidayWorker, self).__init__(parent)
+        self.groups = groups
+        self.save_dir = save_dir
+
+    def run(self):
+        off, work, hit, errs = {}, set(), [], []
+        for group in self.groups:
+            for name, url in group:
+                try:
+                    o, w = self._fetch(name, url)
+                except Exception as e:
+                    errs.append('%s：%s' % (name, e))
+                    continue
+                off.update(o)
+                work |= w
+                hit.append(name)
+                break
+        self.done.emit({'off': off, 'work': work, 'hit': hit, 'err': '；'.join(errs)})
+
+    def _fetch(self, name, url):
+        """有存档目录时抓原文、解析通过后再存（存失败不挡导入）；否则抓了直接解析。"""
+        if not self.save_dir:
+            return cd.fetch_url(url)
+        text = cd.fetch_text(url)
+        parsed = cd.parse_holiday_json(text)
+        self._save_json(name, url, text)
+        return parsed
+
+    def _save_json(self, name, url, text):
+        try:
+            os.makedirs(self.save_dir, exist_ok=True)
+            m = re.search(r'20\d\d', url)   # URL 里抠年份做文件名；抠不到用时间戳
+            tag = m.group(0) if m else datetime.now().strftime('%Y%m%d%H%M%S')
+            with open(os.path.join(self.save_dir, '%s_%s.json' % (name, tag)), 'w',
+                      encoding='utf-8') as f:
+                f.write(text)
+        except Exception:
+            pass
+
+
+def _holiday_groups():
+    """两年 × 三个源：每年之内按 SOURCES 顺序试，两个年份都要拿到数据。"""
+    y = date.today().year
+    return [[(src['name'], src['url'] % year) for src in cd.SOURCES] for year in (y, y + 1)]
+
+
+def _auto_update_due(cfg):
+    """该不该静默更新：从没试过、上次尝试已是别的日子（每天第一次开程序），
+    或距上次尝试已满 48 小时（程序长期不关）。记的是「尝试」时间，所以失败不会反复重试。"""
+    try:
+        ts = float(cfg.data.get('holiday_ts') or 0)
+    except (TypeError, ValueError):
+        return True   # 时间戳坏了：当作没试过，重试一次就会把它写成正常值
+    if not ts:
+        return True
+    return datetime.fromtimestamp(ts).date() != date.today() or time.time() - ts >= 48 * 3600
+
+
+def start_holiday_update(tray, hstore, cfg, panel, groups, manual=True, fallback_url=None,
+                         on_finish=None, save_dir=None):
+    """后台联网更新。manual=False 完全静默（自动更新用）；manual=True 用托盘气泡报结果，
+    fallback_url 非空且全部失败时顺手用浏览器打开它兜底。
+    on_finish 非空时在结束时（无论成败）回调一次，给按钮恢复用；已在跑则附到当前那次上。
+    save_dir 非空时把抓到的原始 JSON 存到该目录（导入窗「下载并导入」用）。"""
+    if _worker and _worker[0].isRunning():
+        if on_finish:
+            _worker[0].done.connect(lambda *_: on_finish())
+        return False
+    cfg.set('holiday_ts', time.time())
+    w = _HolidayWorker(groups, save_dir=save_dir)
+    _worker[:] = [w]
+
+    def on_done(res):
+        try:
+            _merge_and_report(res)
+        finally:
+            if on_finish:
+                on_finish()
+
+    def _merge_and_report(res):
+        n = hstore.merge(res['off'], res['work']) if (res['off'] or res['work']) else 0
+        if n:
+            panel.refresh_holidays()
+        if not manual:
+            return
+        if n:
+            tray.showMessage('节假日数据', '更新成功：%s 共 %d 条' % ('、'.join(res['hit']), n),
+                             QSystemTrayIcon.Information, 3000)
+        else:
+            msg = '联网更新失败：\n%s' % res['err'][:220]
+            if fallback_url:
+                QDesktopServices.openUrl(QUrl(fallback_url))
+                msg += '\n已用浏览器打开，可另存为文件后用「选择文件导入」'
+            tray.showMessage('节假日数据', msg, QSystemTrayIcon.Warning, 6000)
+
+    w.done.connect(on_done)
+    w.start()
+    return True
 
 
 def notify_existing():
@@ -61,7 +174,6 @@ def main():
 
     data_dir = sysutil.appdata_dir()
     cfg = ui.Config(os.path.join(data_dir, 'config.json'))
-    import calendar_data as cd
     hstore = cd.HolidayStore(os.path.join(data_dir, 'holidays.json'))
     tstore = ui.TodoStore(os.path.join(data_dir, 'todos.json'))
     panel = ui.FloatingPanel(cfg, hstore, tstore)
@@ -84,23 +196,39 @@ def main():
             menu = QMenu()
             menu.addAction('显示 / 隐藏', panel.toggle_visible)
             menu.addAction('设置', open_settings)
+            menu.addAction('关于', lambda: ui.AboutDialog(panel).exec_())
             menu.addSeparator()
-            if installer.is_installed():
-                menu.addAction('卸载 Zviber', lambda: _uninstall(qapp))
             menu.addAction('退出', qapp.quit)
             menu.exec_(QCursor.pos())
 
     tray.activated.connect(on_tray)
     tray.show()
+
+    # 节假日数据：设置窗「联网更新」与导入窗里各源的「下载并导入」都走同一条后台通道
+    def fetch_holidays(on_finish=None):
+        return start_holiday_update(tray, hstore, cfg, panel, _holiday_groups(), on_finish=on_finish)
+
+    def download_source(name, url, on_finish=None):
+        return start_holiday_update(tray, hstore, cfg, panel, [[(name, url)]], fallback_url=url,
+                                    on_finish=on_finish, save_dir=sysutil.download_dir())
+
+    def auto_update():
+        if _auto_update_due(cfg):
+            start_holiday_update(tray, hstore, cfg, panel, _holiday_groups(), manual=False)
+
+    auto_timer = QTimer(qapp)
+    auto_timer.timeout.connect(auto_update)
+    auto_timer.start(30 * 60 * 1000)      # 每半小时看一次到没到点
+    QTimer.singleShot(5000, auto_update)  # 启动后先看一次：每天第一次开程序时更新
+
     settings_dlg = []  # 非模态：留住引用，且已开着就不再叠一个
     def open_settings():
         if settings_dlg and settings_dlg[0].isVisible():
             settings_dlg[0].raise_()
             settings_dlg[0].activateWindow()
             return
-        dlg = ui.SettingsDialog(panel,
-                                lambda: _fetch_holidays(tray, hstore, panel),
-                                lambda: _import_holidays(tray, hstore, panel))
+        dlg = ui.SettingsDialog(panel, fetch_holidays,
+                                lambda: _import_holidays(tray, hstore, panel, download_source))
         settings_dlg[:] = [dlg]
         dlg.show()
 
@@ -116,10 +244,14 @@ def main():
         QTimer.singleShot(600, lambda: _self_shot(shot_dir, panel, cfg, tstore, qapp))
     else:
         panel.place_initial()
+        ui._dbg('main: after place_initial pos=(%d,%d) size=(%d,%d) pinned=%s' % (
+            panel.x(), panel.y(), panel.width(), panel.height(), panel._desk_pinned))
         if '--toggle' in sys.argv and panel.isVisible():
             panel.hide()
         else:
             panel.show()
+        ui._dbg('main: after show visible=%s pos=(%d,%d) size=(%d,%d)' % (
+            panel.isVisible(), panel.x(), panel.y(), panel.width(), panel.height()))
     return qapp.exec_()
 
 
@@ -144,51 +276,25 @@ def _on_ipc(server, panel):
         panel.toggle_visible()
 
 
-def _uninstall(qapp):
-    from PyQt5.QtWidgets import QMessageBox
-    r = QMessageBox.question(None, '卸载 Zviber',
-                             '将移除右键菜单、开机自启并删除程序文件，\n'
-                             '待办与配置数据（%APPDATA%\\ZviberPanel）保留。确定卸载？')
-    if r == QMessageBox.Yes:
-        if installer.is_all_users_install() and not installer.is_admin():
-            installer.relaunch_elevated(['--uninstall'])  # HKLM 清理需管理员权限
-        else:
-            installer.uninstall()
-        qapp.quit()
-
-
-def _fetch_holidays(tray, hstore, panel):
-    from PyQt5.QtWidgets import QApplication
-    try:
-        y = date.today().year
-        n = hstore.fetch_year(y) + hstore.fetch_year(y + 1)
-        panel.refresh_holidays()
-        tray.showMessage('节假日数据', '联网更新成功，共导入 %d 条（%d/%d 年）' % (n, y, y + 1),
-                         QSystemTrayIcon.Information, 3000)
-    except Exception as e:
-        tray.showMessage('节假日数据', '联网更新失败：%s\n可使用「从 JSON 文件导入」' % e,
-                         QSystemTrayIcon.Warning, 4000)
-
-
 _import_dlg = []  # 引导窗口是非模态的，要留住引用
 
 
-def _import_holidays(tray, hstore, panel):
-    """先弹引导窗口说明去哪下载，用户选定文件后再解析导入。"""
+def _import_holidays(tray, hstore, panel, on_download):
+    """先弹引导窗口（三个数据源各一行 URL，可点「下载并导入」），
+    也可以自己另存文件后走「选择文件导入」。"""
     def pick():
         path, _ = QFileDialog.getOpenFileName(None, '选择节假日 JSON（数据源页面另存的文件）', '',
                                               'JSON 文件 (*.json)')
         if not path:
             return
         try:
-            with open(path, 'r', encoding='utf-8') as f:
-                n = hstore.import_api_json(f.read())
+            n = hstore.import_file(path)
             panel.refresh_holidays()
             tray.showMessage('节假日数据', '导入成功，共 %d 条' % n, QSystemTrayIcon.Information, 3000)
         except Exception as e:
             tray.showMessage('节假日数据', '导入失败：%s' % e, QSystemTrayIcon.Warning, 4000)
 
-    _import_dlg[:] = [ui.HolidayImportDialog(panel, pick)]
+    _import_dlg[:] = [ui.HolidayImportDialog(panel, on_download, pick)]
     _import_dlg[0].show()
 
 

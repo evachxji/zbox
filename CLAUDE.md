@@ -24,7 +24,10 @@ python build.py              :: 构建 exe 安装包 → dist\ZviberPanel.exe（
 
 `build.py` 除生成图标外还写一份 DPI 感知清单（`--manifest`）交给 PyInstaller：**PyInstaller 默认打的 exe
 没有 DPI 感知声明**，进程被系统按 unaware 虚拟化，`ui_scale()` 读到 96 DPI，界面就完全不放大
-（源码运行由 Qt 运行时自己设了感知，没这个问题）。清单与图标都是构建时生成的临时文件，已被 gitignore。
+（源码运行由 Qt 运行时自己设了感知，没这个问题）。图标、清单连同 spec 与 PyInstaller 工作目录
+全部收在 `dist\build\` 下——这三个 path 都是 `build.py` 显式传的绝对路径，**别把
+`--workpath` / `--specpath` 删掉**，PyInstaller 默认往当前目录扔 `build\` 和 `*.spec`，根目录就乱了。
+`dist\` 整个目录已被 gitignore。
 
 自检（**改任何 UI / 主题 / 布局代码后都要跑**）：
 
@@ -71,20 +74,33 @@ ClearType，文字发灰），圆角靠 Win11 DWM，Win7/10 降级为圆角遮�
 
 - 单栏用 `_SlideStack`（横向滑动切页动画，接口兼容 QStackedWidget 子集），
   双栏用 `QHBoxLayout`，两者由 `self.content`（QStackedLayout）切换。
-- 尺寸常量 `SINGLE_W / DUAL_W / PANEL_H`；`cfg` 键：`theme` / `dual` / `tab` / `pos` / `pin` /
+- 尺寸常量 `SINGLE_W / DUAL_W / PANEL_H`；`cfg` 键：`theme` / `dual` / `tab` / `pos` /
   `off_noon` / `off_evening`，`Config` 用 `__getattr__` 暴露为属性。
-- 标题栏图钉按钮（设置左边）三档循环，`set_pin()` 同时管窗口标志与拖动门槛：
-  0 未固定（可拖动、置顶）→ 1 钉在桌面（**去掉 `WindowStaysOnTopHint`**，于是会被别的窗口盖住）
-  → 2 始终置顶（不可移动）。两档钉住状态都靠 `mousePressEvent` 里的 `not self._pin` 禁掉拖动。
-  两个坑：改 `setWindowFlags` 会销毁并重建原生窗口，所以必须自己按原位置、原显隐 `show()` 回去
-  （`showEvent` 会重贴 DWM 圆角）；图标是画出来的 QIcon，`iconBtn` 的 QSS 配色只作用于文字字形，
-  换主题/换档位要在 `_refresh_pin_icon` 里重画。
+- **桌面格子模式**：窗口标志是 `FramelessWindowHint | Tool`，**故意不带 `WindowStaysOnTopHint`**
+  ——面板就该被别的窗口正常盖住，别再顺手加回去。
+- **顶部栏默认收起**（`_slide_titlebar`）：栏窗高度 0↔`sc(42)` 做动画，靠 `_set_tb_height` 把它摆到
+  面板顶边**上方**（`y = self.y() - h`）实现「向上滑出」，主窗口不动。进入面板（`enterEvent`）展开；
+  离开后等 150ms 用 `_check_hover()` 看光标落点再决定收不收（光标从面板挪进展开栏会先触发面板的
+  `leave`，不等这一拍就会抖）。
+- **拖动把手**：展开的顶部栏、日历左侧的时分秒与日期行，都走同一个 `eventFilter` 里的
+  MouseButtonPress/Move/Release 直接 `move()`，松手 `_save_pos()` 落盘。过滤器只装在
+  `titlebar` / `cal.clock_hm` / `cal.sub` 三个控件上——装在哪就只对谁生效（标题栏里设置、关闭
+  按钮的点击不受影响）；想再划一块可拖区域，得把过滤器也装到那个控件上。
 - 时间设置两处约定：`off_noon` 是**区间** `'HH:mm-HH:mm'`（旧版单值 `'12:00'` 按开始点 +1 小时
   兼容）；时间框一律用自由文本 `QLineEdit` + `parse_time_text` / `parse_noon_range` 解析，
   不用 `QTimeEdit`——它按时/分分段校验，全选后直接打字会被校验器拒掉，且根本打不进冒号。
-  解析器认中文冒号与全角数字；输入中能解析就即时落盘，失焦归一化、解析不了回退上次的值。
+  解析器认中文冒号与全角数字；输入中能解析就即时落盘，失焦才归一化。
+- **午休与下班时间都可以留空**（存空串 = 不设这个时间点）：午休要两端都有效才算数，只填一半
+  按留空处理。留空后重开设置窗口必须还是空框——所以初值直接读配置，**不能再拿默认值兜底**
+  （兜底会让空值悄悄变回 12:00-13:00，用户以为没清掉）。
 - 日历顶部倒计时按这两个值出三档：午休前「距午休」→ 午休区间内「距上班」（倒计时到午休结束）
-  → 「距下班」，下班后「今天已下班」。休息日整档不显示。
+  → 「距下班」，下班后「今天已下班」。休息日显示「今天休息」；**任一时间留空则整块不显示**
+  （没填全就不猜时间点，时钟行留白）。
+- 时钟行右侧那行小字（倒计时 / 翻月后的「yyyy年MM月」）要与左边的时分秒**底边齐平**：
+  布局用 `Qt.AlignBottom` 对齐控件底边，再由 `_sync_sub_baseline()` 补一段下边距顶到同一条
+  文字基线（40px 与 10.5px 的字体 descent 差多少，小字就沉下去多少）。**别改成
+  `Qt.AlignBaseline`**——Qt 对 QLabel 取的并不是文字基线，实测比底边对齐偏得更多。
+  `_update_sub()` 每秒都会调它，所以拿字体的 height/ascent/descent 当缓存键，没变立即返回。
 - 所有动态属性（`dim` / `active` / `we` 等）驱动的 QSS 选择器，改属性后必须
   `unpolish` + `polish` 才会重绘。子孙选择器依赖祖先属性时，祖先与其子控件都要重刷
   （见 `_apply_dim`）。
@@ -108,7 +124,7 @@ ClearType，文字发灰），圆角靠 Win11 DWM，Win7/10 降级为圆角遮�
 新高度可能带出滚动条、行宽还会再变一次。编辑器行高度由 `_open_editor` 固定，同步时要跳过。
 
 日期 tag（`due_chip`）：逾期→「逾期 N 天」，当天→「今天」，7 天内→「还剩 N 天」，更远只报日期。
-日期格式统一由 `fmt_due_date` 给出 `M-d`（如 `10-7`），**行内 tag 与编辑器里的日期按钮共用它**
+日期格式统一由 `fmt_due_date` 给出 `M.d`（如 `10.7`），**行内 tag 与编辑器里的日期按钮共用它**
 ——两处各写各的格式就会出现「编辑时 10/9、保存后 10.09」这种不一致。
 
 ### 主题与 DPI（`themes.py` + `app.py`）
@@ -128,14 +144,35 @@ DPI 约定：**设计尺寸按 100% 基准写死，运行时用 `app.sc(v)` 换�
 `GetDpiForSystem()/96`，钳制在 0.75–3.0）。新增任何尺寸都要过 `sc()`，QSS 里的 px 由
 `build_qss` 统一处理，不要手动乘。
 
-### 节假日与农历（`calendar_data.py`）
+### 节假日与农历（`calendar_data.py` + `main.pyw`）
 
 `HolidayStore.info(d)` 的优先级：用户自定义（联网/导入）→ 内置官方数据 → 普通日。
 内置 `EMBEDDED_OFF` / `EMBEDDED_WORK` 是国务院公布的年份安排，**新一年安排发布后要手工补**；
-没有数据的年份只显示双休与农历节日，不标「休/班」角标。
-网络访问只允许 timor.tech 的年份接口——**该接口不带 User-Agent 会直接回 403**，`fetch_year` 里的 UA
-头是有意加的，别当冗余删掉；离线 JSON 导入路径（jiejiariapi.com 同格式，设置窗里有分步说明）必须一直
-可用，内网用户依赖它。农历是 1900–2100 查表法（`LUNAR_INFO`），带缓存。
+没有数据的年份只显示双休与农历节日，不标「休/班」角标。农历是 1900–2100 查表法（`LUNAR_INFO`），带缓存。
+
+**三个数据源**（`SOURCES` 按顺序回退，三家 JSON 格式互不相同而 `parse_holiday_json` 全认）：
+timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` 扁平 `{iso:{isOffDay}}`
+→ holiday-cn（走 jsDelivr 镜像）`{"days":[{date,name,isOffDay}]}`。导入窗口里三个 URL 都能改
+（内网镜像、换年份）。两个坑：① timor **不带 User-Agent 直接回 403**，UA 头是有意加的、别当冗余删；
+② 有的源用同一个字段顺带标了「小年」这类传统节日（`isOffDay: false`），所以判「班」只认**落在周末**
+的上班日（`_is_weekend`）——不然换个源就会平白多出几个「班」角标，三个源之间也就不一致了。
+
+**后台更新**：`main.pyw` 的 `_HolidayWorker(QThread)` 只负责下载 + 解析，结果用信号交回主线程再合并，
+**绝不跨线程动 store**；抓取期间界面不卡（三源 × 两年 × 10 秒超时最坏能到一分钟）。是否该更新看
+`_auto_update_due()`：上次**尝试**时间（`cfg['holiday_ts']`，记尝试而不是成功，失败才不会反复重试）
+不是今天就更新（每天第一次开程序），或距上次满 48 小时（程序长期不关）；手动「联网更新」与导入窗的
+「下载并导入」走同一条通道，只有手动路径才弹托盘气泡。
+
+⚠️ **PyQt5 里槽函数中未捕获的异常会让进程直接 abort（qFatal），不是打个日志就完事**——实测无自定义
+excepthook 时 exit 127、连输出都没有。`main()` 里那句 `sys.excepthook = _debug_excepthook` 正是挡这个的
+（改成落盘 `debug_due.log`，程序继续跑）；它的注释写着「定位后移除」，但**删掉它 = 任何槽里的异常都会
+静默崩掉整个面板**，要删先确认有别的兜底。反过来说，它也把这类 bug 变成静默的了：后台更新那次
+`hstore.merge` 漏写实现，在应用里只会静静地不更新，是离屏脚本才把它揪出来。
+
+日历格子右上角的「休」/「班」角标：只标法定节假日（`kind == 'off'`）与调休上班日（`kind == 'work'`），
+**普通双休日不标**（双休只靠日期数字的弱化配色区分）。角标是 `DayCell.badge` 这个 QLabel，文字与配色
+全由 `#badge[kind=…]` 的 QSS 给，摆位在 `DayCell._place_badge`——单栏一格只有约 43px 宽，尺寸必须靠
+`adjustSize()` 自适应、且不能加 padding，写死尺寸或留内边距都会压住 19px 的日期数字。
 
 ### 系统集成（`sysutil.py` + `installer.py` + `install.py`）
 

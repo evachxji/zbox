@@ -21,6 +21,7 @@ QWidget#panel {
     border: 1px solid rgba(255,255,255,22);
     border-radius: 16px;
 }
+QFrame#titlebar { background: #1e2028; }
 QFrame#tabBox { background: transparent; }
 QToolButton#tab {
     background: transparent; border: none; border-bottom: 2px solid transparent;
@@ -47,7 +48,7 @@ QLabel#clockBig { color: #f0ede6; font: 500 40px "%NUM%"; }
 QLabel#calSub { color: #6d6a62; font: 10.5px "%CN%"; }
 QLabel#calSub[accent="true"] { color: #e8a33d; }
 QLabel#weekLabel { color: #6d6a62; font: 600 10px "%CN%"; }
-QFrame#dayCell { border-radius: 10px; background: transparent; }
+QFrame#dayCell { border-radius: 10px; background: transparent; margin: 3px 0; }
 QFrame#dayCell:hover { background: rgba(255,255,255,14); }
 QLabel#dayNum { color: #e8e6e1; background: transparent; border-radius: 17px; }
 QFrame#dayCell[dim="true"] QLabel#dayNum { color: #4c4a45; }
@@ -61,10 +62,11 @@ QFrame#dayCell[today="true"] QLabel#dayNum { color: #1a1610; font-weight: 700; }
 QFrame#dayCell[today="true"] QLabel#daySub { color: rgba(26,22,16,190); }
 QLabel#daySub { color: #6d6a62; font: 9px "%CN%"; }
 QLabel#daySub[fest="true"] { color: #e8a33d; }
-/* 休息日角标：贴右上角的红色直角三角形（仿 Excel 批注标记）。
-   三角形状由 app._CornerBadge 用 QPainter 画，这里只负责给颜色。 */
-#badge[kind="off"] { color: #e05252; }
-#badge[kind="work"] { color: #6d6a62; }
+/* 节假日角标：贴格子右上角的圆角标签 —— 法定节假日「休」，调休上班日「班」。
+   普通双休日不标；文字与配色都在这里给，app 只负责内容与摆位。 */
+#badge { font: 700 8px "%CN%"; padding: 0 1px; border-radius: 3px; }
+#badge[kind="off"] { color: #e05252; background: rgba(224,82,82,46); }
+#badge[kind="work"] { color: #9a9aa0; background: rgba(255,255,255,26); }
 QFrame#todoPane { border-left: 1px solid rgba(255,255,255,18); }
 QLabel#todoTitle { color: #f0ede6; font: 600 14px "%CN%"; }
 QLabel#todoCount { color: #e8a33d; font: 600 11px "%NUM%"; }
@@ -138,6 +140,11 @@ QWidget#timeField QLineEdit {
     background: transparent; border: none; color: #f0ede6; font: 600 13px "%NUM%";
     padding: 4px 0px 4px 9px; selection-background-color: rgba(232,163,61,90);
 }
+QLineEdit#srcEdit {
+    background: rgba(255,255,255,12); border: 1px solid rgba(255,255,255,28); border-radius: 7px;
+    color: #cfccc4; font: 11px "%NUM%"; padding: 5px 8px; selection-background-color: rgba(232,163,61,90);
+}
+QLineEdit#srcEdit:focus { border-color: #e8a33d; color: #f0ede6; background: rgba(232,163,61,16); }
 QToolButton#timeBtn { background: transparent; border: none; border-radius: 5px; }
 QToolButton#timeBtn:hover { background: rgba(255,255,255,16); }
 QFrame#timePopup { background: #23252d; border: 1px solid rgba(255,255,255,30); border-radius: 10px; }
@@ -189,6 +196,7 @@ QCalendarWidget QSpinBox {
     selection-background-color: rgba(232,163,61,90);
 }
 QCalendarWidget QHeaderView::section { background: #23252d; color: #6d6a62; border: none; font: 10px "%NUM%"; }
+QToolTip { background-color: #2a2d36; border: 1px solid rgba(255,255,255,40); padding: 4px 8px; }
 """,
 }
 
@@ -203,6 +211,7 @@ QWidget#panel {
     border: 1px solid rgba(0,0,0,26);
     border-radius: 12px;
 }
+QFrame#titlebar { background: #f7f8fa; }
 QFrame#tabBox { background: rgba(0,0,0,14); border-radius: 8px; }
 QToolButton#tab {
     background: transparent; border: none; border-radius: 6px;
@@ -229,7 +238,7 @@ QLabel#calSub { color: #8a8a90; font: 10.5px "%CN%"; }
 QLabel#calSub[accent="true"] { color: #0067c0; }
 QLabel#weekLabel { color: #8a8a90; font: 600 10px "%CN%"; }
 QLabel#weekLabel[we="true"] { color: #c94f4f; }
-QFrame#dayCell { border-radius: 8px; background: transparent; }
+QFrame#dayCell { border-radius: 8px; background: transparent; margin: 3px 0; }
 QFrame#dayCell:hover { background: rgba(0,0,0,13); }
 QLabel#dayNum { color: #1b1b1f; background: transparent; border-radius: 17px; }
 QFrame#dayCell[dim="true"] QLabel#dayNum { color: #b4b4ba; }
@@ -243,10 +252,11 @@ QFrame#dayCell[today="true"] QLabel#dayNum { color: #ffffff; font-weight: 700; }
 QFrame#dayCell[today="true"] QLabel#daySub { color: rgba(255,255,255,210); }
 QLabel#daySub { color: #9a9aa0; font: 9px "%CN%"; }
 QLabel#daySub[fest="true"] { color: #0067c0; font-weight: 600; }
-/* 休息日角标：贴右上角的红色直角三角形（仿 Excel 批注标记）。
-   三角形状由 app._CornerBadge 用 QPainter 画，这里只负责给颜色。 */
-#badge[kind="off"] { color: #c42b1c; }
-#badge[kind="work"] { color: #a9a9af; }
+/* 节假日角标：贴格子右上角的圆角标签 —— 法定节假日「休」，调休上班日「班」。
+   普通双休日不标；文字与配色都在这里给，app 只负责内容与摆位。 */
+#badge { font: 700 8.5px "%CN%"; padding: 0 1px; border-radius: 3px; }
+#badge[kind="off"] { color: #c42b1c; background: #fde7e6; }
+#badge[kind="work"] { color: #77777d; background: rgba(0,0,0,20); }
 QFrame#todoPane { border-left: 1px solid rgba(0,0,0,16); background: #f0f1f4; }
 QLabel#todoTitle { color: #1b1b1f; font: 600 14px "%CN%"; }
 QLabel#todoCount { color: #8a8a90; font: 11px "%CN%"; }
@@ -319,6 +329,11 @@ QWidget#timeField QLineEdit {
     background: transparent; border: none; color: #1b1b1f; font: 600 13px "%NUM%";
     padding: 4px 0px 4px 9px; selection-background-color: rgba(0,103,192,60);
 }
+QLineEdit#srcEdit {
+    background: #ffffff; border: 1px solid rgba(0,0,0,26); border-radius: 7px;
+    color: #4a4a50; font: 11px "%NUM%"; padding: 5px 8px; selection-background-color: rgba(0,103,192,60);
+}
+QLineEdit#srcEdit:focus { border-color: #0067c0; color: #1b1b1f; background: rgba(0,103,192,10); }
 QToolButton#timeBtn { background: transparent; border: none; border-radius: 5px; }
 QToolButton#timeBtn:hover { background: rgba(0,0,0,12); }
 QFrame#timePopup { background: #ffffff; border: 1px solid rgba(0,0,0,30); border-radius: 10px; }

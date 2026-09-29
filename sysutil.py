@@ -1,12 +1,13 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """系统集成：开机自启 + 桌面右键菜单 + 应用列表卸载项。
 默认写 HKCU（免管理员，Win7/10/11 通用）；all_users=True 写 HKLM（exe 安装向导「此计算机」选项，需管理员）。"""
 import os
 import sys
 import winreg
 
+from version import APP_VERSION
+
 APP_NAME = 'ZviberPanel'
-APP_VERSION = '1.0.0'
 MENU_TITLE = 'zviber桌面日历'
 IPC_KEY = 'zviber-panel-v1'
 RUN_KEY = r'Software\Microsoft\Windows\CurrentVersion\Run'
@@ -25,6 +26,11 @@ def appdata_dir():
     if not os.path.isdir(p):
         os.makedirs(p)
     return p
+
+
+def download_dir():
+    """「下载并导入」抓到的年份 JSON 统一存这里；导入窗的「打开下载目录」开的也是它。"""
+    return os.path.join(appdata_dir(), 'downloads')
 
 
 def launcher_cmd(toggle=False, exe=None):

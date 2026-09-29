@@ -126,7 +126,7 @@ def _copy_with_progress(src, dst, cb):
     shutil.copystat(src, dst)
 
 
-def install(path_dir, all_users=False, autostart=True, menu=True, progress=None):
+def install(path_dir, all_users=False, autostart=True, shortcut=True, progress=None):
     """把当前 exe 安装到指定目录并注册系统集成，返回安装后的 exe 路径。
     progress(pct, text) 回报进度。"""
     def report(pct, text):
@@ -142,8 +142,11 @@ def install(path_dir, all_users=False, autostart=True, menu=True, progress=None)
     icon = os.path.join(path_dir if all_users else sysutil.appdata_dir(), 'icon.ico')
     icon_path = icon if _gen_icon(icon) else None
     report(82, '正在注册系统集成…')
-    if menu:
-        sysutil.context_menu_install(icon_path, exe=dst, all_users=all_users)
+    # 桌面右键菜单不设开关：安装即生效
+    sysutil.context_menu_install(icon_path, exe=dst, all_users=all_users)
+    if shortcut:
+        report(88, '正在创建桌面快捷方式…')
+        create_desktop_shortcut(dst)
     if autostart:
         sysutil.autostart_set(exe=dst, all_users=all_users)
     else:
@@ -160,11 +163,43 @@ def uninstall():
     sysutil.uninstall_reg_remove()
     sysutil.context_menu_remove()
     sysutil.autostart_remove()
+    remove_desktop_shortcut()
     if is_installed():
         # exe 运行中无法删除自身：延迟 + 四轮重试（覆盖卸载完成提示框存活期）
         target = os.path.dirname(os.path.abspath(sys.executable))
         seq = ['ping 127.0.0.1 -n 4 > nul', 'rmdir /s /q "%s"' % target] * 4
         subprocess.Popen('cmd /c ' + ' & '.join(seq), creationflags=subprocess.CREATE_NO_WINDOW)
+
+
+def _desktop_dir():
+    """桌面真实路径（SHGetFolderPath 兼容 OneDrive 重定向的桌面）。"""
+    import ctypes
+    buf = ctypes.create_unicode_buffer(260)
+    try:
+        if ctypes.windll.shell32.SHGetFolderPathW(None, 0x10, None, 0, buf) == 0:
+            return buf.value
+    except Exception:
+        pass
+    return os.path.join(os.path.expanduser('~'), 'Desktop')
+
+
+def create_desktop_shortcut(exe_path):
+    """在桌面创建指向 exe 的 .lnk：借 PowerShell 的 WScript.Shell COM，免 pywin32 依赖（Win7+ 自带）。"""
+    lnk = os.path.join(_desktop_dir(), '%s.lnk' % APP_TITLE)
+    args = tuple(p.replace("'", "''") for p in (lnk, exe_path, os.path.dirname(exe_path), exe_path))
+    ps = ("$w=New-Object -ComObject WScript.Shell;"
+          "$s=$w.CreateShortcut('%s');$s.TargetPath='%s';$s.WorkingDirectory='%s';"
+          "$s.IconLocation='%s,0';$s.Save()" % args)
+    subprocess.call(['powershell', '-NoProfile', '-Command', ps],
+                    creationflags=subprocess.CREATE_NO_WINDOW)
+
+
+def remove_desktop_shortcut():
+    """卸载时清掉桌面快捷方式（没有就跳过）。"""
+    try:
+        os.remove(os.path.join(_desktop_dir(), '%s.lnk' % APP_TITLE))
+    except OSError:
+        pass
 
 
 def _relaunch(path):
@@ -198,7 +233,7 @@ def maybe_install():
         path = sys.argv[sys.argv.index('--install-elevated') + 1]
         wiz = InstallWizard()
         wiz.start_install(path, all_users=True,
-                          menu='--no-menu' not in sys.argv,
+                          shortcut='--no-shortcut' not in sys.argv,
                           autostart='--no-autostart' not in sys.argv)
         wiz.exec_()
         return True
@@ -278,6 +313,9 @@ class InstallWizard(QDialog):
         title = QLabel('  %s' % APP_TITLE)
         title.setObjectName('setTitle')
         tb.addWidget(title)
+        ver = QLabel('v%s' % sysutil.APP_VERSION)
+        ver.setObjectName('setLabel')
+        tb.addWidget(ver, 0, Qt.AlignVCenter)
         tb.addStretch(1)
         close = QToolButton()
         close.setObjectName('closeBtn')
@@ -357,11 +395,11 @@ class InstallWizard(QDialog):
         lay.addWidget(self._space)
 
         lay.addWidget(self._section('附加选项'))
-        self._menu = QCheckBox('桌面右键菜单「%s」' % sysutil.MENU_TITLE)
-        self._menu.setChecked(True)
+        self._shortcut = QCheckBox('创建桌面快捷方式')
+        self._shortcut.setChecked(True)
         self._auto = QCheckBox('开机自动启动')
         self._auto.setChecked(True)
-        lay.addWidget(self._menu)
+        lay.addWidget(self._shortcut)
         lay.addWidget(self._auto)
         lay.addStretch(1)
 
@@ -486,17 +524,17 @@ class InstallWizard(QDialog):
         all_users = self._radio_all.isChecked()
         if all_users and not is_admin():
             args = ['--install-elevated', '"%s"' % path]
-            if not self._menu.isChecked():
-                args.append('--no-menu')
+            if not self._shortcut.isChecked():
+                args.append('--no-shortcut')
             if not self._auto.isChecked():
                 args.append('--no-autostart')
             if relaunch_elevated(args):
                 self.accept()  # 提权实例接管安装
             return  # UAC 被拒绝时留在选项页
-        self.start_install(path, all_users, self._menu.isChecked(), self._auto.isChecked())
+        self.start_install(path, all_users, self._shortcut.isChecked(), self._auto.isChecked())
 
     # ---- 安装执行 ----
-    def start_install(self, path, all_users, menu, autostart):
+    def start_install(self, path, all_users, shortcut, autostart):
         """执行安装并切换到进度/完成页（提权实例直接调用）。"""
         self._stack.setCurrentIndex(1)
 
@@ -505,13 +543,12 @@ class InstallWizard(QDialog):
             self._bar.setValue(pct)
             QApplication.processEvents()
         try:
-            self._dst = install(path, all_users, menu, autostart, progress=prog)
+            self._dst = install(path, all_users, shortcut, autostart, progress=prog)
         except Exception as e:
             QMessageBox.critical(self, '安装失败', str(e))
             self._stack.setCurrentIndex(0)
             return
-        self._finish_detail.setText('已安装到：%s\n可通过桌面右键菜单「%s」开关面板。'
-                                    % (self._dst, sysutil.MENU_TITLE))
+        self._finish_detail.setText('已安装到：%s' % self._dst)
         self._run_now.setVisible(not all_users)  # 提权进程启动的面板会带管理员身份，不提供立即运行
         self._stack.setCurrentIndex(2)
 

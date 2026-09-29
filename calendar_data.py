@@ -40,7 +40,115 @@ EMBEDDED_OFF.update(_span(2026, 9, 25, 9, 27, {0: '中秋'}))
 EMBEDDED_OFF.update(_span(2026, 10, 1, 10, 7, {0: '国庆'}))
 EMBEDDED_WORK.update(['2026-01-04', '2026-02-14', '2026-02-28', '2026-05-09', '2026-09-20', '2026-10-10'])
 
-API_URL = 'https://timor.tech/api/holiday/year/%d'  # jiejiariapi.com 同源接口
+API_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'   # timor.tech 不带 UA 会回 403
+
+# 三个数据源，按顺序尝试：前一个抓不到（网络不通或格式不认识）才用下一个。URL 里的 %d 是年份。
+# 注意三家的 JSON 格式互不相同，parse_holiday_json 全都认；URL 在导入窗口里可以改（内网/镜像）。
+SOURCES = (
+    {'name': 'timor.tech', 'url': 'https://timor.tech/api/holiday/year/%d'},
+    {'name': 'jiejiariapi', 'url': 'https://jiejiariapi.com/v1/holidays/%d'},
+    {'name': 'holiday-cn', 'url': 'https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/%d.json'},
+)
+
+
+def _short_name(name):
+    """「劳动节」→「劳动」：日历格子下的小字放不下全称。"""
+    name = (name or '').strip()
+    if len(name) > 2 and name.endswith('节'):
+        name = name[:-1]
+    return name or None
+
+
+def iso_from_key(key, year=None):
+    """'2026-01-01' 原样返回；'01-01' 且有年份则补成 '2026-01-01'；补不出来返回 None。"""
+    if not key:
+        return None
+    key = str(key).strip()
+    if len(key) == 10 and key[4] == '-':
+        return key
+    if len(key) == 5 and key[2] == '-' and year:
+        return '%s-%s' % (year, key)
+    return None
+
+
+def _is_weekend(iso):
+    try:
+        return date(*[int(x) for x in iso.split('-')]).weekday() >= 5
+    except Exception:
+        return False
+
+
+def _pick(items, flag, year):
+    """把 (键, 条目) 整理成 (off, work)：flag 为真的算放假，否则看是不是调休上班。
+    调休（「班」角标）按定义都落在周末，而有的源用同一个字段顺带标了「小年」这类
+    传统节日（jiejiariapi：isOffDay=false + name=小年），落在工作日的一律不算调休——
+    否则换个源就会平白多出几个「班」角标。"""
+    off, work = {}, set()
+    for key, v in items:
+        d = v.get('date') or iso_from_key(key, year)
+        if not d:
+            continue
+        if v.get(flag):
+            off[d] = _short_name(v.get('name'))
+        elif _is_weekend(d):
+            work.add(d)
+    if not off and not work:
+        raise ValueError('JSON 里没有可识别的节假日条目')
+    return off, work
+
+
+def parse_holiday_json(text):
+    """解析年份 JSON，返回 (off, work)：off = {iso: 名称或 None}，work = {iso}。
+    三个数据源的格式都认：
+      timor.tech   {"holiday": {"01-01": {"holiday": true, "name": "元旦", "date": "...", ...}}}
+      jiejiariapi  {"2026-01-01": {"isOffDay": true, "name": "元旦"}}
+      holiday-cn   {"year": 2026, "days": [{"date": "2026-01-01", "isOffDay": true, "name": "元旦"}]}
+    认不出来抛 ValueError。"""
+    data = json.loads(text)
+    if not isinstance(data, dict):
+        raise ValueError('无法识别的节假日 JSON 格式')
+    root = data.get('data') if isinstance(data.get('data'), dict) else data  # 有的接口包在 data 里
+    year = root.get('year') or data.get('year')
+
+    hol = root.get('holiday')
+    if isinstance(hol, dict):                                        # timor.tech
+        return _pick([(k, v) for k, v in hol.items() if isinstance(v, dict)], 'holiday', year)
+
+    days = root.get('days')
+    if isinstance(days, list):                                       # holiday-cn
+        return _pick([(v.get('date'), v) for v in days if isinstance(v, dict)], 'isOffDay', year)
+
+    flat = [(k, v) for k, v in root.items()
+            if isinstance(v, dict) and 'isOffDay' in v]              # jiejiariapi
+    if flat:
+        return _pick(flat, 'isOffDay', year)
+    raise ValueError('无法识别的节假日 JSON 格式')
+
+
+def fetch_text(url, timeout=10):
+    """抓一个 URL 的原始文本（统一 UA，timor.tech 不带 UA 会回 403）。"""
+    req = urllib.request.Request(url, headers={'User-Agent': API_UA})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.read().decode('utf-8')
+
+
+def fetch_url(url, timeout=10):
+    """抓一个 JSON URL 并解析，返回 (off, work)。"""
+    return parse_holiday_json(fetch_text(url, timeout))
+
+
+def fetch_year_data(year, timeout=10, sources=None):
+    """按 SOURCES 顺序依次尝试抓取某一年，返回 (off, work)。
+    全部失败时抛 ValueError，消息里带上每个源各自的失败原因（供气泡显示）。"""
+    errs = []
+    for src in (sources or SOURCES):
+        try:
+            # URL 里带 %d 的按年份填；已经填好年份的（导入窗口里用户改过的）原样用
+            url = src['url'] % year if '%d' in src['url'] else src['url']
+            return fetch_url(url, timeout)
+        except Exception as e:
+            errs.append('%s：%s' % (src['name'], e))
+    raise ValueError('；'.join(errs))
 
 
 class HolidayStore(object):
@@ -79,47 +187,34 @@ class HolidayStore(object):
             return '班', 'work'
         return None, None
 
-    @staticmethod
-    def _short_name(name):
-        name = (name or '').strip()
-        if len(name) > 2 and name.endswith('节'):
-            name = name[:-1]
-        return name or None
+    def _merge(self, off, work):
+        """并入抓来/导入的数据：同一天不能既休又班，后到的为准，返回条目数。"""
+        for d, name in off.items():
+            self.off[d] = name
+            self.work.discard(d)
+        for d in work:
+            self.work.add(d)
+            self.off.pop(d, None)
+        return len(off) + len(work)
 
-    def import_api_json(self, text):
-        """导入 jiejiariapi.com / timor.tech 的年份 JSON，返回条目数。"""
-        data = json.loads(text)
-        hol = data.get('holiday')
-        if hol is None and isinstance(data.get('data'), dict):
-            hol = data['data'].get('holiday')
-        if not isinstance(hol, dict):
-            raise ValueError('无法识别的节假日 JSON 格式')
-        n = 0
-        for key, v in hol.items():
-            if not isinstance(v, dict) or 'holiday' not in v:
-                continue
-            d = v.get('date')
-            if not d:  # key 形如 "10-01"，补年份
-                y = str(data.get('year') or '')
-                if not y and '-' in key and len(key) == 5:
-                    continue
-                d = '%s-%s' % (y, key)
-            if v['holiday']:
-                self.off[d] = self._short_name(v.get('name'))
-                self.work.discard(d)
-            else:
-                self.work.add(d)
-                self.off.pop(d, None)
-            n += 1
+    def merge(self, off, work):
+        """并入抓来的数据并落盘，返回条目数（入口的后台线程用这个）。"""
+        n = self._merge(off, work)
         self.save()
         return n
 
+    def import_api_json(self, text):
+        """导入年份 JSON（三个数据源的格式都认，见 parse_holiday_json），返回条目数。"""
+        return self.merge(*parse_holiday_json(text))
+
+    def import_file(self, path):
+        """从文件导入，返回条目数。"""
+        with open(path, 'r', encoding='utf-8') as f:
+            return self.import_api_json(f.read())
+
     def fetch_year(self, year, timeout=10):
-        # timor.tech 对没有 User-Agent 的请求一律回 403，必须显式带上
-        req = urllib.request.Request(API_URL % year,
-                                     headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return self.import_api_json(r.read().decode('utf-8'))
+        """联网抓取某一年（按 SOURCES 依次尝试），返回条目数。"""
+        return self.merge(*fetch_year_data(year, timeout))
 
     def reset(self):
         self.off, self.work = {}, set()

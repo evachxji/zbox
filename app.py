@@ -1,23 +1,27 @@
 ﻿# -*- coding: utf-8 -*-
 """Zviber 桌面悬浮面板：日历 + 待办。PyQt5，兼容 Win7/10/11、Python 3.8+。"""
 import ctypes
+from ctypes import wintypes
 import json
 import os
 import sys
+import time
 from datetime import date, datetime, timedelta
 
-from PyQt5.QtCore import (Qt, QTimer, QSize, QPoint, QPointF, QRectF, QDate, QTime, QUrl,
-                          pyqtSignal, QEvent, QPropertyAnimation, QEasingCurve)
+from PyQt5.QtCore import (Qt, QTimer, QSize, QPoint, QPointF, QRectF, QDate, QTime,
+                          pyqtSignal, QEvent, QPropertyAnimation, QVariantAnimation, QEasingCurve)
 from PyQt5.QtGui import (QFont, QFontDatabase, QPainter, QColor, QPixmap, QIcon, QPainterPath,
-                         QRegion, QPen, QLinearGradient, QDesktopServices)
+                         QRegion, QPen, QLinearGradient, QCursor)
 from PyQt5.QtWidgets import (QWidget, QFrame, QLabel, QToolButton, QVBoxLayout, QHBoxLayout,
                              QGridLayout, QStackedLayout, QListWidget,
                              QListWidgetItem, QLineEdit, QMenu, QApplication, QDialog,
-                             QFormLayout, QCheckBox, QRadioButton, QPushButton, QCalendarWidget)
+                             QFormLayout, QCheckBox, QRadioButton, QPushButton, QCalendarWidget,
+                             QLayout)
 
 import calendar_data as cd
 import sysutil
 from themes import THEMES, THEME_ORDER, THEME_CHOICES, AUTO, build_qss
+from version import APP_VERSION, GITHUB_URL
 
 SHADOW = 0  # 不透明窗口：无边距，圆角由 DWM/遮罩实现
 SINGLE_W, DUAL_W, PANEL_H = 344, 700, 428
@@ -113,14 +117,6 @@ def _indicator_icons():
 
 
 DUE_ICON_COLORS = {'nocturne': '#8d8a82', 'mica': '#8a8a90'}
-ACCENT_COLORS = {'nocturne': '#e8a33d', 'mica': '#0067c0'}   # 与主题强调色一致（同 _indicator_icons）
-
-# 固定按钮三档：0 未固定（可拖动、置顶）→ 1 钉在桌面（不可移动、可被覆盖）→ 2 始终置顶（不可移动）
-PIN_TIPS = (
-    '未固定（可拖动）\n点击：钉在桌面，不可移动、可被其它窗口覆盖',
-    '已钉在桌面（不可移动、可被其它窗口覆盖）\n点击：始终显示在最上层',
-    '已始终置顶（不可移动）\n点击：取消固定',
-)
 
 
 def make_cal_icon(color):
@@ -160,33 +156,10 @@ def make_clock_icon(color):
     return QIcon(pm)
 
 
-def make_pin_icon(color, filled=False):
-    """固定按钮的图钉（画法对齐 make_cal_icon）：空心 = 钉在桌面，实心 = 始终置顶。"""
-    s = sc(16)
-    pm = QPixmap(s, s)
-    pm.fill(Qt.transparent)
-    p = QPainter(pm)
-    p.setRenderHint(QPainter.Antialiasing)
-    col = QColor(color)
-    m = s / 16.0
-    pen = QPen(col)
-    pen.setWidthF(max(1.0, 1.3 * ui_scale()))
-    pen.setJoinStyle(Qt.RoundJoin)
-    p.setPen(pen)
-    head = QRectF(4 * m, 3 * m, 8 * m, 3 * m)        # 钉帽
-    body = QRectF(6 * m, 6 * m, 4 * m, 3.5 * m)      # 钉身
-    p.setBrush(col if filled else Qt.NoBrush)
-    p.drawRoundedRect(head, 1 * m, 1 * m)
-    p.drawRoundedRect(body, 0.8 * m, 0.8 * m)
-    p.setBrush(Qt.NoBrush)
-    p.drawLine(QPointF(8 * m, 9.5 * m), QPointF(8 * m, 13 * m))   # 针尖
-    p.end()
-    return QIcon(pm)
-
 
 def fmt_due_date(d):
-    """截止日期统一显示成 M-d（如 10-9）：行内 tag 与编辑器按钮共用这一处格式，避免两边不一致。"""
-    return '%d-%d' % (d.month, d.day)
+    """截止日期统一显示成 M.d（如 10.7）：行内 tag 与编辑器按钮共用这一处格式，避免两边不一致。"""
+    return '%d.%d' % (d.month, d.day)
 
 
 def due_chip(due_str):
@@ -209,7 +182,7 @@ def due_chip(due_str):
 class Config(object):
     def __init__(self, path):
         self.path = path
-        self.data = {'theme': THEME_ORDER[0], 'dual': False, 'tab': 0, 'pos': None, 'pin': 0,
+        self.data = {'theme': THEME_ORDER[0], 'dual': False, 'tab': 0, 'pos': None,
                      'off_noon': '12:00-13:00', 'off_evening': '18:00'}
         self.load()
 
@@ -255,26 +228,6 @@ def set_num_font(name):
     _NUM_FONT['name'] = name
 
 
-class _CornerBadge(QWidget):
-    """休息日角标：贴格子右上角的直角三角形（仿 Excel 批注标记）。
-    形状用 QPainter 画，颜色取主题 QSS 给的 color —— QSS 的 border / 渐变都画不出可靠的三角。"""
-
-    def __init__(self, parent=None):
-        super(_CornerBadge, self).__init__(parent)
-        self.setAttribute(Qt.WA_TransparentForMouseEvents)
-
-    def paintEvent(self, e):
-        w, h = self.width(), self.height()
-        path = QPainterPath()
-        path.moveTo(0, 0)
-        path.lineTo(w, 0)
-        path.lineTo(w, h)
-        path.closeSubpath()
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        p.fillPath(path, self.palette().color(self.foregroundRole()))
-
-
 class DayCell(QFrame):
     clicked = pyqtSignal()
 
@@ -285,7 +238,7 @@ class DayCell(QFrame):
         self.num = QLabel(self)
         self.num.setObjectName('dayNum')
         self.num.setAlignment(Qt.AlignCenter)
-        self.num.setFixedSize(sc(38), sc(38))
+        self.num.setFixedSize(sc(38), sc(30))  # 数字居中，高度收紧让农历贴近数字
         if _NUM_FONT['name']:
             f = QFont(_NUM_FONT['name'])
             f.setPixelSize(sc(_NUM_FONT['size']))
@@ -294,9 +247,9 @@ class DayCell(QFrame):
         self.sub = QLabel(self)
         self.sub.setObjectName('daySub')
         self.sub.setAlignment(Qt.AlignCenter)
-        self.badge = _CornerBadge(self)
+        self.badge = QLabel(self)   # 贴右上角的「休」/「班」圆角标签，配色由主题 QSS 按 kind 给
         self.badge.setObjectName('badge')
-        self.badge.setFixedSize(sc(7), sc(7))
+        self.badge.setAlignment(Qt.AlignCenter)
         self.badge.hide()
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, sc(2), 0, sc(2))
@@ -310,8 +263,12 @@ class DayCell(QFrame):
 
     def resizeEvent(self, e):
         super(DayCell, self).resizeEvent(e)
-        w = self.badge.width()
-        self.badge.setGeometry(self.width() - w, 0, w, w)  # 贴右上角：Excel 批注标记的位置
+        self._place_badge()
+
+    def _place_badge(self):
+        """角标贴格子右上角：先按 QSS 字号自适应尺寸，再摆到设计稿的 top/right 内缩位置。"""
+        self.badge.adjustSize()
+        self.badge.move(self.width() - self.badge.width() - sc(2), sc(2))
 
     def set_day(self, d, dim, store, sel=False):
         today = date.today()
@@ -326,16 +283,17 @@ class DayCell(QFrame):
         fest = bool(show_name or cd.festival_name(d))
         self.sub.setText(show_name or cd.lunar_text(d))
         self.sub.setProperty('fest', 'true' if fest else 'false')
-        # 红点 = 休息日：法定节假日，或非调休的双休日；调休上班日（班）不标
-        off = (kind == 'off') or (d.weekday() >= 5 and kind != 'work')
-        if off:
-            self.badge.setProperty('kind', 'off')
+        # 右上角标签：法定节假日「休」、调休上班日「班」；普通双休日不标
+        if kind:
+            self.badge.setText('休' if kind == 'off' else '班')
+            self.badge.setProperty('kind', kind)
             self.badge.show()
         else:
             self.badge.hide()
         for w in (self, self.num, self.sub, self.badge):
             w.style().unpolish(w)
             w.style().polish(w)
+        self._place_badge()   # QSS 字号在 polish 之后才生效，尺寸自适应要放最后
 
 
 def _page_pixmap(page):
@@ -436,6 +394,7 @@ class CalendarWidget(QWidget):
         self.clock_hm.setObjectName('clockBig')
         self.sub = QLabel()
         self.sub.setObjectName('calSub')
+        self._sub_fm_key = None    # _sync_sub_baseline 的缓存：字体没变就不重复量
         clock_row.addWidget(bar)
         clock_row.addWidget(self.clock_hm)
         clock_row.addWidget(self.sub, 0, Qt.AlignBottom)
@@ -521,7 +480,26 @@ class CalendarWidget(QWidget):
         d = self._pages[0].start + timedelta(days=7 * r + 3)
         return d.year, d.month
 
+    def _sync_sub_baseline(self):
+        """把右边的小字顶到跟左边时分秒同一条文字基线上。
+        两个 QLabel 按底边对齐时，字号大的字体 descent 也大，小字看着就沉下去一截 ——
+        这里量出两者「基线到控件底边」的距离差，用下边距补回来（`Qt.AlignBaseline` 对 QLabel
+        取的并不是文字基线，实测偏得更多，别改回去）。字体由 QSS 按 DPI 缩放，换了就得重量；
+        每秒都会被调用，所以先比字体的 height/ascent/descent，没变就直接返回。"""
+        fm = self.sub.fontMetrics()
+        key = (fm.height(), fm.ascent(), fm.descent())
+        if key == self._sub_fm_key:
+            return
+        self._sub_fm_key = key
+        big = self.clock_hm.fontMetrics()
+
+        def inset(f):   # 单行文本在控件内垂直居中时，基线到控件底边的距离
+            return (f.height() - f.ascent() + f.descent()) // 2
+
+        self.sub.setContentsMargins(0, 0, 0, max(0, inset(big) - inset(fm)))
+
     def _update_sub(self):
+        self._sync_sub_baseline()
         t = date.today()
         y, m = self._visible_month()
         if (y, m) != self._dim_month:  # 显示月变化：置灰滞后到停手（平移中逐帧重刷样式会卡）
@@ -543,25 +521,25 @@ class CalendarWidget(QWidget):
 
     def _countdown_text(self, t):
         """距离下一个节点的倒计时：午休前→距午休，午休区间内→距上班（午休结束），之后→距下班。
-        休息日不显示。"""
+        休息日显示「今天休息」；午休与下班时间只要有一个留空，就整块不显示倒计时。"""
         _, kind = self.store.info(t)
         if kind == 'off' or (t.weekday() >= 5 and kind != 'work'):
             return '今天休息'
+        noon = parse_noon_range(self.cfg.data.get('off_noon'))
+        off_text = parse_time_text(self.cfg.data.get('off_evening'))
+        if not noon or not off_text:
+            return ''
         now = datetime.now()
 
         def at(hhmm):
             return now.replace(hour=int(hhmm[:2]), minute=int(hhmm[3:]), second=0, microsecond=0)
 
-        noon_a, noon_b = parse_noon_range(self.cfg.data.get('off_noon')) or NOON_DEFAULT
-        noon_a = at(noon_a)
-        noon_b = at(noon_b)
-        off = parse_time_text(self.cfg.data.get('off_evening') or '18:00')
-        off = at(off) if off else None
+        noon_a, noon_b, off = at(noon[0]), at(noon[1]), at(off_text)
         if now < noon_a:
             target, label = noon_a, '午休'
         elif noon_b > noon_a and now < noon_b:   # 区间反了就跳过「上班」这一档
             target, label = noon_b, '上班'
-        elif off is not None and now < off:
+        elif now < off:
             target, label = off, '下班'
         else:
             return '今天已下班'
@@ -1167,7 +1145,9 @@ class TodoWidget(QWidget):
         pop.show()
         pop.raise_()        # 面板是置顶 Tool 窗，确保弹层压在其上
         pos = btn.mapToGlobal(QPoint(0, btn.height() + sc(4)))
-        ag = QApplication.primaryScreen().availableGeometry()
+        # 按锚点所在屏幕的可用区夹取，多显示器下弹层才不会被拉回主屏边缘
+        scr = QApplication.screenAt(btn.mapToGlobal(btn.rect().center())) or QApplication.primaryScreen()
+        ag = scr.availableGeometry()
         x = min(pos.x(), ag.right() - pop.width() - sc(4))
         y = min(pos.y(), ag.bottom() - pop.height() - sc(4))
         pop.move(x, max(y, ag.top()))
@@ -1250,6 +1230,162 @@ class TodoWidget(QWidget):
             self.rebuild()
 
 
+# ---------------- 桌面层级 ----------------
+# 64 位安全的 ctypes 签名（windll 默认按 32 位 int 截断，句柄高位会丢）
+_u32 = ctypes.windll.user32
+_u32.FindWindowW.restype = ctypes.c_void_p
+_u32.FindWindowW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p]
+_u32.GetTopWindow.restype = ctypes.c_void_p
+_u32.GetTopWindow.argtypes = [ctypes.c_void_p]
+_u32.IsWindowVisible.restype = ctypes.c_int
+_u32.IsWindowVisible.argtypes = [ctypes.c_void_p]
+_u32.GetWindowLongPtrW.restype = ctypes.c_longlong
+_u32.GetWindowLongPtrW.argtypes = [ctypes.c_void_p, ctypes.c_int]
+_u32.GetWindowRect.restype = ctypes.c_int
+_u32.GetWindowRect.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+_u32.GetWindow.restype = ctypes.c_void_p
+_u32.GetWindow.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+_u32.SetWindowPos.restype = ctypes.c_int
+_u32.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+                              ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+_u32.SetParent.restype = ctypes.c_void_p
+_u32.SetParent.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+_u32.GetParent.restype = ctypes.c_void_p
+_u32.GetParent.argtypes = [ctypes.c_void_p]
+_u32.WindowFromPoint.restype = ctypes.c_void_p
+_u32.WindowFromPoint.argtypes = [wintypes.POINT]
+_u32.FindWindowExW.restype = ctypes.c_void_p
+_u32.FindWindowExW.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_wchar_p]
+_u32.GetAncestor.restype = ctypes.c_void_p
+_u32.GetAncestor.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+_u32.IsWindow.restype = ctypes.c_int
+_u32.IsWindow.argtypes = [ctypes.c_void_p]
+_u32.GetClassNameW.restype = ctypes.c_int
+_u32.GetClassNameW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
+_u32.GetForegroundWindow.restype = ctypes.c_void_p
+_u32.GetForegroundWindow.argtypes = []
+_u32.GetWindowThreadProcessId.restype = wintypes.DWORD
+_u32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+_u32.AttachThreadInput.restype = ctypes.c_int
+_u32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+_u32.SetFocus.restype = ctypes.c_void_p
+_u32.SetFocus.argtypes = [ctypes.c_void_p]
+
+_GW_HWNDPREV = 3
+_GW_HWNDNEXT = 2
+_GA_ROOT = 2
+_GWL_STYLE = -16
+_GWL_EXSTYLE = -20
+_WS_MINIMIZEBOX = 0x20000
+_WS_EX_TOOLWINDOW = 0x80
+_SWP_Z_ONLY = 0x1 | 0x2 | 0x10   # SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE：只动 z-order
+
+
+def _dbg(msg):
+    """ZVIBER_DEBUG 环境变量开启的桌面层级调试日志。"""
+    if os.environ.get('ZVIBER_DEBUG'):
+        try:
+            with open(os.path.join(os.environ.get('TEMP', '.'), 'zviber_debug.log'), 'a',
+                      encoding='utf-8') as f:
+                f.write('%.2f %s\n' % (time.time(), msg))
+        except Exception:
+            pass
+_HWND_TOP = 0
+
+
+def _is_desktop_surface(hwnd, sw, sh):
+    """桌面表层判定：盖在桌面上的全屏层（Progman 本体、桌面整理软件的覆盖层等）。
+    特征：可见 + 几乎铺满全屏 + 工具窗样式（WS_EX_TOOLWINDOW）+ 不可最小化（无 WS_MINIMIZEBOX）。
+    最大化的普通应用窗口带 WS_MINIMIZEBOX，不会被误判。"""
+    if not _u32.IsWindowVisible(hwnd):
+        return False
+    r = wintypes.RECT()
+    _u32.GetWindowRect(hwnd, ctypes.byref(r))
+    if (r.right - r.left) < sw * 9 // 10 or (r.bottom - r.top) < sh * 4 // 5:
+        return False
+    st = _u32.GetWindowLongPtrW(hwnd, _GWL_STYLE)
+    ex = _u32.GetWindowLongPtrW(hwnd, _GWL_EXSTYLE)
+    return bool(ex & _WS_EX_TOOLWINDOW) and not (st & _WS_MINIMIZEBOX)
+
+
+def _class_name(hwnd):
+    buf = ctypes.create_unicode_buffer(64)
+    _u32.GetClassNameW(hwnd, buf, 64)
+    return buf.value
+
+
+_PROG_FAMILY = ('Progman', 'SHELLDLL_DefView', 'WorkerW')
+
+
+def probe_desktop(skip=(), extra=()):
+    """在桌面采样点（外加 extra 点）做命中探测：返回 (第三方桌面表层 hwnd 或 None, 是否摸到桌面本体)。
+    命中窗口沿父链向上逐级检查：Progman 家族 = 桌面本体；全屏工具窗 = 桌面整理的覆盖层。
+    桌面整理软件的表层窗口嵌套层级会变化（有时是顶层窗口，有时挂在隐藏的辅助窗口下），
+    z-order 遍历不可靠，只能用命中探测。采样点全被应用盖住时返回 (None, False) = 无结论。"""
+    sw, sh = _u32.GetSystemMetrics(0), _u32.GetSystemMetrics(1)
+    points = [(sw // 2, sh // 2), (sw // 4, sh // 3), (sw * 3 // 4, sh // 3),
+              (sw // 4, sh * 2 // 3), (sw * 3 // 4, sh * 2 // 3)] + list(extra)
+    surface, touched = None, False
+    for x, y in points:
+        h = _u32.WindowFromPoint(wintypes.POINT(x, y))
+        while h:
+            if h in skip:
+                break
+            if _class_name(h) in _PROG_FAMILY:
+                touched = True
+                break
+            if _is_desktop_surface(h, sw, sh):
+                surface = h
+                break
+            h = _u32.GetParent(h)
+        if surface:
+            break
+    return surface, touched
+
+
+def pin_to_desktop(win):
+    """把窗口的属主设为桌面图标窗（SHELLDLL_DefView）：加入「桌面带」，
+    Win+D / 显示桌面会跳过桌面带（Win11 24H2 上顶层窗口一律被收，桌面带成员豁免——
+    桌面整理软件的 TXMiniSkin 就是这个结构）。
+    保持 WS_POPUP 不改样式：坐标仍是屏幕绝对坐标，绘制/DWM 圆角/键盘焦点全走正常路径。
+    成功返回 True。"""
+    try:
+        hwnd = int(win.winId())
+        progman = _u32.FindWindowW('Progman', None)
+        dv = _u32.FindWindowExW(progman, None, 'SHELLDLL_DefView', None) if progman else None
+        if not hwnd or not dv:
+            return False
+        if _u32.GetAncestor(hwnd, _GA_ROOT) != progman:
+            _u32.SetParent(hwnd, dv)
+        return _u32.GetAncestor(hwnd, _GA_ROOT) == progman
+    except Exception:
+        return False
+
+
+def sink_to_desktop(win, anchor=None):
+    """把窗口压到桌面层：桌面整理软件的全屏覆盖层之上、所有应用窗口之下。
+    做法：从 z-order 顶部往下找「最上层的桌面表层」作锚点（找不到就用 Progman），
+    把窗口插到锚点正上方。桌面整理软件会频繁重建/重排它的表层窗口，
+    从顶部找锚点不受其 z-order 抖动影响；已就位时不动，避免闪烁。"""
+    try:
+        hwnd = int(win.winId())
+        if not hwnd:
+            return
+        if anchor is None:
+            anchor, _t = probe_desktop(skip=(hwnd,))
+        if anchor is None:
+            anchor = _u32.FindWindowW('Progman', None)
+            if not anchor or anchor == hwnd:
+                return
+        above = _u32.GetWindow(anchor, _GW_HWNDPREV)
+        if above == hwnd:
+            return   # 已经在桌面层正上方
+        _dbg('sink: anchor=%s above=%s' % (anchor, above))
+        _u32.SetWindowPos(hwnd, above or _HWND_TOP, 0, 0, 0, 0, _SWP_Z_ONLY)
+    except Exception:
+        pass
+
+
 # ---------------- 设置窗口 ----------------
 
 def round_corners(win):
@@ -1263,6 +1399,44 @@ def round_corners(win):
             path = QPainterPath()
             path.addRoundedRect(0.0, 0.0, float(win.width()), float(win.height()), 14.0, 14.0)
             win.setMask(QRegion(path.toFillPolygon().toPolygon()))
+    except Exception:
+        pass
+
+
+def bar_corner_radius(win):
+    """栏窗顶角半径（也是底边探进面板的深度）：对齐面板的实际圆角——
+    Win11 DWM 圆角约 8 物理像素（换算成逻辑像素），Win7/10 遮罩固定 14（同 round_corners）。"""
+    try:
+        if sys.getwindowsversion().build >= 22000:
+            return 8.0 / win.devicePixelRatioF()
+    except Exception:
+        pass
+    return 14.0
+
+
+def round_bar_top(win):
+    """栏窗遮罩：只圆上面两个角。底边保持方角并探进面板顶边下方（被面板遮住），
+    栏窗与面板合成一张完整卡片——没有接缝，面板上角的缺口也被栏窗填掉。"""
+    try:
+        r = bar_corner_radius(win)
+        w, h = float(win.width()), float(win.height())
+        path = QPainterPath()
+        path.moveTo(0.0, h)
+        path.lineTo(0.0, r)
+        path.quadTo(0.0, 0.0, r, 0.0)
+        path.lineTo(w - r, 0.0)
+        path.quadTo(w, 0.0, w, r)
+        path.lineTo(w, h)
+        path.closeSubpath()
+        win.setMask(QRegion(path.toFillPolygon().toPolygon()))
+    except Exception:
+        pass
+
+
+def _place_below(win, anchor):
+    """把 win 压到 anchor 正下方一档（只动 z-order，不动位置尺寸）。"""
+    try:
+        _u32.SetWindowPos(int(win.winId()), int(anchor.winId()), 0, 0, 0, 0, _SWP_Z_ONLY)
     except Exception:
         pass
 
@@ -1291,9 +1465,6 @@ def parse_time_text(text):
     return '%02d:%02d' % (h, m)
 
 
-NOON_DEFAULT = ('12:00', '13:00')   # 午休区间默认值（开始, 结束）
-
-
 def parse_noon_range(text):
     """午休区间文本 -> (开始, 结束) 的 'HH:mm' 二元组，解析不了返回 None。
     分隔符宽松（- ~ ～ — － 都认）；只给一个时间时按旧版单值处理，结束 = 开始 + 1 小时。"""
@@ -1314,17 +1485,18 @@ def parse_noon_range(text):
 
 
 class HolidayImportDialog(QDialog):
-    """导入节假日 JSON 的引导窗口：先告诉用户去哪拿数据，再选文件。
-    文件选择 / 解析 / 托盘通知都由入口的 on_pick 负责，本窗口只管引导。"""
+    """导入节假日数据的引导窗口：三个数据源各一行 URL，点「下载并导入」由程序代抓。
+    抓取/解析由入口的 on_download 负责（抓到的原文存 sysutil.download_dir()），
+    选文件导入由 on_pick 负责，本窗口只管引导与收 URL。"""
 
-    def __init__(self, panel, on_pick):
+    def __init__(self, panel, on_download, on_pick):
         super(HolidayImportDialog, self).__init__(panel)
         self.setObjectName('settingsDlg')
         self.setWindowTitle('导入节假日数据')
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setWindowModality(Qt.NonModal)  # 与设置窗口一致：不阻塞面板
         self._drag = None
-        url = cd.API_URL % date.today().year
+        year = date.today().year
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -1359,35 +1531,80 @@ class HolidayImportDialog(QDialog):
             lb.setWordWrap(True)
             lay.addWidget(lb)
 
-        note('本程序导入的是「年份 JSON」，与内置数据同源，共三步：')
-        note('① 用浏览器打开下面的网址，把页面内容另存为 .json 文件\n'
-             '（网址末尾是年份，要别的年份直接改它）')
+        note('三个数据源任选，年份 JSON 的格式程序都认。点「下载并导入」由程序直接抓取并导入，'
+             '不用再手动另存；抓不到时（内网 / 代理）会自动用浏览器打开，另存成文件后再用下面的按钮导入。')
 
-        self.url = QLabel(url)
-        self.url.setObjectName('setUrl')
-        self.url.setTextInteractionFlags(Qt.TextSelectableByMouse)  # 方便复制
-        lay.addWidget(self.url)
+        # 每源一行：主源 / 备用1 / 备用2 + 可改的 URL + 下载并导入
+        self.sources = []
+        for i, src in enumerate(cd.SOURCES):
+            row = QHBoxLayout()
+            row.setSpacing(sc(6))
+            tag = QLabel('主源' if i == 0 else '备用%d' % i)
+            tag.setObjectName('setLabel')
+            tag.setFixedWidth(sc(32))
+            ed = QLineEdit(src['url'] % year)
+            ed.setObjectName('srcEdit')
+            ed.setCursorPosition(0)   # 默认露出域名（URL 尾巴不如域名好认）
+            ed.setToolTip('%s\nURL 可以改：内网镜像、换年份直接改链接里的数字' % src['name'])
+            btn = QPushButton('下载并导入')
+            btn.setObjectName('setBtn')
+            btn.clicked.connect(lambda _=False, s=src, e=ed, b=btn: self._download(on_download, s['name'], e, b))
+            row.addWidget(tag)
+            row.addWidget(ed, 1)
+            row.addWidget(btn)
+            lay.addLayout(row)
+            self.sources.append((ed, btn))
 
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, sc(4))
-        open_btn = QPushButton('打开网址')
-        open_btn.setObjectName('setBtn')
-        open_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(url)))
-        row.addWidget(open_btn)
-        row.addStretch(1)
-        lay.addLayout(row)
-
-        note('② 回到这里，选择刚保存的文件即可导入')
+        note('也可以自己另存成文件后从这里导入（三个源的 JSON 都能直接导入）：')
+        self.status = QLabel()
+        self.status.setObjectName('setLabel')
+        lay.addWidget(self.status)
         row2 = QHBoxLayout()
-        pick = QPushButton('选择文件…')
+        pick = QPushButton('选择文件导入…')
         pick.setObjectName('setBtn')
         pick.clicked.connect(lambda: (self.close(), on_pick()))
         row2.addWidget(pick)
         row2.addStretch(1)
+        open_dir = QPushButton('打开下载目录')
+        open_dir.setObjectName('setBtn')
+        open_dir.setToolTip('「下载并导入」抓到的年份 JSON 都保存在这个目录')
+        open_dir.clicked.connect(self._open_download_dir)
+        row2.addWidget(open_dir)
         lay.addLayout(row2)
+        self.setFixedWidth(sc(470))
 
-        note('内网无法访问上述网址时，可用 jiejiariapi.com 的同格式接口。')
-        self.setFixedWidth(sc(388))
+        # 与设置窗口一致：默认居中在面板所在屏幕的可用区
+        self.adjustSize()
+        scr = QApplication.screenAt(panel.frameGeometry().center()) or QApplication.primaryScreen()
+        ag = scr.availableGeometry()
+        g = self.frameGeometry()
+        g.moveCenter(ag.center())
+        self.move(g.topLeft())
+
+    def _download(self, on_download, name, edit, btn):
+        """点「下载并导入」：按钮 loading + 禁用，后台抓取结束后恢复（结果看托盘气泡）。"""
+        url = edit.text().strip()
+        if not url:
+            self.status.setText('URL 不能为空')
+            return
+        btn.setEnabled(False)
+        btn.setText('下载中…')
+        if on_download(name, url, lambda: self._download_done(btn)):
+            self.status.setText('正在下载 %s… 结果看右下角托盘气泡' % name)
+        else:
+            self.status.setText('上一次下载还没结束，本次随它一起完成')
+
+    def _open_download_dir(self):
+        d = sysutil.download_dir()
+        os.makedirs(d, exist_ok=True)
+        os.startfile(d)
+
+    def _download_done(self, btn):
+        try:
+            btn.setEnabled(True)
+            btn.setText('下载并导入')
+        except RuntimeError:
+            pass  # 导入窗已关，按钮随窗口销毁
 
     # 无边框窗口：拖标题栏移动
     def mousePressEvent(self, e):
@@ -1508,34 +1725,32 @@ class SettingsDialog(QDialog):
             self._time_rows.append((ed, btn, field))
             return field, ed
 
-        def commit_single(ed, key, dflt, normalize):
-            """单值框：输入过程中即时落盘；normalize（失焦/回车）时归一化，解析不了回退上次的值。"""
+        def commit_single(ed, key, normalize):
+            """单值框：输入中途能解析才即时落盘；失焦时归一化，解析不了（含清空）就存空。"""
             v = parse_time_text(ed.text())
             if v is None:
                 if not normalize:
                     return
-                v = cfg.data.get(key) or dflt
+                v = ''      # 留空 = 不设这个时间点（面板也就整块不显示倒计时）
             cfg.set(key, v)
             if normalize and ed.text() != v:
                 ed.setText(v)
 
-        def commit_noon(finishing=None):
-            """午休两个框合并成一个 'HH:mm-HH:mm' 落盘；finishing 是失焦的那个框，
-            它解析不了就退回已存区间的对应端，避免半截输入把整个区间写坏。"""
+        def commit_noon(normalize=False):
+            """午休两个框合并成一个 'HH:mm-HH:mm' 落盘：两端都有效才算数，否则（含整体清空）存空。
+            输入中途不写半截状态；失焦才归一化，把解析不了的框清成空，能解析的留着等用户补齐另一端。"""
             a, b = parse_time_text(noon_a.text()), parse_time_text(noon_b.text())
-            if finishing is not None:
-                cur = parse_noon_range(cfg.data.get('off_noon')) or NOON_DEFAULT
-                a, b = a or cur[0], b or cur[1]
-            if not (a and b):
+            ok = bool(a and b)
+            if not ok and not normalize:
                 return
-            cfg.set('off_noon', '%s-%s' % (a, b))
-            if finishing is not None:
-                for ed, v in ((noon_a, a), (noon_b, b)):
+            cfg.set('off_noon', '%s-%s' % (a, b) if ok else '')
+            if normalize:
+                for ed, v in ((noon_a, a or ''), (noon_b, b or '')):
                     if ed.text() != v:
                         ed.setText(v)
 
-        # 午休：开始 – 结束
-        rng = parse_noon_range(cfg.data.get('off_noon')) or NOON_DEFAULT
+        # 午休：开始 – 结束（留空即不设，两个框都空着显示）
+        rng = parse_noon_range(cfg.data.get('off_noon')) or ('', '')
         noon_row = QWidget()
         rb = QHBoxLayout(noon_row)
         rb.setContentsMargins(0, 0, 0, 0)
@@ -1551,14 +1766,14 @@ class SettingsDialog(QDialog):
         form.addRow(row_label('午休时间'), noon_row)
         noon_a.textChanged.connect(lambda _t: commit_noon())
         noon_b.textChanged.connect(lambda _t: commit_noon())
-        noon_a.editingFinished.connect(lambda: commit_noon(noon_a))
-        noon_b.editingFinished.connect(lambda: commit_noon(noon_b))
+        noon_a.editingFinished.connect(lambda: commit_noon(True))
+        noon_b.editingFinished.connect(lambda: commit_noon(True))
 
-        # 下班
-        evening_row, evening = time_field(parse_time_text(cfg.data.get('off_evening') or '18:00') or '18:00')
+        # 下班（同样可留空）
+        evening_row, evening = time_field(parse_time_text(cfg.data.get('off_evening')) or '')
         form.addRow(row_label('下班时间'), evening_row)
-        evening.textChanged.connect(lambda _t: commit_single(evening, 'off_evening', '18:00', False))
-        evening.editingFinished.connect(lambda: commit_single(evening, 'off_evening', '18:00', True))
+        evening.textChanged.connect(lambda _t: commit_single(evening, 'off_evening', False))
+        evening.editingFinished.connect(lambda: commit_single(evening, 'off_evening', True))
 
         # 开机自启
         auto = QCheckBox('登录 Windows 后自动启动')
@@ -1573,11 +1788,15 @@ class SettingsDialog(QDialog):
         form.addRow(sep)
         holiday_row = QHBoxLayout()
         holiday_row.setSpacing(sc(8))
-        for text, fn in (('联网更新', on_fetch), ('导入 JSON…', on_import)):
-            b = QPushButton(text)
-            b.setObjectName('setBtn')
-            b.clicked.connect(fn)
-            holiday_row.addWidget(b)
+        self._on_fetch = on_fetch
+        self.btn_fetch = QPushButton('联网更新')
+        self.btn_fetch.setObjectName('setBtn')
+        self.btn_fetch.clicked.connect(self._fetch_clicked)
+        holiday_row.addWidget(self.btn_fetch)
+        b = QPushButton('导入 JSON…')
+        b.setObjectName('setBtn')
+        b.clicked.connect(on_import)
+        holiday_row.addWidget(b)
         form.addRow(row_label('节假日'), holiday_row)
 
         # 保存按钮（改动即时生效，点击即确认并关闭）
@@ -1592,15 +1811,27 @@ class SettingsDialog(QDialog):
         save_row.addWidget(save)
         lay.addLayout(save_row)
 
-        # 默认停靠在主面板上方右对齐，溢出屏幕上方则改到下方
+        # 默认居中在屏幕可用区（不贴着面板：面板常停右下角，跟着它会被挤到屏幕边上）
+        # 面板在哪个屏幕就居中到哪个屏幕，多显示器下对话框跟人待的那块屏一致
         self.adjustSize()
-        ag = QApplication.primaryScreen().availableGeometry()
-        geo = panel.frameGeometry()
-        x = min(max(geo.right() - self.width(), ag.left()), ag.right() - self.width())
-        y = geo.top() - self.height() - sc(8)
-        if y < ag.top():
-            y = min(geo.bottom() + sc(8), ag.bottom() - self.height())
-        self.move(x, y)
+        scr = QApplication.screenAt(panel.frameGeometry().center()) or QApplication.primaryScreen()
+        ag = scr.availableGeometry()
+        g = self.frameGeometry()
+        g.moveCenter(ag.center())
+        self.move(g.topLeft())
+
+    def _fetch_clicked(self):
+        """联网更新：点击即 loading + 禁用，后台抓取结束后恢复（无论成败，结果看托盘气泡）。"""
+        self.btn_fetch.setEnabled(False)
+        self.btn_fetch.setText('更新中…')
+        self._on_fetch(self._fetch_done)
+
+    def _fetch_done(self):
+        try:
+            self.btn_fetch.setEnabled(True)
+            self.btn_fetch.setText('联网更新')
+        except RuntimeError:
+            pass  # 设置窗已关，按钮随窗口销毁
 
     def _pick_time(self, te, anchor):
         """在时间输入框下方弹出时/分选择层，选中的时间写回输入框（textChanged 即落盘）。"""
@@ -1614,7 +1845,9 @@ class SettingsDialog(QDialog):
         pop.show()
         pop.raise_()           # 设置窗是置顶 Tool 窗，确保弹层压在其上
         pos = anchor.mapToGlobal(QPoint(0, anchor.height() + sc(4)))
-        ag = QApplication.primaryScreen().availableGeometry()
+        # 按锚点所在屏幕的可用区夹取，多显示器下弹层才不会被拉回主屏边缘
+        scr = QApplication.screenAt(anchor.mapToGlobal(anchor.rect().center())) or QApplication.primaryScreen()
+        ag = scr.availableGeometry()
         x = min(pos.x(), ag.right() - pop.width() - sc(4))
         y = min(pos.y(), ag.bottom() - pop.height() - sc(4))
         pop.move(max(x, ag.left()), max(y, ag.top()))
@@ -1661,6 +1894,137 @@ class SettingsDialog(QDialog):
     def mouseReleaseEvent(self, e):
         self._drag = None
         super(SettingsDialog, self).mouseReleaseEvent(e)
+
+
+class AboutDialog(QDialog):
+    """托盘菜单「关于」弹窗：图标 + 简介 + 版本号 + GitHub 链接，样式跟随当前主题。
+    版本号与开源地址取自 version.py（发新版只改那个文件）。"""
+
+    def __init__(self, panel):
+        super(AboutDialog, self).__init__(panel)
+        self.setObjectName('settingsDlg')
+        self.setWindowTitle('关于')
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self._drag = None
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        card = QWidget()
+        card.setObjectName('settingsPanel')
+        root.addWidget(card)
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(sc(16), sc(6), sc(14), sc(14))
+        lay.setSpacing(0)
+
+        # 标题栏（可拖动）
+        self.titlebar = QFrame()
+        self.titlebar.setFixedHeight(sc(34))
+        tb = QHBoxLayout(self.titlebar)
+        tb.setContentsMargins(0, 0, 0, 0)
+        title = QLabel('关于')
+        title.setObjectName('setTitle')
+        tb.addWidget(title)
+        tb.addStretch(1)
+        close = QToolButton()
+        close.setObjectName('closeBtn')
+        close.setText('✕')
+        close.setFixedSize(sc(28), sc(24))
+        close.setToolTip('关闭')
+        close.clicked.connect(self.reject)
+        tb.addWidget(close)
+        lay.addWidget(self.titlebar)
+
+        # 图标 + 名称 / 版本
+        head = QHBoxLayout()
+        head.setContentsMargins(sc(2), sc(4), sc(6), sc(4))
+        head.setSpacing(sc(12))
+        icon = QLabel()
+        icon.setPixmap(make_icon().pixmap(sc(48), sc(48)))
+        icon.setFixedSize(sc(48), sc(48))
+        head.addWidget(icon)
+        info = QVBoxLayout()
+        info.setSpacing(sc(4))
+        name = QLabel('Zviber 桌面日历')
+        name.setObjectName('setTitle')
+        info.addWidget(name)
+        ver = QLabel('版本 v%s' % APP_VERSION)
+        ver.setObjectName('setLabel')
+        info.addWidget(ver)
+        info.addStretch(1)
+        head.addLayout(info, 1)
+        lay.addLayout(head)
+
+        # 简要介绍
+        intro = QLabel('Windows 桌面悬浮面板：日历 + 待办，深色 / 浅色双主题，内置法定节假日与农历。')
+        intro.setObjectName('setLabel')
+        intro.setWordWrap(True)
+        intro.setContentsMargins(sc(2), sc(2), sc(6), sc(6))
+        lay.addWidget(intro)
+
+        # GitHub 地址（可点击跳转）；链接颜色随主题，写在行内样式里（QSS 管不到 <a>）
+        accent = '#0067c0' if resolve_theme(panel._theme) == 'mica' else '#e8a33d'
+        gh = QHBoxLayout()
+        gh.setContentsMargins(sc(2), 0, sc(6), 0)
+        gh.setSpacing(sc(8))
+        gh_label = QLabel('开源地址')
+        gh_label.setObjectName('setLabel')
+        gh.addWidget(gh_label)
+        link = QLabel('<a href="%s" style="color:%s; text-decoration:none;">%s</a>'
+                      % (GITHUB_URL, accent, GITHUB_URL))
+        link.setObjectName('setUrl')
+        link.setOpenExternalLinks(True)
+        link.setCursor(Qt.PointingHandCursor)
+        link.setToolTip('在浏览器中打开')
+        gh.addWidget(link)
+        gh.addStretch(1)
+        lay.addLayout(gh)
+
+        # 右下角关闭按钮
+        btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(0, sc(12), sc(4), 0)
+        btn_row.addStretch(1)
+        done = QPushButton('关闭')
+        done.setObjectName('setSave')
+        done.setCursor(Qt.PointingHandCursor)
+        done.setDefault(True)
+        done.clicked.connect(self.accept)
+        btn_row.addWidget(done)
+        lay.addLayout(btn_row)
+
+        self.setFixedWidth(sc(360))
+        # 与设置窗口一致：默认居中在面板所在屏幕的可用区
+        self.adjustSize()
+        scr = QApplication.screenAt(panel.frameGeometry().center()) or QApplication.primaryScreen()
+        ag = scr.availableGeometry()
+        g = self.frameGeometry()
+        g.moveCenter(ag.center())
+        self.move(g.topLeft())
+
+    def showEvent(self, e):
+        super(AboutDialog, self).showEvent(e)
+        round_corners(self)
+
+    def resizeEvent(self, e):
+        super(AboutDialog, self).resizeEvent(e)
+        round_corners(self)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton and e.pos().y() < self.titlebar.height():
+            self._drag = e.globalPos() - self.frameGeometry().topLeft()
+            e.accept()
+        else:
+            super(AboutDialog, self).mousePressEvent(e)
+
+    def mouseMoveEvent(self, e):
+        if self._drag is not None and e.buttons() & Qt.LeftButton:
+            self.move(e.globalPos() - self._drag)
+            e.accept()
+        else:
+            super(AboutDialog, self).mouseMoveEvent(e)
+
+    def mouseReleaseEvent(self, e):
+        self._drag = None
+        super(AboutDialog, self).mouseReleaseEvent(e)
 
 
 # ---------------- 主窗口 ----------------
@@ -1762,8 +2126,13 @@ class FloatingPanel(QWidget):
         set_num_font(self.num_font)
         # 不用 WA_TranslucentBackground：分层窗口禁用 ClearType，文字灰糊。
         # 不透明窗口 + Win11 DWM 圆角（Win7/10 降级为圆角遮罩），文字锐利度对齐系统组件。
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
-        self._pin = 0   # 固定档位，稍后由 set_pin 按配置恢复（见「固定」一节）
+        # 桌面格子模式：不置顶，可被其它窗口覆盖；移动靠顶部栏（悬浮滑出）或日历左侧时分秒拖拽。
+        # 桌面层级（见 _ensure_band）：属主设为桌面图标窗加入「桌面带」，Win+D 收不走；
+        # z-order 由看门狗维护在桌面带之上、应用窗口之下
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool)
+        self._desk_pinned = False   # True = 已归属桌面带（SHELLDLL_DefView 的属主 popup）
+        self._desk_surface = None   # 探测到的第三方桌面表层（沉底锚点缓存）
+        self._drag = None           # 窗口拖拽偏移（globalPos - topLeft）；None = 未在拖拽
         self.setObjectName('panelRoot')
 
         root = QVBoxLayout(self)
@@ -1780,13 +2149,17 @@ class FloatingPanel(QWidget):
         pl.setContentsMargins(0, 0, 0, 0)
         pl.setSpacing(0)
 
-        # 标题栏
-        self.titlebar = QFrame()
+        # 顶部栏：独立顶层小窗，默认收起。悬浮展开只改栏窗自己的几何——主窗口不重排、
+        # 不重绘，不会抖动。无属主（子窗口永远压在父窗口之上）：栏窗要待在面板之下，
+        # 底边探进面板顶边下方被遮住，才能和面板合成一张卡片；显隐由面板手动同步。
+        self.titlebar = QFrame(None, Qt.FramelessWindowHint | Qt.Tool)
         self.titlebar.setObjectName('titlebar')
-        self.titlebar.setFixedHeight(sc(42))
+        self.titlebar.installEventFilter(self)
         tb = QHBoxLayout(self.titlebar)
         tb.setContentsMargins(sc(14), sc(8), sc(10), sc(2))
         tb.setSpacing(6)
+        # 栏窗高度由展开动画逐帧设置，不能被子控件的最小高度顶住
+        tb.setSizeConstraint(QLayout.SetNoConstraint)
 
         self.tab_box = QFrame()
         self.tab_box.setObjectName('tabBox')
@@ -1805,12 +2178,6 @@ class FloatingPanel(QWidget):
         tb.addWidget(self.tab_box)
         tb.addStretch(1)
 
-        self.btn_pin = QToolButton()
-        self.btn_pin.setObjectName('iconBtn')
-        self.btn_pin.setFixedSize(sc(30), sc(26))
-        self.btn_pin.setIconSize(QSize(sc(14), sc(14)))
-        self.btn_pin.clicked.connect(self._cycle_pin)
-        tb.addWidget(self.btn_pin)
         self.btn_settings = QToolButton()
         self.btn_settings.setObjectName('iconBtn')
         self.btn_settings.setText('⚙')
@@ -1822,15 +2189,22 @@ class FloatingPanel(QWidget):
         self.btn_close.setText('✕')
         self.btn_close.setFixedSize(sc(30), sc(26))
         self.btn_close.setToolTip('关闭（托盘可重新打开）')
-        self.btn_close.clicked.connect(self.hide)
+        self.btn_close.clicked.connect(self.close_panel)
         tb.addWidget(self.btn_settings)
         tb.addWidget(self.btn_close)
-        pl.addWidget(self.titlebar)
+        self._tb_anim = QVariantAnimation(self)
+        self._tb_anim.setDuration(160)
+        self._tb_anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._tb_anim.valueChanged.connect(self._set_tb_height)
+        self._tb_anim.finished.connect(self._tb_anim_done)
 
         # 内容：单栏（堆叠）/ 双栏（并排）
         self.cal = CalendarWidget(hstore, cfg, resolve_theme(cfg.theme))
         self.todo = TodoWidget(tstore)
         self.todo.set_theme(resolve_theme(cfg.theme))
+        # 顶部栏平时隐藏：日历左侧的时分秒 / 日期行充当窗口拖拽把手
+        self.cal.clock_hm.installEventFilter(self)
+        self.cal.sub.installEventFilter(self)
 
         self.single_stack = _SlideStack()
         self.single_page = QWidget()
@@ -1856,12 +2230,98 @@ class FloatingPanel(QWidget):
         self._theme = cfg.theme
         self._icon_dir = _indicator_icons()
         self.apply_theme(cfg.theme, save=False)
-        self.set_pin(cfg.pin or 0, save=False)   # 恢复上次的固定档位
         if cfg.dual:
             self.set_dual(True, save=False)
         else:
             self.set_dual(False, save=False)
             self.set_tab(int(cfg.tab or 0), save=False)
+
+        # 桌面层级：归属桌面带（Win+D 免疫）+ 看门狗维护 z-order 与挂接健康
+        self._ensure_band()
+        self._sink_timer = QTimer(self)
+        self._sink_timer.timeout.connect(self._desktop_mode_tick)
+        self._sink_timer.start(500)   # 桌面整理软件会在 Win+D 等时机重排表层，要快些跟上
+        QApplication.instance().focusChanged.connect(self._grab_input_focus)
+        QTimer.singleShot(800, lambda: sink_to_desktop(self))   # 首次沉底
+
+    # --- 桌面层级 ---
+    def _ensure_band(self):
+        """确保面板归属桌面带（属主 = 桌面图标窗 SHELLDLL_DefView）。挂接丢失时补挂。"""
+        hwnd = int(self.winId())
+        progman = _u32.FindWindowW('Progman', None)
+        if not progman:
+            return
+        if _u32.GetAncestor(hwnd, _GA_ROOT) != progman:
+            self._desk_pinned = pin_to_desktop(self)
+
+    def _desktop_mode_tick(self):
+        hwnd = int(self.winId())
+        if not _u32.IsWindow(hwnd):
+            QApplication.instance().quit()   # 桌面（DefView）被销毁会连坐销毁属主窗口，无法恢复
+            return
+        self._ensure_band()
+        skip = (hwnd, int(self.titlebar.winId()))
+        extra = []
+        if self.isVisible():
+            extra.append((self.x() + self.width() // 2, self.y() + self.height() // 2))
+        self._desk_surface, _t = probe_desktop(skip=skip, extra=extra)
+        covered = self._covered_by_surface()
+        _dbg('tick: pinned=%s surface=%s covered=%s active=%s undermouse=%s' % (
+            self._desk_pinned, self._desk_surface, covered, self.isActiveWindow(), self.underMouse()))
+        if covered:
+            sink_to_desktop(self, self._desk_surface)   # 被桌面表层压住：无条件抬上来
+        else:
+            self._ensure_desktop_level()
+
+    def _covered_by_surface(self):
+        """面板中心被桌面整理软件的表层压住（看不见也点不到）的判定。
+        此状态绝非用户所愿，必须无条件抬回——不能走 _ensure_desktop_level 的空闲守卫
+        （光标停在面板上时 underMouse 会因收不到 Leave 事件而过期为真，把沉底永久挡住）。"""
+        if not self.isVisible():
+            return False
+        h = _u32.WindowFromPoint(wintypes.POINT(self.x() + self.width() // 2,
+                                                self.y() + self.height() // 2))
+        mine = (int(self.winId()), int(self.titlebar.winId()))
+        sw, sh = _u32.GetSystemMetrics(0), _u32.GetSystemMetrics(1)
+        while h:
+            if h in mine or _class_name(h) in _PROG_FAMILY:
+                return False
+            if _is_desktop_surface(h, sw, sh):
+                return True
+            h = _u32.GetParent(h)
+        return False
+
+    def _grab_input_focus(self, _old, new):
+        """桌面带窗口的键盘焦点兜底（Win7/10 用；Win11 实测点击即自然获得焦点）。
+        焦点不在面板上时不动。"""
+        if not self._desk_pinned or new is None or new.window() is not self:
+            return
+        try:
+            hwnd = int(self.winId())
+            cur = ctypes.windll.kernel32.GetCurrentThreadId()
+            tid = _u32.GetWindowThreadProcessId(_u32.GetForegroundWindow(), None)
+            if tid and tid != cur:
+                _u32.AttachThreadInput(cur, tid, True)
+                _u32.SetFocus(hwnd)
+                _u32.AttachThreadInput(cur, tid, False)
+        except Exception:
+            pass
+
+
+    def event(self, e):
+        if e.type() == QEvent.WindowDeactivate:
+            QTimer.singleShot(300, self._ensure_desktop_level)   # 失焦后压回桌面层
+        return super(FloatingPanel, self).event(e)
+
+    def _ensure_desktop_level(self):
+        """面板被点击激活后会浮到普通窗口之上；空闲（未激活/未悬停/未拖拽）时压回桌面层，
+        让其它窗口可以正常遮挡它。正在使用时不动，避免打字/拖拽途中被其它窗口盖住。"""
+        if (not self.isVisible() or self.isActiveWindow() or self.underMouse()
+                or self._drag is not None or self.titlebar.underMouse()):
+            return
+        sink_to_desktop(self, self._desk_surface)
+        if self.titlebar.isVisible():
+            _place_below(self.titlebar, self)   # 面板沉层后栏窗要重新压回它正下方
 
     # --- 布局模式 ---
     def set_tab(self, idx, save=True):
@@ -1904,38 +2364,6 @@ class FloatingPanel(QWidget):
         if save:
             self.cfg.set('dual', dual)
 
-    # --- 固定 ---
-    def _cycle_pin(self):
-        self.set_pin(self._pin + 1)
-
-    def set_pin(self, state, save=True):
-        """三档循环：0 未固定（可拖动、置顶）→ 1 钉在桌面（不可移动、可被其它窗口覆盖）
-        → 2 始终置顶（不可移动）。切换档位要改窗口标志，而改标志会销毁并重建原生窗口，
-        所以这里自己负责按原位置、原显隐状态重新 show（showEvent 会重贴圆角）。"""
-        try:
-            self._pin = int(state) % 3
-        except (TypeError, ValueError):
-            self._pin = 0
-        flags = Qt.FramelessWindowHint | Qt.Tool
-        if self._pin != 1:
-            flags |= Qt.WindowStaysOnTopHint    # 「钉在桌面」这一档不置顶，才会被别的窗口盖住
-        pos, was_visible = self.pos(), self.isVisible()
-        self.setWindowFlags(flags)
-        self.move(pos)
-        if was_visible:
-            self.show()
-        self._refresh_pin_icon()
-        self.btn_pin.setToolTip(PIN_TIPS[self._pin])
-        if save:
-            self.cfg.set('pin', self._pin)
-
-    def _refresh_pin_icon(self):
-        """图钉配色跟着主题走：未固定用弱化色，钉住用强调色，实心表示始终置顶。"""
-        real = resolve_theme(self._theme)
-        if self._pin == 0:
-            self.btn_pin.setIcon(make_pin_icon(DUE_ICON_COLORS.get(real, '#8a8a90')))
-        else:
-            self.btn_pin.setIcon(make_pin_icon(ACCENT_COLORS.get(real, '#e8a33d'), self._pin == 2))
 
     # --- 主题 ---
     def apply_theme(self, key, save=True):
@@ -1944,7 +2372,6 @@ class FloatingPanel(QWidget):
         QApplication.instance().setStyleSheet(build_qss(real, self.cn_font, self.num_font, ui_scale(), self._icon_dir))
         self.cal.set_theme(real)
         self.todo.set_theme(real)
-        self._refresh_pin_icon()
         if save:
             self.cfg.set('theme', key)
 
@@ -1953,9 +2380,28 @@ class FloatingPanel(QWidget):
         super(FloatingPanel, self).showEvent(e)
         self._round_corners()
 
+    def hideEvent(self, e):
+        self.titlebar.hide()   # 栏窗无属主，不随面板隐藏，手动带上
+        super(FloatingPanel, self).hideEvent(e)
+
+    def moveEvent(self, e):
+        super(FloatingPanel, self).moveEvent(e)
+        self._sync_bar()
+
     def resizeEvent(self, e):
         super(FloatingPanel, self).resizeEvent(e)
+        self._sync_bar()
         self._round_corners()
+
+    def _sync_bar(self):
+        """栏窗贴住面板顶边（底边探进一个圆角半径，藏在面板下面）：拖拽移动、
+        单双栏变宽时跟随；遮罩随尺寸重贴；z-order 重新压回面板之下。"""
+        if self.titlebar.isVisible():
+            ov = int(bar_corner_radius(self.titlebar))
+            self.titlebar.setGeometry(self.x(), self.y() - self.titlebar.height() + ov,
+                                      self.width(), self.titlebar.height())
+            round_bar_top(self.titlebar)
+            _place_below(self.titlebar, self)
 
     def _round_corners(self):
         round_corners(self)
@@ -1980,34 +2426,89 @@ class FloatingPanel(QWidget):
         y = min(max(self.y(), ag.top()), ag.bottom() - 60)
         self.move(x, y)
 
-    def mousePressEvent(self, e):
-        # 固定后不可移动（固定档位由标题栏的图钉按钮切换）
-        if e.button() == Qt.LeftButton and not self._pin \
-                and e.pos().y() < SHADOW + self.titlebar.height():
-            self._drag = e.globalPos() - self.frameGeometry().topLeft()
-            e.accept()
-        else:
-            super(FloatingPanel, self).mousePressEvent(e)
+    # --- 顶部栏：默认收起，悬浮时从面板顶边向上展开 ---
+    def enterEvent(self, e):
+        self._slide_titlebar(True)
+        super(FloatingPanel, self).enterEvent(e)
 
-    def mouseMoveEvent(self, e):
-        if getattr(self, '_drag', None) is not None and e.buttons() & Qt.LeftButton:
-            self.move(e.globalPos() - self._drag)
-            e.accept()
-        else:
-            super(FloatingPanel, self).mouseMoveEvent(e)
+    def leaveEvent(self, e):
+        self._schedule_hover_check()
+        super(FloatingPanel, self).leaveEvent(e)
 
-    def mouseReleaseEvent(self, e):
-        if getattr(self, '_drag', None) is not None:
+    def _schedule_hover_check(self):
+        # 光标从面板挪到展开栏会先触发面板 leave：等一拍看落点再决定收不收
+        QTimer.singleShot(150, self._check_hover)
+
+    def _check_hover(self):
+        pos = QCursor.pos()
+        if not self.geometry().contains(pos) and not self.titlebar.geometry().contains(pos):
+            self._slide_titlebar(False)
+
+    def _slide_titlebar(self, on):
+        """栏窗高 0↔H 动画（从当前高度续滑，中途反向不打断）；只改栏窗几何，主窗口不动。"""
+        if on and not self.isVisible():
+            return   # 面板已收起就不再弹出栏窗（面板隐藏后光标划过原位置也会触发栏窗 Enter）
+        self._tb_anim.stop()
+        ov = int(bar_corner_radius(self.titlebar))
+        cur = self.titlebar.height() - ov if self.titlebar.isVisible() else 0   # 栏高含底边探进量
+        self._tb_anim.setStartValue(max(0, cur))
+        self._tb_anim.setEndValue(sc(42) if on else 0)
+        if on:
+            self.titlebar.show()
+            _place_below(self.titlebar, self)   # 栏窗待在面板之下，探进的底边才被遮住
+        self._tb_anim.start()
+
+    def _set_tb_height(self, h):
+        # 可见高度 h：底边探进面板一个圆角半径（被面板遮住，不露接缝）；
+        # 动画中高度每帧都变，遮罩跟着重贴
+        h = int(h)
+        ov = int(bar_corner_radius(self.titlebar))
+        self.titlebar.setGeometry(self.x(), self.y() - h, self.width(), h + ov)
+        round_bar_top(self.titlebar)
+
+    def _tb_anim_done(self):
+        if self._tb_anim.endValue() == 0:
+            self.titlebar.hide()
+
+    def eventFilter(self, obj, ev):
+        """时分秒 / 日期行和展开的顶部栏都是窗口拖拽把手；栏窗的悬浮进出也在这里接力。"""
+        t = ev.type()
+        if obj is self.titlebar and t == QEvent.WindowActivate:
+            _place_below(self.titlebar, self)   # 激活会浮到面板之上，压回去
+            return False
+        if obj is self.titlebar and t == QEvent.Enter:
+            self._slide_titlebar(True)
+            return False
+        if obj is self.titlebar and t == QEvent.Leave:
+            self._schedule_hover_check()
+            return False
+        if t == QEvent.MouseButtonPress and ev.button() == Qt.LeftButton:
+            self._drag = ev.globalPos() - self.frameGeometry().topLeft()
+            return True
+        if t == QEvent.MouseMove and self._drag is not None and ev.buttons() & Qt.LeftButton:
+            self.move(ev.globalPos() - self._drag)
+            return True
+        if t == QEvent.MouseButtonRelease and self._drag is not None:
             self._drag = None
-            ag = QApplication.primaryScreen().availableGeometry()
-            self.cfg.data['pos_screen'] = [ag.width(), ag.height()]
-            self.cfg.set('pos', [self.x(), self.y()])
-        super(FloatingPanel, self).mouseReleaseEvent(e)
+            self._save_pos()
+            return True
+        return super(FloatingPanel, self).eventFilter(obj, ev)
+
+    def _save_pos(self):
+        ag = QApplication.primaryScreen().availableGeometry()
+        self.cfg.data['pos_screen'] = [ag.width(), ag.height()]
+        self.cfg.set('pos', [self.x(), self.y()])
 
     # --- 其他 ---
+    def close_panel(self):
+        """收起面板：顶部栏是独立顶层小窗，必须跟着一起收（否则会残留在屏幕上）。"""
+        self._tb_anim.stop()
+        self.titlebar.hide()
+        self.hide()
+
     def toggle_visible(self):
         if self.isVisible():
-            self.hide()
+            self.close_panel()
         else:
             self.show()
             self.raise_()
