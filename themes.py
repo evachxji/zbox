@@ -43,17 +43,18 @@ QToolButton#todayBtn {
 }
 QToolButton#todayBtn:hover { background: rgba(232,163,61,30); }
 QFrame#clockBar { background: #e8a33d; border: none; border-radius: 1.5px; margin: 5px 0px; }
-QLabel#clockBig { color: #f0ede6; font: 700 40px "%NUM%"; }
-QLabel#clockSec { color: #f0ede6; font: 700 16px "%NUM%"; padding-bottom: 5px; }
+QLabel#clockBig { color: #f0ede6; font: 500 40px "%NUM%"; }
 QLabel#calSub { color: #6d6a62; font: 10.5px "%CN%"; }
 QLabel#calSub[accent="true"] { color: #e8a33d; }
 QLabel#weekLabel { color: #6d6a62; font: 600 10px "%CN%"; }
 QFrame#dayCell { border-radius: 10px; background: transparent; }
 QFrame#dayCell:hover { background: rgba(255,255,255,14); }
-QLabel#dayNum { color: #e8e6e1; font: 600 20px "%NUM%"; background: transparent; border-radius: 15px; }
+QLabel#dayNum { color: #e8e6e1; background: transparent; border-radius: 17px; }
 QFrame#dayCell[dim="true"] QLabel#dayNum { color: #4c4a45; }
 QFrame#dayCell[we="true"] QLabel#dayNum { color: #8f8b81; }
 QFrame#dayCell[dim="true"][we="true"] QLabel#dayNum { color: #454340; }
+QFrame#dayCell[sel="true"] { background: rgba(232,163,61,36); }
+QFrame#dayCell[sel="true"] QLabel#dayNum { color: #e8a33d; }
 QFrame#dayCell[today="true"] QLabel#dayNum { background: #e8a33d; color: #1a1610; font-weight: 700; }
 QLabel#daySub { color: #6d6a62; font: 9px "%CN%"; }
 QLabel#daySub[fest="true"] { color: #e8a33d; }
@@ -193,18 +194,19 @@ QToolButton#todayBtn {
 }
 QToolButton#todayBtn:hover { background: rgba(0,103,192,26); }
 QFrame#clockBar { background: #0067c0; border: none; border-radius: 1.5px; margin: 5px 0px; }
-QLabel#clockBig { color: #1b1b1f; font: 700 38px "%NUM%"; }
-QLabel#clockSec { color: #1b1b1f; font: 700 15px "%NUM%"; padding-bottom: 5px; }
+QLabel#clockBig { color: #1b1b1f; font: 500 40px "%NUM%"; }
 QLabel#calSub { color: #8a8a90; font: 10.5px "%CN%"; }
 QLabel#calSub[accent="true"] { color: #0067c0; }
 QLabel#weekLabel { color: #8a8a90; font: 600 10px "%CN%"; }
 QLabel#weekLabel[we="true"] { color: #c94f4f; }
 QFrame#dayCell { border-radius: 8px; background: transparent; }
 QFrame#dayCell:hover { background: rgba(0,0,0,13); }
-QLabel#dayNum { color: #1b1b1f; font: 600 20px "%NUM%"; background: transparent; border-radius: 15px; }
+QLabel#dayNum { color: #1b1b1f; background: transparent; border-radius: 17px; }
 QFrame#dayCell[dim="true"] QLabel#dayNum { color: #b4b4ba; }
 QFrame#dayCell[we="true"] QLabel#dayNum { color: #c94f4f; }
 QFrame#dayCell[dim="true"][we="true"] QLabel#dayNum { color: #dcb0b0; }
+QFrame#dayCell[sel="true"] { background: rgba(0,103,192,22); }
+QFrame#dayCell[sel="true"] QLabel#dayNum { color: #0067c0; }
 QFrame#dayCell[today="true"] QLabel#dayNum { background: #0067c0; color: #ffffff; font-weight: 700; }
 QLabel#daySub { color: #9a9aa0; font: 9px "%CN%"; }
 QLabel#daySub[fest="true"] { color: #0067c0; font-weight: 600; }
@@ -328,6 +330,11 @@ def build_qss(key, cn_font, num_font, scale=1.0):
             _PX_RE = re.compile(r'(\d+(?:\.\d+)?)px')
         qss = _PX_RE.sub(lambda m: '%gpx' % (round(float(m.group(1)) * scale, 2)), qss)
     return qss
+
+
+
+
+
 
 
 

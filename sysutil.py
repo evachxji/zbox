@@ -19,12 +19,15 @@ def appdata_dir():
 
 
 def launcher_cmd(toggle=False):
-    """优先用 pythonw.exe 实现无窗口静默运行。"""
-    exe = os.path.join(os.path.dirname(sys.executable), 'pythonw.exe')
-    if not os.path.exists(exe):
-        exe = sys.executable
-    script = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'main.pyw'))
-    cmd = '"%s" "%s"' % (exe, script)
+    """冻结为 exe 时直接启动自身；源码运行优先用 pythonw.exe 实现无窗口静默。"""
+    if getattr(sys, 'frozen', False):
+        cmd = '"%s"' % sys.executable
+    else:
+        exe = os.path.join(os.path.dirname(sys.executable), 'pythonw.exe')
+        if not os.path.exists(exe):
+            exe = sys.executable
+        script = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'main.pyw'))
+        cmd = '"%s" "%s"' % (exe, script)
     return cmd + (' --toggle' if toggle else '')
 
 

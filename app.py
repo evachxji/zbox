@@ -7,7 +7,7 @@ import sys
 from datetime import date, datetime, timedelta
 
 from PyQt5.QtCore import (Qt, QTimer, QSize, QPoint, QPointF, QRectF, QDate, QTime,
-                          pyqtSignal, QEvent, QPropertyAnimation, QEasingCurve, pyqtProperty)
+                          pyqtSignal, QEvent, QPropertyAnimation, QEasingCurve)
 from PyQt5.QtGui import (QFont, QFontDatabase, QPainter, QColor, QPixmap, QIcon, QPainterPath,
                          QRegion, QPen)
 from PyQt5.QtWidgets import (QWidget, QFrame, QLabel, QToolButton, QVBoxLayout, QHBoxLayout,
@@ -67,6 +67,16 @@ def make_icon():
 
 
 DUE_ICON_COLORS = {'nocturne': '#8d8a82', 'mica': '#8a8a90'}
+
+
+def _dbg(msg):
+    """临时调试：记录日期按钮点击链路。定位完成后移除。"""
+    try:
+        p = os.path.join(os.environ.get('APPDATA', '.'), 'ZviberPanel', 'debug_due.log')
+        with open(p, 'a', encoding='utf-8') as f:
+            f.write('%s %s\n' % (datetime.now().strftime('%H:%M:%S.%f')[:-3], msg))
+    except Exception:
+        pass
 
 
 def make_cal_icon(color):
@@ -144,14 +154,30 @@ class Config(object):
 
 # ---------------- 日历 ----------------
 
+# 日历数字字体：Qt 用 pixelSize + weight 精确控制，对齐 Win11 日历（字形高 21px / Medium）
+_NUM_FONT = {'name': None, 'size': 19, 'weight': 50}
+
+
+def set_num_font(name):
+    _NUM_FONT['name'] = name
+
+
 class DayCell(QFrame):
+    clicked = pyqtSignal()
+
     def __init__(self, parent=None):
         super(DayCell, self).__init__(parent)
         self.setObjectName('dayCell')
+        self.date = None
         self.num = QLabel(self)
         self.num.setObjectName('dayNum')
         self.num.setAlignment(Qt.AlignCenter)
-        self.num.setFixedSize(sc(30), sc(30))
+        self.num.setFixedSize(sc(38), sc(38))
+        if _NUM_FONT['name']:
+            f = QFont(_NUM_FONT['name'])
+            f.setPixelSize(sc(_NUM_FONT['size']))
+            f.setWeight(_NUM_FONT['weight'])
+            self.num.setFont(f)
         self.sub = QLabel(self)
         self.sub.setObjectName('daySub')
         self.sub.setAlignment(Qt.AlignCenter)
@@ -166,15 +192,19 @@ class DayCell(QFrame):
         lay.addWidget(self.num, 0, Qt.AlignHCenter)
         lay.addWidget(self.sub, 0, Qt.AlignHCenter)
         lay.addStretch(1)
+        for w in (self.num, self.sub, self.badge):
+            w.setAttribute(Qt.WA_TransparentForMouseEvents)  # 点击穿透到格子本身
 
     def resizeEvent(self, e):
         super(DayCell, self).resizeEvent(e)
         w = self.badge.width()
         self.badge.setGeometry(self.width() - w - sc(4), sc(4), w, w)
 
-    def set_day(self, d, dim, store):
+    def set_day(self, d, dim, store, sel=False):
         today = date.today()
+        self.date = d
         self.setProperty('dim', 'true' if dim else 'false')
+        self.setProperty('sel', 'true' if sel else 'false')
         self.setProperty('we', 'true' if d.weekday() >= 5 else 'false')
         self.setProperty('today', 'true' if d == today else 'false')
         self.num.setText(str(d.day))
@@ -196,12 +226,38 @@ class DayCell(QFrame):
             w.style().polish(w)
 
 
+def _page_pixmap(page):
+    """抓取页面为透明底位图。QWidget.grab() 对非半透明控件会用调色板底色（浅色）填充，
+    深色主题下平移时会闪白，所以手动预填透明再 render。"""
+    dpr = page.devicePixelRatioF()
+    pm = QPixmap(page.size() * dpr)
+    pm.setDevicePixelRatio(dpr)
+    pm.fill(Qt.transparent)
+    page.setAttribute(Qt.WA_TranslucentBackground)  # 否则 render 按不透明控件填系统底色
+    page.render(pm)
+    page.setAttribute(Qt.WA_TranslucentBackground, False)
+    return pm
+
+
 class _GridViewport(QWidget):
-    """日历网格视口：裁剪滑动中的月页面，尺寸变化时通知日历重新排页。"""
+    """日历网格视口：裁剪滑动中的月页面。平移期间改画页面位图缓存，
+    每帧只 blit 三张图（亚毫秒），避免 126 个 QSS 格子逐帧重绘。"""
 
     def __init__(self, parent=None):
         super(_GridViewport, self).__init__(parent)
         self.on_resize = None
+        self.pixmaps = None  # {页序: QPixmap}；None = 显示活页面（可悬停/点击）
+        self.pan_off = 0.0
+
+    def paintEvent(self, e):
+        if self.pixmaps is None:
+            super(_GridViewport, self).paintEvent(e)
+            return
+        p = QPainter(self)
+        h = self.height()
+        for d, pm in self.pixmaps.items():
+            p.drawPixmap(0, int(round(d * h + self.pan_off)), pm)
+        p.end()
 
     def resizeEvent(self, e):
         super(_GridViewport, self).resizeEvent(e)
@@ -210,28 +266,34 @@ class _GridViewport(QWidget):
 
 
 class _GridPage(QWidget):
-    """单月视图：42 个 DayCell 组成的网格，作为整体在视口内滑动。可原地重建内容。"""
+    """六周条带：连续周序列上 42 个 DayCell 组成的一段。条带间首尾相接、无重复周，
+    平移停在任意位置都不会出现跨页重复行。可原地重建内容。"""
 
     def __init__(self, store, parent=None):
         super(_GridPage, self).__init__(parent)
         self.store = store
-        self.d_off = 0  # 相对当前月的页序：-1 上月 / 0 本月 / 1 下月
+        self.on_day_click = None
+        self.start = None  # 本段第一周的周一
         self._grid = QGridLayout(self)
         self._grid.setSpacing(0)
         self._grid.setContentsMargins(0, 0, 0, 0)
 
-    def build(self, year, month, d_off):
-        self.d_off = d_off
+    def build(self, start, selected=None, dim_month=None):
+        self.start = start
         while self._grid.count():
             it = self._grid.takeAt(0)
             if it.widget():
+                it.widget().hide()  # 立即隐藏，避免等待 deleteLater 期间与新格子重叠
                 it.widget().deleteLater()
-        first = date(year, month, 1)
-        start = first.toordinal() - first.weekday()  # 周一开头
+        if dim_month is None:  # 无显示月上下文时的临时基准，随后由 _update_sub 统一校正
+            ref = start + timedelta(days=17)
+            dim_month = (ref.year, ref.month)
         for i in range(42):
-            d = date.fromordinal(start + i)
+            d = start + timedelta(days=i)
             cell = DayCell()
-            cell.set_day(d, d.month != month, self.store)
+            cell.set_day(d, (d.year, d.month) != dim_month, self.store, d == selected)
+            if self.on_day_click:
+                cell.clicked.connect(lambda c=cell: self.on_day_click(c.date))
             self._grid.addWidget(cell, i // 7, i % 7)
 
 
@@ -260,17 +322,13 @@ class CalendarWidget(QWidget):
         bar.setFixedWidth(sc(3))
         self.clock_hm = QLabel()
         self.clock_hm.setObjectName('clockBig')
-        self.clock_s = QLabel()
-        self.clock_s.setObjectName('clockSec')
-        self.clock_s.setAlignment(Qt.AlignCenter)
-        clock_row.addWidget(bar)
-        clock_row.addWidget(self.clock_hm)
-        clock_row.addWidget(self.clock_s, 0, Qt.AlignBottom)
-        clock_row.addStretch(1)
-        left.addLayout(clock_row)
         self.sub = QLabel()
         self.sub.setObjectName('calSub')
-        left.addWidget(self.sub)
+        clock_row.addWidget(bar)
+        clock_row.addWidget(self.clock_hm)
+        clock_row.addWidget(self.sub, 0, Qt.AlignBottom)
+        clock_row.addStretch(1)
+        left.addLayout(clock_row)
         head.addLayout(left, 0)
         head.addStretch(1)
         self.btn_today = QToolButton()
@@ -297,13 +355,24 @@ class CalendarWidget(QWidget):
         self.viewport = _GridViewport()
         root.addWidget(self.viewport, 1)
         self.viewport.on_resize = self._layout_pages
-        self._pages = {}      # 上/当前/下三个月页面：{-1, 0, 1} -> _GridPage
+        self._pages = {}      # 上/当前/下三个条带：{-1, 0, 1} -> _GridPage
         self._off = 0.0       # 平移偏移（像素）：>0 内容下移（往上月），<0 内容上移（往下月）
-        self._snap = None     # 进行中的吸附动画
-        self._settle = QTimer(self)  # 滚轮停手判定
+        self._selected = None  # 单击选中的日期
+        self._dim_month = None  # 灰色显示当前依据的 (年, 月)，跟随视口显示月
+        self._dim_dirty = False  # 置灰滞后标记：平移中只记账，停手时一次性重刷
+        self._panning = False  # 平移中（画位图缓存）
+        self._drag_y = None    # 鼠标拖拽起点（globalY）；None = 未按下
+        self._dragging = False # 是否已越过拖拽阈值
+        self._press_y = 0
+        self._settle = QTimer(self)  # 滚动停手判定：停手后切回活页面
         self._settle.setSingleShot(True)
-        self._settle.setInterval(150)
-        self._settle.timeout.connect(self._settle_snap)
+        self._settle.setInterval(200)
+        self._settle.timeout.connect(self._end_pan)
+        self._glide_left = 0.0  # 滚轮平滑动画的剩余待滑距离（像素，与偏移回绕无关）
+        self._glide_vel = 0.0   # 当前滑动速度（像素/帧），起步加速段 = 阻尼感
+        self._glide = QTimer(self)  # 普通滚轮离散步进 -> 带阻尼的连续滑动（触摸板不走动画）
+        self._glide.setInterval(15)
+        self._glide.timeout.connect(self._glide_step)
 
         self._clock = QTimer(self)
         self._clock.timeout.connect(self._tick)
@@ -315,21 +384,50 @@ class CalendarWidget(QWidget):
 
     def _tick(self):
         now = datetime.now()
-        self.clock_hm.setText(now.strftime('%H:%M'))
-        self.clock_s.setText(now.strftime(':%S'))
+        self.clock_hm.setText(now.strftime('%H:%M:%S'))
         self._update_sub()
+
+    def _apply_dim(self):
+        """按 _dim_month 统一刷新所有格子的灰色显示（非当月置灰）。"""
+        self._dim_dirty = False
+        y, m = self._dim_month
+        for page in self._pages.values():
+            for cell in page.findChildren(DayCell):
+                dim = 'true' if (cell.date.year, cell.date.month) != (y, m) else 'false'
+                if cell.property('dim') != dim:
+                    cell.setProperty('dim', dim)
+                    for w in (cell, cell.num, cell.sub):  # 子孙选择器依赖祖先属性，需一并重刷
+                        w.style().unpolish(w)
+                        w.style().polish(w)
+
+    def _visible_month(self):
+        """视口垂直中线所在周的年月（以该周周四定月），随平移位置变化。"""
+        h = self.viewport.height()
+        if not self._pages or self._pages[0].start is None or h <= 0:
+            return self.year, self.month
+        r = int((h / 2.0 - self._off) // (h / 6.0))  # 中线所在行（相对当前段首周）
+        d = self._pages[0].start + timedelta(days=7 * r + 3)
+        return d.year, d.month
 
     def _update_sub(self):
         t = date.today()
-        self.btn_today.setVisible((self.year, self.month) != (t.year, t.month))
-        if (self.year, self.month) != (t.year, t.month):
-            self.sub.setText('%d年%d月' % (self.year, self.month))
-            self.sub.setProperty('accent', 'true')
-        else:
-            self.sub.setText(self._countdown_text(t))
-            self.sub.setProperty('accent', 'false')
-        self.sub.style().unpolish(self.sub)
-        self.sub.style().polish(self.sub)
+        y, m = self._visible_month()
+        if (y, m) != self._dim_month:  # 显示月变化：置灰滞后到停手（平移中逐帧重刷样式会卡）
+            self._dim_month = (y, m)
+            self._dim_dirty = True
+            if not self._panning:
+                self._apply_dim()
+        vis = (y, m) != (t.year, t.month)
+        if self.btn_today.isVisible() != vis:
+            self.btn_today.setVisible(vis)
+        txt = ('%d年%d月' % (y, m)) if vis else self._countdown_text(t)
+        if self.sub.text() != txt:
+            self.sub.setText(txt)
+        accent = 'true' if vis else 'false'
+        if self.sub.property('accent') != accent:
+            self.sub.setProperty('accent', accent)
+            self.sub.style().unpolish(self.sub)
+            self.sub.style().polish(self.sub)
 
     def _countdown_text(self, t):
         """距离下一个下班节点（午休/晚上）的倒计时，休息日不显示。"""
@@ -355,28 +453,28 @@ class CalendarWidget(QWidget):
             lb.setText(txt)
 
     def refresh(self):
-        """即时重建三个月页面并归零偏移（节假日更新、跨天、回到今天），无动画。"""
-        self._stop_snap()
+        """即时重建三个条带页面并归零偏移（节假日更新、跨天、回到今天），无动画。"""
         self._settle.stop()
+        self._glide.stop()
+        self._end_pan()
         self._off = 0.0
+        self._glide_left = 0.0
+        self._glide_vel = 0.0
         if not self._pages:
             for d in (-1, 0, 1):
                 page = _GridPage(self.store, self.viewport)
+                page.on_day_click = self._select_day
                 page.show()
                 self._pages[d] = page
+        first = date(self.year, self.month, 1)
+        anchor = first - timedelta(days=first.weekday())  # 当前月 1 日所在周的周一
         for d in (-1, 0, 1):
-            y, m = self._month_at(d)
-            self._pages[d].build(y, m, d)
+            self._pages[d].build(anchor + timedelta(days=42 * d), self._selected, self._dim_month)
         self._update_sub()
         self._layout_pages()
 
-    def _month_at(self, n):
-        """当前月偏移 n 个月后的 (年, 月)。"""
-        m = self.month + n
-        return self.year + (m - 1) // 12, (m - 1) % 12 + 1
-
     def _layout_pages(self):
-        """按当前偏移摆放三个月页面：上月在视口上方，下月在下方。"""
+        """按当前偏移摆放三个条带：上一段在视口上方，下一段在下方。"""
         if not self._pages:
             return
         w, h = self.viewport.width(), self.viewport.height()
@@ -384,87 +482,147 @@ class CalendarWidget(QWidget):
             page.setGeometry(0, int(round(d * h + self._off)), w, h)
 
     def _recenter(self, n):
-        """当前月向 n 方向换一个月（n=+1 下月 / -1 上月），轮换并回收页面。"""
-        self.year, self.month = self._month_at(n)
+        """向 n 方向滚动一个条带（n=+1 向后 / -1 向前），轮换并回收页面。"""
         if n > 0:
             gone = self._pages[-1]
             self._pages = {-1: self._pages[0], 0: self._pages[1], 1: gone}
-            y, m = self._month_at(1)
-            gone.build(y, m, 1)
+            gone.build(self._pages[0].start + timedelta(days=42), self._selected, self._dim_month)
         else:
             gone = self._pages[1]
             self._pages = {-1: gone, 0: self._pages[-1], 1: self._pages[0]}
-            y, m = self._month_at(-1)
-            gone.build(y, m, -1)
-        self._update_sub()
+            gone.build(self._pages[0].start - timedelta(days=42), self._selected, self._dim_month)
+        if self._panning:
+            self.viewport.pixmaps[n] = _page_pixmap(gone)
 
-    # --- 连续滚动 ---
-    def _get_off(self):
-        return self._off
+    def _select_day(self, d):
+        """单击日期：记录选中并刷新现有格子的选中态（滚动/重建后由 build 保持）。"""
+        self._selected = d
+        for page in self._pages.values():
+            for cell in page.findChildren(DayCell):
+                sel = 'true' if cell.date == d else 'false'
+                if cell.property('sel') != sel:
+                    cell.setProperty('sel', sel)
+                    for w in (cell, cell.num, cell.sub):  # 子孙选择器依赖祖先属性，需一并重刷
+                        w.style().unpolish(w)
+                        w.style().polish(w)
 
-    def _set_off(self, v):
-        self._off = float(v)
-        self._layout_pages()
-
-    panOffset = pyqtProperty(float, _get_off, _set_off)
-
-    def _stop_snap(self):
-        if self._snap is not None:
-            anim, self._snap = self._snap, None
-            try:
-                anim.finished.disconnect()
-            except TypeError:
-                pass
-            anim.stop()
-
-    def wheelEvent(self, e):
-        # 触摸板给像素级增量，普通滚轮给角度增量（一格 120）；都直接转成像素平移，内容 1:1 跟手
-        self._stop_snap()
-        pd = e.pixelDelta()
-        dy = pd.y() if not pd.isNull() else e.angleDelta().y()
-        if dy == 0:
-            e.accept()
-            return
+    # --- 自由平移（滚轮 / 触摸板 / 鼠标拖拽，停在哪就留在哪，不吸附） ---
+    def _pan_by(self, dy):
+        """平移 dy 像素：>0 内容下移（往上月），<0 内容上移（往下月）。越界换月回绕。"""
+        self._begin_pan()
         self._off += dy
         h = self.viewport.height()
-        while h > 0 and self._off >= h:      # 上月页已滚到正中：换月并回绕偏移
+        while h > 0 and self._off >= h:      # 上一段已滚到正中：换段并回绕偏移
             self._recenter(-1)
             self._off -= h
-        while h > 0 and self._off <= -h:     # 下月页已滚到正中
+        while h > 0 and self._off <= -h:     # 下一段已滚到正中
             self._recenter(1)
             self._off += h
+        self._update_sub()
+        self.viewport.pan_off = self._off
+        self.viewport.update()
+
+    def _begin_pan(self):
+        """进入平移：抓取三个月页面为位图并隐藏活页面，之后每帧只 blit。"""
+        if self._panning or not self._pages:
+            return
+        self._panning = True
+        self.viewport.pan_off = self._off
+        self.viewport.pixmaps = {d: _page_pixmap(page) for d, page in self._pages.items()}
+        for page in self._pages.values():
+            page.hide()
+        self.viewport.update()
+
+    def _end_pan(self):
+        """结束平移：活页面同步到当前偏移并显示，恢复悬停/点击。位置保持不变。"""
+        if not self._panning:
+            return
+        self._panning = False
+        if self._dim_dirty:
+            self._apply_dim()
+        self.viewport.pixmaps = None
         self._layout_pages()
-        self._settle.start()                 # 停手 150ms 后吸附
+        for page in self._pages.values():
+            page.show()
+        self.viewport.update()
+
+    def wheelEvent(self, e):
+        # 触摸板给像素级增量：直接 1:1 跟手；普通滚轮只给角度增量（一格 120）：累积目标偏移，
+        # 由 _glide 按 ~66fps 指数趋近，离散步进变成连续滑动
+        pd = e.pixelDelta()
+        if not pd.isNull():
+            self._glide.stop()
+            self._glide_left = 0.0
+            self._glide_vel = 0.0
+            self._pan_by(pd.y())
+            self._settle.start()  # 停手 200ms 后切回活页面
+        else:
+            dy = e.angleDelta().y()
+            if dy:
+                h = self.viewport.height()
+                self._glide_left += dy
+                if h > 0:  # 限制累计距离，避免快速滚动时冲过太远
+                    self._glide_left = max(-2 * h, min(2 * h, self._glide_left))
+                if not self._glide.isActive():
+                    self._glide.start()
         e.accept()
 
-    def _settle_snap(self):
-        """滚动停止后，缓动吸附到最近的月份位置。"""
-        h = self.viewport.height()
-        if h <= 0 or not self._pages:
+    def _glide_step(self):
+        """平滑动画每帧：速度向"剩余距离 x 0.22"阻尼趋近（起步渐快 = 阻尼感，
+        剩余距离耗尽自然减速停稳）；剩余距离与偏移回绕无关，滚动再远也能收敛。"""
+        d = self._glide_left
+        if abs(d) < 0.5:  # 收尾：补足残差后停
+            if d:
+                self._pan_by(d)
+                self._glide_left = 0.0
+            self._glide_vel = 0.0
+            self._glide.stop()
+            self._settle.start()
             return
-        if self._off > h / 2:
-            target = float(h)
-        elif self._off < -h / 2:
-            target = float(-h)
-        else:
-            target = 0.0
-        anim = QPropertyAnimation(self, b'panOffset', self)
-        anim.setDuration(250)
-        anim.setEasingCurve(QEasingCurve.OutCubic)
-        anim.setStartValue(self._off)
-        anim.setEndValue(target)
-        anim.finished.connect(lambda: self._snap_done(target))
-        anim.start()
-        self._snap = anim
+        self._glide_vel += (d * 0.22 - self._glide_vel) * 0.35
+        step = self._glide_vel
+        if abs(step) > abs(d):  # 单步不超过剩余距离，防过冲
+            step = d
+            self._glide_vel = d
+        self._glide_left -= step
+        self._pan_by(step)
+        self._settle.start()
 
-    def _snap_done(self, target):
-        self._snap = None
-        h = self.viewport.height()
-        d = -int(round(target / h)) if h > 0 else 0  # 目标 +h = 上月居中 = 月份 -1
-        self._off = 0.0
-        if d:
-            self._recenter(d)
-        self._layout_pages()
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self._glide.stop()
+            self._glide_left = 0.0
+            self._glide_vel = 0.0
+            self._drag_y = self._press_y = e.globalPos().y()
+            self._dragging = False
+            e.accept()
+        else:
+            super(CalendarWidget, self).mousePressEvent(e)
+
+    def mouseMoveEvent(self, e):
+        if self._drag_y is not None:
+            y = e.globalPos().y()
+            if self._dragging or abs(y - self._press_y) > 4:  # 阈值内仍算点击
+                self._dragging = True
+                self._pan_by(y - self._drag_y)
+                self._drag_y = y
+            e.accept()
+        else:
+            super(CalendarWidget, self).mouseMoveEvent(e)
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton and self._drag_y is not None:
+            if self._dragging:
+                self._end_pan()  # 拖拽结束立即切回活页面
+            else:
+                cell = QApplication.widgetAt(e.globalPos())  # 未拖动 = 单击，手动分发
+                if isinstance(cell, DayCell) and self.viewport.isAncestorOf(cell):
+                    cell.clicked.emit()
+            self._drag_y = None
+            self._dragging = False
+            e.accept()
+        else:
+            super(CalendarWidget, self).mouseReleaseEvent(e)
 
     def go_today(self):
         t = date.today()
@@ -555,7 +713,7 @@ class DuePopup(QFrame):
     """截止时间选择弹层：月历 + 快捷按钮。Qt.Popup，点外侧自动关闭。"""
 
     def __init__(self, parent, current, on_pick, on_close):
-        super(DuePopup, self).__init__(parent, Qt.Popup)
+        super(DuePopup, self).__init__(parent, Qt.Popup | Qt.WindowStaysOnTopHint)
         self.setObjectName('duePopup')
         self._on_pick = on_pick
         self._on_close = on_close
@@ -726,6 +884,7 @@ class TodoWidget(QWidget):
     def _open_editor(self, item_id, text):
         self._editing = True
         self._picking = False
+        self._just_picked = False
         self._edit_due = None
         if item_id is not None:
             # 编辑：原地替换原条目（原行不再显示）
@@ -764,10 +923,10 @@ class TodoWidget(QWidget):
         btn.setFocusPolicy(Qt.NoFocus)   # 不抢焦点，避免触发编辑框的失焦提交
         btn.setCursor(Qt.PointingHandCursor)
         btn.setToolTip('设置截止时间')
-        btn.setFixedHeight(sc(30))
+        btn.setFixedSize(sc(32), sc(30))
         btn.setIcon(make_cal_icon(DUE_ICON_COLORS.get(self.theme_key, '#8a8a90')))
-        btn.setIconSize(QSize(sc(15), sc(15)))
-        btn.clicked.connect(lambda: self._pick_due(btn))
+        btn.setIconSize(QSize(sc(17), sc(17)))
+        btn.clicked.connect(lambda: (_dbg('date btn CLICKED'), self._pick_due(btn)))
         hl.addWidget(btn)
         old_w = self.list.itemWidget(li)
         if old_w is not None:  # 替换前先移除并隐藏旧行，避免残留重影
@@ -787,32 +946,46 @@ class TodoWidget(QWidget):
                 d = datetime.strptime(self._edit_due, '%Y-%m-%d').date()
                 self._due_btn.setIcon(QIcon())
                 self._due_btn.setText('%d/%d' % (d.month, d.day))
+                self._due_btn.setFixedWidth(sc(46))
                 return
             except Exception:
                 pass
         self._due_btn.setText('')
 
     def _pick_due(self, btn):
+        _dbg('_pick_due enter: editing=%s picking=%s' % (self._editing, getattr(self, '_picking', None)))
         if not self._editing or getattr(self, '_picking', False):
+            _dbg('_pick_due EARLY RETURN')
             return
         self._picking = True
         pop = DuePopup(self, self._edit_due, self._due_picked, self._popup_closed)
         self._popup = pop   # 持有引用，避免 PyQt 包装层被 GC 回收
         pop.show()
+        pop.raise_()        # 面板是置顶 Tool 窗，确保弹层压在其上
         pos = btn.mapToGlobal(QPoint(0, btn.height() + sc(4)))
         ag = QApplication.primaryScreen().availableGeometry()
         x = min(pos.x(), ag.right() - pop.width() - sc(4))
         y = min(pos.y(), ag.bottom() - pop.height() - sc(4))
         pop.move(x, max(y, ag.top()))
+        _dbg('popup shown: visible=%s pos=(%d,%d) size=%dx%d btnGlobal=%s' % (
+            pop.isVisible(), x, y, pop.width(), pop.height(), pos))
 
     def _due_picked(self, d):
+        if not self._editing:
+            return   # 编辑会话已结束（编辑器控件已随 rebuild 销毁），忽略迟到回调
         self._edit_due = d.isoformat() if d else None
+        self._just_picked = True
         self._refresh_due_btn()
-        if getattr(self, '_editor', None):
-            self._editor[1].setFocus()
 
     def _popup_closed(self):
+        _dbg('popup closed')
         self._picking = False
+        if getattr(self, '_just_picked', False):
+            # 刚选了日期：保持编辑态，焦点交还输入框继续编辑
+            self._just_picked = False
+            if self._editing and getattr(self, '_editor', None):
+                self._editor[1].setFocus()
+            return
         # 点弹窗外侧关闭：若焦点没回到编辑框，视为放弃编辑，兜底提交
         QTimer.singleShot(0, self._commit_if_unfocused)
 
@@ -840,6 +1013,8 @@ class TodoWidget(QWidget):
         self._commit(li, ed, item_id)
 
     def _commit(self, li, ed, item_id):
+        _dbg('_commit: editing=%s picking=%s text=%r' % (
+            self._editing, getattr(self, '_picking', None), ed.text()[:20]))
         if not self._editing or ed.property('cancelled') or getattr(self, '_picking', False):
             return
         self._editing = False
@@ -1137,6 +1312,7 @@ class FloatingPanel(QWidget):
         super(FloatingPanel, self).__init__()
         self.cfg = cfg
         self.cn_font, self.num_font = pick_fonts()
+        set_num_font(self.num_font)
         # 不用 WA_TranslucentBackground：分层窗口禁用 ClearType，文字灰糊。
         # 不透明窗口 + Win11 DWM 圆角（Win7/10 降级为圆角遮罩），文字锐利度对齐系统组件。
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
@@ -1222,7 +1398,7 @@ class FloatingPanel(QWidget):
         self._midnight.timeout.connect(self._check_date)
         self._midnight.start(30000)
 
-        self._dual = False
+        self._dual = None  # None 而非 False：避免 set_dual 的“无变化短路”跳过首次布局/定尺寸
         self._theme = cfg.theme
         self.apply_theme(cfg.theme, save=False)
         if cfg.dual:
@@ -1355,6 +1531,11 @@ class FloatingPanel(QWidget):
             self._today = date.today()
             self.cal.refresh()
             self.todo.rebuild()
+
+
+
+
+
 
 
 

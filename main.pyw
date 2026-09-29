@@ -32,7 +32,19 @@ def notify_existing():
     return False
 
 
+def _debug_excepthook(t, v, tb):
+    """临时调试：pythonw 下槽函数异常无控制台可见，落盘到 debug_due.log。定位后移除。"""
+    try:
+        import traceback
+        p = os.path.join(sysutil.appdata_dir(), 'debug_due.log')
+        with open(p, 'a', encoding='utf-8') as f:
+            f.write(''.join(traceback.format_exception(t, v, tb)))
+    except Exception:
+        pass
+
+
 def main():
+    sys.excepthook = _debug_excepthook
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
     QApplication.setQuitOnLastWindowClosed(False)

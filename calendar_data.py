@@ -181,17 +181,24 @@ def _year_days(y):
     return total + (_leap_days(y) if _leap_month(y) else 0)
 
 
+# 年天数表（1900-2100 一次算清）+ 逐日结果缓存：滚动时农历计算从每年位运算降为查表/字典命中
+_YEAR_DAYS = [_year_days(y) for y in range(1900, 2101)]
+_LUNAR_CACHE = {}
+_LUNAR_EPOCH = date(1900, 1, 31).toordinal()
+
+
 def solar_to_lunar(y, m, d):
     """公历 -> (农历年, 月, 日, 是否闰月)；超出 1900-2100 返回 None。"""
-    offset = (date(y, m, d) - date(1900, 1, 31)).days
+    o = date(y, m, d).toordinal()
+    if o in _LUNAR_CACHE:
+        return _LUNAR_CACHE[o]
+    offset = o - _LUNAR_EPOCH
     if offset < 0 or offset > 73514:
+        _LUNAR_CACHE[o] = None
         return None
     ly = 1900
-    while True:
-        yd = _year_days(ly)
-        if offset < yd:
-            break
-        offset -= yd
+    while offset >= _YEAR_DAYS[ly - 1900]:
+        offset -= _YEAR_DAYS[ly - 1900]
         ly += 1
     leap = _leap_month(ly)
     is_leap = False
@@ -217,7 +224,8 @@ def solar_to_lunar(y, m, d):
     if offset < 0:
         offset += days
         i -= 1
-    return ly, i, offset + 1, is_leap
+    _LUNAR_CACHE[o] = (ly, i, offset + 1, is_leap)
+    return _LUNAR_CACHE[o]
 
 
 def lunar_day_text(m, d, is_leap):
