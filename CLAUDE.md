@@ -205,12 +205,23 @@ excepthook 时 exit 127、连输出都没有。`main()` 里那句 `sys.excepthoo
 - **空白格子是真实文件夹**（`Boxes\<id>\`）：拖入 = `shutil.move` 进去，解散 = 全部还原回
   桌面（SHGetFolderPath 取真桌面，处理 OneDrive 重定向），不删文件。映射格子只读目录、
   `QFileSystemWatcher` 300ms 去抖刷新；路径失效显示「解散格子」页。
+- **解散格子有二次确认**（`BoxConfirmDialog`：无边框 Tool 窗，结构仿面板「关于」窗，
+  视觉沿用格子的深色磨砂圆角，空白/映射格子提示语不同）。`QMessageBox` 只还剩删除确认在用，
+  `_box_qss` 里给它补了深色底——白字落默认浅色底会看不清。
+- **双击标题名称 = 原地内联重命名**（QLineEdit 替换 QLabel，回车/失焦提交、Esc 取消；
+  事件在过滤器里吃掉，不再触发双击收起）。映射格子点左上角文件夹图标 = 打开所在文件夹
+  （eventFilter 里按下即开，双击/松开都吃掉防连带拖动与收起）；空白格子是背地里的
+  存储目录，图标不可点。
 - **视觉固定深色磨砂**，不挂主题系统。`WA_TranslucentBackground` 的 ClearType 问题这里接受
   （参考软件本身就是半透明）。
-- **双击桌面显隐**：`DesktopClickHook` 独立线程装 `WH_MOUSE_LL`（LL 钩子收不到
+- **双击桌面空白显隐**（`BoxManager.toggle_all`）：桌面图标 + 全部格子 + 面板一起显隐，
+  图标显隐 = ShowWindow 桌面的 `SysListView32`（`find_desktop_listview` 定位，Progman
+  找不到再扫 WorkerW）。`DesktopClickHook` 独立线程装 `WH_MOUSE_LL`（LL 钩子收不到
   `WM_LBUTTONDBLCLK`，自己按 GetDoubleClickTime 判双击）。坑：① 命中链先排我们自己的窗口；
   ② 认 Progman 家族 + `SysListView32` + 全屏工具窗（腾讯整理 TXMiniSkin 覆盖层）；
-  ③ **第一击也必须落在桌面上**，否则「拖开格子 → 快速点它腾出的空位」会误判双击桌面，
+  ③ **`SysListView32` 要过跨进程 `LVM_HITTEST`**：点在图标/文件夹上不算空白（结构体开在
+  explorer 地址空间里 SendMessage 才读得到）；
+  ④ **第一击也必须落在桌面上**，否则「拖开格子 → 快速点它腾出的空位」会误判双击桌面，
   全部格子被隐藏（真实用户 bug）。
 - **已可见的窗口 SetParent 挂带后 win32 侧 WS_VISIBLE 会丢**（Qt 仍认为可见不重绘 = 消失），
   `_repin` 里补 `ShowWindow(SW_SHOWNA)`。面板在 init 挂带（未 show）所以没踩过。
