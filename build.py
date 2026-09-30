@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
-"""构建 exe 安装包：生成图标 + PyInstaller 打包为 onedir 目录（自身即安装向导）。
-用法：python build.py
-产物：dist\\ZviberPanel\\（内含 ZviberPanel.exe 与 _internal\\ 依赖）+ dist\\ZviberPanel-v<版本>-<架构>.zip
-分发包——解压后双击 ZviberPanel.exe 弹出安装向导，安装后经桌面右键菜单启动。
-onedir 而非 onefile：启动免解压临时目录，常驻面板每次开机都快；代价是分发要整个目录（已自动打 zip）。
-中间文件（图标、DPI 清单、spec 与 PyInstaller 工作目录）一律收在 dist\\build\\ 下，
+"""构建 exe 安装包：两次 PyInstaller——
+1) main.pyw → onedir 程序本体（dist\\build\\app\\ZviberPanel\\，安装后就是这个目录：一堆小文件、启动快）；
+2) setup.pyw → onefile 安装包，把 onedir 目录整体内嵌为 payload（--add-data），
+   产物 dist\\ZviberPanel-Setup-v<版本>-<架构>.exe——用户只拿到这一个 exe，双击弹安装向导。
+中间文件（图标、DPI 清单、spec、PyInstaller 工作目录、onedir 本体）一律收在 dist\\build\\ 下，
 根目录保持干净；dist 整个目录已在 .gitignore 里。
+用法：python build.py
 """
+import glob
 import os
 import platform
 import shutil
@@ -16,6 +17,7 @@ import sys
 ROOT = os.path.dirname(os.path.abspath(__file__))
 DIST = os.path.join(ROOT, 'dist')        # 最终产物放在这一层
 WORK = os.path.join(DIST, 'build')       # 其余中间文件都收在这里
+APP_DIR = os.path.join(WORK, 'app')      # onedir 程序本体（payload 来源）
 ICON = os.path.join(WORK, '_build_icon.ico')
 MANIFEST = os.path.join(WORK, '_build_manifest.xml')
 
@@ -48,32 +50,50 @@ def gen_icon():
         qapp.quit()
 
 
+def run_pyinstaller(entry, name, mode, dist_dir, work_dir, extra=()):
+    # 三个 path 都给绝对路径：PyInstaller 默认把 spec 丢当前目录、工作文件丢 ./build，
+    # 不改的话根目录会被这两样塞满
+    args = [sys.executable, '-m', 'PyInstaller',
+            '--noconfirm', '--clean', mode, '--windowed',
+            '--name', name, '--icon', ICON, '--manifest', MANIFEST,
+            '--distpath', dist_dir, '--workpath', work_dir, '--specpath', WORK]
+    args += list(extra)
+    args.append(os.path.join(ROOT, entry))
+    print('[..] %s' % ' '.join(args))
+    return subprocess.call(args)
+
+
 def main():
     os.makedirs(WORK, exist_ok=True)     # 图标与清单要写进去，得先有目录
-    # onefile 时代的残留：onedir 产物是同名目录，根下这个旧 exe 会误导分发，顺手清掉
+    # 旧形态残留：onefile app、onedir 直发目录、zip 分发包，顺手清掉避免误发
     stale = os.path.join(DIST, 'ZviberPanel.exe')
     if os.path.isfile(stale):
         os.remove(stale)
+    if os.path.isdir(os.path.join(DIST, 'ZviberPanel')):
+        shutil.rmtree(os.path.join(DIST, 'ZviberPanel'))
+    for z in glob.glob(os.path.join(DIST, 'ZviberPanel-v*.zip')):
+        os.remove(z)
     if not gen_icon():
         print('[ERR] 图标生成失败')
         return 1
     with open(MANIFEST, 'w', encoding='utf-8') as f:
         f.write(MANIFEST_XML)
-    # 三个 path 都给绝对路径：PyInstaller 默认把 spec 丢当前目录、工作文件丢 ./build，
-    # 不改的话根目录会被这两样塞满
-    args = [sys.executable, '-m', 'PyInstaller',
-            '--noconfirm', '--clean', '--onedir', '--windowed',
-            '--name', 'ZviberPanel', '--icon', ICON, '--manifest', MANIFEST,
-            '--distpath', DIST, '--workpath', WORK, '--specpath', WORK,
-            os.path.join(ROOT, 'main.pyw')]
-    print('[..] %s' % ' '.join(args))
-    r = subprocess.call(args)
+    from version import APP_VERSION
+
+    # 1) 程序本体：onedir（安装到用户机器的就是这份）
+    r = run_pyinstaller('main.pyw', 'ZviberPanel', '--onedir', APP_DIR,
+                        os.path.join(WORK, 'work_app'))
+    if r:
+        return r
+
+    # 2) 安装包：onefile，把 onedir 目录整体内嵌为 payload
+    name = 'ZviberPanel-Setup-v%s-%s' % (APP_VERSION, ARCH)
+    payload = os.path.join(APP_DIR, 'ZviberPanel')
+    r = run_pyinstaller('setup.pyw', name, '--onefile', DIST,
+                        os.path.join(WORK, 'work_setup'),
+                        extra=['--add-data', '%s;payload' % payload])
     if r == 0:
-        from version import APP_VERSION
-        zip_base = os.path.join(DIST, 'ZviberPanel-v%s-%s' % (APP_VERSION, ARCH))
-        shutil.make_archive(zip_base, 'zip', DIST, 'ZviberPanel')
-        print('[OK] 构建完成：%s' % os.path.join(DIST, 'ZviberPanel', 'ZviberPanel.exe'))
-        print('[OK] 分发包：%s.zip' % zip_base)
+        print('[OK] 安装包：%s' % os.path.join(DIST, name + '.exe'))
     return r
 
 

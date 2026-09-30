@@ -84,16 +84,17 @@ LLM 经常默默选择一种解释然后执行。这个原则强制明确推理�
 Zviber 是 Windows 桌面悬浮面板（日历 + 待办），PyQt5，Python 3.8+，Win7 / Win10 / Win11 通用。
 平铺布局，一个模块一个职责：
 
-- `main.pyw` — 入口：单实例 IPC（`QLocalServer`）、系统托盘、节假日后台更新、（frozen 时）安装/卸载流程
+- `main.pyw` — 入口：单实例 IPC（`QLocalServer`）、系统托盘、节假日后台更新、（frozen 时）`--uninstall` 卸载向导入口
 - `app.py` — 面板 UI（日历 / 待办 / 双栏 / 顶部栏滑出与拖动）、`SettingsDialog` 与节假日导入引导窗
 - `boxes.py` — 桌面格子：空白格子（文件移入数据目录）与文件夹映射格子、双击桌面显隐
 - `calendar_data.py` — 内置国务院节假日数据、农历换算、三源联网回退与离线导入
 - `themes.py` — 两套主题 QSS（深色 `nocturne` / 浅色 `mica`）加 `auto` 伪主题；`%CN%`/`%NUM%` 为字体占位符
 - `version.py` — 版本号唯一来源：关于窗、设置窗左下角、安装向导、卸载注册表项共用 `APP_VERSION`，发版只改这一个文件
 - `sysutil.py` — 注册表集成：开机自启、桌面右键菜单、应用列表卸载项（默认 HKCU，免管理员）
-- `installer.py` — exe 安装向导（选项/进度/完成页）、自安装与卸载向导（可选删除个人数据；只在 frozen 时生效）
+- `installer.py` — 安装向导（选项/进度/完成页）与卸载向导（可选删除个人数据）；供 setup exe（安装）与程序本体 `--uninstall`（卸载）共用
 - `install.py` — 源码方式的系统集成（只装开机自启）
-- `build.py` / `build.cmd` — 生成图标与 DPI 清单，PyInstaller 打包 onedir 到 `dist\ZviberPanel\` 并自动打成 `dist\ZviberPanel-v<版本>-<架构>.zip` 分发包（架构标识跟随打包用的 Python：x64 / x86 / arm64）
+- `setup.pyw` — 安装包入口：build.py 把它打成 onefile exe，内嵌 onedir 本体为 payload，双击弹安装向导
+- `build.py` / `build.cmd` — 生成图标与 DPI 清单，两段式 PyInstaller：main.pyw 打 onedir 本体（`dist\build\app\`），setup.pyw 内嵌本体打成单个安装包 `dist\ZviberPanel-Setup-v<版本>-<架构>.exe`（架构标识跟随打包用的 Python：x64 / x86 / arm64）
 - `run.cmd` — 双击启动面板；已在运行则切换显隐
 - `designs/` — 两套主题的设计稿（HTML，浏览器可直接打开）
 
@@ -135,14 +136,13 @@ set ZVIBER_SHOT=designs\verify && python main.pyw   :: 截图自检
 `holidays.json`、运行时生成的 `icons/`）——**绝不提交这些数据**。
 
 `main()` 的顺序是有意的，改动前先读懂：设置 excepthook → `installer.maybe_install()`
-（仅 frozen exe 生效，返回 True 表示安装/卸载/取消已处理完，直接退出）→ 单实例 IPC 探测
+（仅 frozen exe 生效，只处理 `--uninstall` 卸载向导，返回 True 直接退出）→ 单实例 IPC 探测
 （`QLocalSocket` 连 `sysutil.IPC_KEY`，已运行则发 `toggle` 后退出）→ 建面板 → 起 `QLocalServer`
 接收 `toggle` / `quit` → 托盘。
 
 - 单实例靠 `QLocalServer` 名称 `zviber-panel-v1`；`quit` 消息供卸载程序请求退出。
 - 托盘/桌面右键菜单都用 `--toggle` 让已运行实例显隐，不新起进程。
-- `installer.maybe_install()` 里 `ZVIBER_AUTO_INSTALL` 是静默安装测试钩子，`ZVIBER_SHOT` /
-  `ZVIBER_GRABSCREEN` 下跳过安装向导。
+- `installer.setup_main()`（setup exe 入口）里 `ZVIBER_AUTO_INSTALL` 是静默安装测试钩子。
 - 设置窗口是**非模态**的（托盘「设置」或标题栏 ⚙），已开着就 `raise_()`，不会叠第二个；
   托盘菜单只有「显示 / 隐藏、设置、卸载 Zviber（仅已安装时）、退出」——主题 / 双栏 / 时间 / 节假日
   全部挪进了设置窗口，别再往托盘里加。
@@ -284,8 +284,8 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
   每次启动 `installer.sync_context_menu()` 按 `Uninstall\ZviberPanel` 的 `InstallLocation` 判定——
   没有任何安装记录就清掉菜单残留（旧版 install.py 的源码安装、向导取消、半卸载）。
 - `sysutil.launcher_cmd()` 区分 frozen（直接启自身）与源码（优先 `pythonw.exe` 实现无窗口静默）。
-- `installer.py` 的向导与自安装**只在 frozen 时生效**；源码运行走 `install.py`。
-- 安装 = 把 onedir 程序目录（exe + `_internal\`）**整体复制**到目标位置，按字节回报进度；目标目录已有旧安装（含 `ZviberPanel.exe`）时先整体清空再复制——`_check_dir` 只放行空目录/新目录/含 `ZviberPanel.exe` 的旧安装目录，别放宽这个签名判断，否则覆盖重装与卸载会误删用户文件。
+- `installer.py` 的向导**只在 frozen 时生效**；源码运行走 `install.py`。
+- 安装 = 把安装包内嵌的 payload（onefile 运行时解压到 `_MEIPASS\payload` 的 onedir 本体：exe + `_internal\`）**整体复制**到目标位置，按字节回报进度；目标目录已有旧安装（含 `ZviberPanel.exe`）时先整体清空再复制——`_check_dir` 只放行空目录/新目录/含 `ZviberPanel.exe` 的旧安装目录，别放宽这个签名判断，否则覆盖重装与卸载会误删用户文件。
 - 卸载走与安装同风格的**卸载向导**（确认页 → 进度页 → 完成页）：确认页 checkbox「同时删除个人数据」勾选后连同 `%APPDATA%\ZviberPanel`（待办、格子、配置）一起 rmtree，默认保留；程序目录用延迟 `rmdir` 删除（exe 运行中删不掉自己）。
 
 ### 桌面格子（`boxes.py`）

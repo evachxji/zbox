@@ -186,7 +186,7 @@ def main():
 
     installer.sync_context_menu()  # 右键菜单只属于已安装的程序，未安装时清掉残留
     if installer.maybe_install():
-        return 0  # exe 安装包：安装/卸载/取消后退出
+        return 0  # --uninstall 卸载向导结束后退出（安装包是独立的 setup exe）
 
     if notify_existing():
         return 0  # 已有实例在运行，转发 toggle 后退出

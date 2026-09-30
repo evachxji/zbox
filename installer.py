@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""exe 安装包：深色主题安装向导（路径/范围/空间/进度）+ 自安装 + 卸载向导（可选删除个人数据）。
+"""安装/卸载：深色主题安装向导（路径/范围/进度/完成页）+ 卸载向导（可选删除个人数据）。
+安装包形态：setup.pyw 打成 onefile exe，内嵌 onedir 程序目录为 payload（--add-data），
+向导把 payload 整体复制到安装目录（按字节回报进度）；装出来的程序本体是 onedir（一堆小文件）。
 仅冻结为 exe 时生效；源码运行（pythonw main.pyw）不受影响，仍走 install.py。
 样式复用 themes.py NOCTURNE 主题与 #settingsPanel/#setBtn/#setSave 规范，仅补充少量同配色控件样式。
-onedir 说明：build.py 打出的 dist\\ZviberPanel\\ 目录自身即安装包（exe + _internal\\ 依赖），
-安装 = 把该目录整体复制到目标位置（按字节回报进度）。
 """
 import os
 import shutil
@@ -74,6 +74,15 @@ def relaunch_elevated(args):
 def _bundle_dir():
     """frozen onedir 的程序目录（exe 与 _internal\\ 所在目录）。"""
     return os.path.dirname(os.path.abspath(sys.executable))
+
+
+def _payload_dir():
+    """安装包内嵌的 onedir 程序目录：frozen 时在 _MEIPASS\\payload；
+    源码调试安装向导时回退到构建中间产物 dist\\build\\app\\ZviberPanel。"""
+    mp = getattr(sys, '_MEIPASS', None)
+    if mp:
+        return os.path.join(mp, 'payload')
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dist', 'build', 'app', 'ZviberPanel')
 
 
 def _exe_dir():
@@ -165,13 +174,13 @@ def _copy_tree_with_progress(src_root, dst_root, cb):
 
 
 def install(path_dir, all_users=False, autostart=True, shortcut=True, progress=None):
-    """把当前 onedir 程序目录整体复制到指定目录并注册系统集成，返回安装后的 exe 路径。
+    """把安装包内嵌的 onedir 程序目录整体复制到指定目录并注册系统集成，返回安装后的 exe 路径。
     目标目录里已有旧安装（含 ZviberPanel.exe，_check_dir 保证无用户文件）时先清空再复制。
     progress(pct, text) 回报进度。"""
     def report(pct, text):
         if progress:
             progress(pct, text)
-    src = _bundle_dir()
+    src = _payload_dir()
     if os.path.normcase(src) != os.path.normcase(os.path.abspath(path_dir)):
         if os.path.isfile(os.path.join(path_dir, APP_EXE)):
             shutil.rmtree(path_dir)  # 覆盖重装：清掉旧版全部文件（含残留的 _internal）
@@ -266,12 +275,18 @@ def _uninstall_flow():
 
 
 def maybe_install():
-    """frozen 场景入口处理；返回 True 表示已处理完毕（安装/卸载/取消），调用方应退出。"""
+    """frozen 程序本体入口处理：--uninstall 走卸载向导。
+    返回 True 表示已处理完毕，调用方应退出。程序本体不再兼任安装包（安装包是 setup.pyw 打的 exe）。"""
     if not getattr(sys, 'frozen', False):
         return False
     if '--uninstall' in sys.argv:
         _uninstall_flow()
         return True
+    return False
+
+
+def setup_main():
+    """安装包入口（setup.pyw 打成的 onefile exe）：安装向导 / 提权安装实例。返回进程退出码。"""
     if '--install-elevated' in sys.argv:
         # 提权后的安装实例：直接执行安装并展示进度/完成页
         path = sys.argv[sys.argv.index('--install-elevated') + 1]
@@ -280,17 +295,13 @@ def maybe_install():
                           shortcut='--no-shortcut' not in sys.argv,
                           autostart='--no-autostart' not in sys.argv)
         wiz.exec_()
-        return True
-    if is_installed():
-        return False
-    if os.environ.get('ZVIBER_SHOT') or os.environ.get('ZVIBER_GRABSCREEN'):
-        return False  # 自检模式直接运行，不弹安装窗口
+        return 0
     if os.environ.get('ZVIBER_AUTO_INSTALL'):
         # 测试钩子：跳过向导按默认项静默安装
         _relaunch(install(install_dir()))
-        return True
+        return 0
     InstallWizard().exec_()
-    return True
+    return 0
 
 
 def _scale_qss(css, scale):
@@ -587,7 +598,7 @@ class InstallWizard(_WizardBase):
                 p = p2
             try:
                 free = shutil.disk_usage(p).free
-                need = _dir_size(_bundle_dir())
+                need = _dir_size(_payload_dir())
                 drive = os.path.splitdrive(os.path.abspath(p))[0]
                 if need > free:
                     err = '磁盘空间不足：需要 %s，%s 盘仅剩 %s' % (_fmt_size(need), drive, _fmt_size(free))
