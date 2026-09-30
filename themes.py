@@ -219,11 +219,11 @@ QLabel#deviceType {
 }
 QLabel#deviceAlias { color: #e8e6e1; font: 12.5px "%CN%"; background: transparent; }
 QLabel#deviceIp { color: #6d6a62; font: 10.5px "%NUM%"; background: transparent; }
-QToolButton#refreshBtn {
+QToolButton#refreshBtn, QToolButton#cancelBtn {
     background: transparent; border: 1px solid rgba(255,255,255,30); border-radius: 6px;
     color: #8d8a82; font: 11px "%CN%"; padding: 2px 10px;
 }
-QToolButton#refreshBtn:hover { border-color: rgba(232,163,61,130); color: #e8a33d; }
+QToolButton#refreshBtn:hover, QToolButton#cancelBtn:hover { border-color: rgba(232,163,61,130); color: #e8a33d; }
 QToolButton#refreshBtn:disabled { color: #4c4a45; border-color: rgba(255,255,255,16); }
 QToolButton#pickBtn {
     background: transparent; border: 1px dashed rgba(255,255,255,40); border-radius: 8px;
@@ -456,11 +456,11 @@ QLabel#deviceType {
 }
 QLabel#deviceAlias { color: #1b1b1f; font: 12.5px "%CN%"; background: transparent; }
 QLabel#deviceIp { color: #8a8a90; font: 10.5px "%NUM%"; background: transparent; }
-QToolButton#refreshBtn {
+QToolButton#refreshBtn, QToolButton#cancelBtn {
     background: #ffffff; border: 1px solid rgba(0,0,0,26); border-radius: 6px;
     color: #5b5b60; font: 11px "%CN%"; padding: 2px 10px;
 }
-QToolButton#refreshBtn:hover { border-color: #0067c0; color: #0067c0; }
+QToolButton#refreshBtn:hover, QToolButton#cancelBtn:hover { border-color: #0067c0; color: #0067c0; }
 QToolButton#refreshBtn:disabled { color: #b4b4ba; border-color: rgba(0,0,0,14); }
 QToolButton#pickBtn {
     background: transparent; border: 1px dashed rgba(0,0,0,46); border-radius: 8px;

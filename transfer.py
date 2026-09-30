@@ -659,11 +659,14 @@ def _post_json(url, payload, timeout):
         resp.close()
 
 
-def send_files(host, port, files, on_progress=None, on_done=None, device_info=None):
+def send_files(host, port, files, on_progress=None, on_done=None, device_info=None,
+               cancel_event=None):
     '''发送方客户端：prepare-upload -> 逐文件 upload -> 失败 cancel。
 
     files 为本地路径列表。on_progress(file_index, done_bytes, total_bytes)，
-    on_done(ok, message)：被拒时 message 为 'rejected'。同步阻塞，调用方自行放线程。
+    on_done(ok, message)：被拒时 message 为 'rejected'，主动取消为 'cancelled'。
+    cancel_event（threading.Event）置位后中断上传并通知对端 cancel；prepare
+    等待确认期间无法打断阻塞 IO，在 prepare 返回后检查。同步阻塞，调用方自行放线程。
     '''
     if device_info is None:
         device_info = DeviceInfo.local(socket.gethostname(), uuid.uuid4().hex)
@@ -712,8 +715,13 @@ def send_files(host, port, files, on_progress=None, on_done=None, device_info=No
         return
 
     for index, (file_id, path) in enumerate(order):
-        err = _upload_one(host, port, session_id, file_id,
-                          tokens.get(file_id) or '', path, index, on_progress)
+        # prepare 等待确认期间点下的取消在此生效；每个文件上传前也检查一次
+        if cancel_event is not None and cancel_event.is_set():
+            err = 'cancelled'
+        else:
+            err = _upload_one(host, port, session_id, file_id,
+                              tokens.get(file_id) or '', path, index,
+                              on_progress, cancel_event)
         if err is not None:
             try:
                 req = urllib.request.Request(
@@ -727,8 +735,12 @@ def send_files(host, port, files, on_progress=None, on_done=None, device_info=No
     _safe_call(on_done, True, '')
 
 
-def _upload_one(host, port, session_id, file_id, token, path, index, on_progress):
-    '''分块 POST 单个文件，每块回调进度；返回 None 表示成功，否则为错误描述。'''
+def _upload_one(host, port, session_id, file_id, token, path, index, on_progress,
+                cancel_event=None):
+    '''分块 POST 单个文件，每块回调进度；返回 None 表示成功，否则为错误描述。
+
+    cancel_event 置位时中断发送并返回 'cancelled'；连接由 finally 关闭，
+    对端按传输中断清理半成品。'''
     size = os.path.getsize(path)
     conn = http.client.HTTPConnection(host, port, timeout=NET_TIMEOUT)
     try:
@@ -741,6 +753,8 @@ def _upload_one(host, port, session_id, file_id, token, path, index, on_progress
         done = 0
         with open(path, 'rb') as f:
             while True:
+                if cancel_event is not None and cancel_event.is_set():
+                    return 'cancelled'
                 chunk = f.read(CHUNK_SIZE)
                 if not chunk:
                     break

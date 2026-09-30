@@ -13,6 +13,7 @@ import shutil
 import socket
 import sys
 import tempfile
+import threading
 import time
 import traceback
 import urllib.error
@@ -457,6 +458,63 @@ def case_bad_size_meta(ctx):
         shutil.rmtree(root, ignore_errors=True)
 
 
+def case_send_cancel(ctx):
+    # 用例 13：发送方 cancel_event 中断 64MB 上传 → on_done(False, 'cancelled')、
+    # 接收端半成品删除、on_cancelled 触发（发给 A，用其 on_cancelled 钩子）
+    root = tempfile.mkdtemp(prefix='zviber_case13_')
+    try:
+        src_dir = os.path.join(root, 'src')
+        recv = os.path.join(root, 'recv')
+        os.makedirs(src_dir)
+        os.makedirs(recv)
+        ctx.box_a['dir'] = recv
+        big = os.path.join(src_dir, 'big.bin')
+        with open(big, 'wb') as f:
+            f.write(os.urandom(64 * 1024 * 1024))
+
+        cancel_event = threading.Event()
+        done_flag = threading.Event()
+        result = {}
+
+        def on_progress(index, done, total):
+            # 传到 4MB 时置位取消：替代固定 0.2s 延时，与回环速度无关，
+            # 保证必然在传输中触发（64MB 回环传输可能快于 0.2s）
+            if done >= 4 * 1024 * 1024:
+                cancel_event.set()
+
+        def on_done(ok, err):
+            result['ok'] = ok
+            result['err'] = err
+            done_flag.set()
+
+        t = threading.Thread(
+            target=transfer.send_files,
+            args=('127.0.0.1', ctx.srv_a.port, [big]),
+            kwargs={'on_progress': on_progress, 'on_done': on_done,
+                    'device_info': ctx.info_b, 'cancel_event': cancel_event})
+        t.daemon = True
+        t.start()
+        check(done_flag.wait(15.0), 'on_done 未在 15s 内返回')
+        t.join(15.0)
+        check(result.get('ok') is False,
+              '取消后 ok 应为 False，实际 %r' % result.get('ok'))
+        check(result.get('err') == 'cancelled',
+              "取消后 err 应为 'cancelled'，实际 %r" % result.get('err'))
+        # 半成品删除与 on_cancelled 在服务端异步完成，轮询等待
+        deadline = time.time() + 5.0
+        while time.time() < deadline:
+            if not os.listdir(recv) and ctx.cancelled:
+                break
+            time.sleep(0.05)
+        check(not os.listdir(recv),
+              '取消后接收端不应有残留文件: %r' % os.listdir(recv))
+        check(ctx.cancelled, '接收端 on_cancelled 未触发')
+    finally:
+        ctx.box_a['dir'] = None
+        ctx.cancelled[:] = []
+        shutil.rmtree(root, ignore_errors=True)
+
+
 CASES = [
     ('register 互见设备', case_register),
     ('GET /info 字段完整', case_info),
@@ -470,6 +528,7 @@ CASES = [
     ('Content-Length 与声明 size 不符回 400', case_size_mismatch),
     ('来源 IP 不符回 403', case_ip_mismatch),
     ('坏 size 元数据 prepare 回 400', case_bad_size_meta),
+    ('发送方 cancel_event 中断上传', case_send_cancel),
 ]
 
 

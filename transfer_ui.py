@@ -472,9 +472,10 @@ class TransferWidget(QWidget):
                 except OSError:
                     pass
             key = self._add_record('up', names, total)
+            cancel_event = self._records[key]['cancel_event']
             self._set_files([])
             threading.Thread(target=self._send_worker,
-                             args=(key, ip, info.port, files),
+                             args=(key, ip, info.port, files, cancel_event),
                              name='transfer-send', daemon=True).start()
         except Exception:
             pass
@@ -492,7 +493,7 @@ class TransferWidget(QWidget):
                 merged[fp] = (info, ip)
         return merged
 
-    def _send_worker(self, key, ip, port, files):
+    def _send_worker(self, key, ip, port, files, cancel_event):
         '''工作线程：send_files 阻塞调用，进度/结果经信号回主线程。'''
         sizes = []
         for p in files:
@@ -517,7 +518,7 @@ class TransferWidget(QWidget):
 
         try:
             send_files(ip, port, files, on_progress=on_progress, on_done=on_done,
-                       device_info=self.device_info)
+                       device_info=self.device_info, cancel_event=cancel_event)
         except Exception as exc:
             # 核心层已兜底，理论不可达；双保险防线程静默死
             self.sig_send_done.emit(key, False, '%s' % exc)
@@ -545,9 +546,26 @@ class TransferWidget(QWidget):
                 rec['done'] = rec['total']
             elif err == 'rejected':
                 rec['state'] = 'rejected'
+            elif err == 'cancelled':
+                rec['state'] = 'cancelled'
             else:
                 rec['state'] = 'fail'
                 rec['err'] = err
+            self._update_record(rec)
+        except Exception:
+            pass
+
+    def _cancel_send(self, key):
+        '''取消按钮：置位该发送任务的 cancel_event，结果以 on_done 为准。'''
+        try:
+            rec = self._records.get(key)
+            if rec is None or rec['direction'] != 'up':
+                return
+            ev = rec.get('cancel_event')
+            if ev is None or rec['state'] not in ('wait', 'busy'):
+                return
+            ev.set()
+            rec['state'] = 'cancelling'      # 先显示「取消中…」，等 on_done('cancelled') 落实
             self._update_record(rec)
         except Exception:
             pass
@@ -784,6 +802,17 @@ class TransferWidget(QWidget):
         top.addWidget(arrow)
         top.addWidget(name, 1)
         top.addWidget(state)
+        cancel_btn = None
+        cancel_event = None
+        if direction == 'up':
+            # 发送方取消入口：仅「等待确认 / 传输中」可见（见 _update_record）
+            cancel_event = threading.Event()
+            cancel_btn = QToolButton()
+            cancel_btn.setObjectName('cancelBtn')
+            cancel_btn.setText('取消')
+            cancel_btn.clicked.connect(
+                lambda checked=False, k=key: self._cancel_send(k))
+            top.addWidget(cancel_btn)
         bar = QProgressBar()
         bar.setRange(0, 1000)
         bar.setValue(0)
@@ -795,7 +824,8 @@ class TransferWidget(QWidget):
         self.rec_lay.insertWidget(0, row)
         rec = {'key': key, 'direction': direction, 'name': display, 'total': total,
                'done': 0, 'files': {}, 'saved': [], 'state': 'wait', 'err': '',
-               'session_id': None, 'row': row, 'bar': bar, 'state_lab': state}
+               'session_id': None, 'row': row, 'bar': bar, 'state_lab': state,
+               'cancel_btn': cancel_btn, 'cancel_event': cancel_event}
         self._records[key] = rec
         self._rec_keys.insert(0, key)
         self._update_record(rec)
@@ -821,6 +851,8 @@ class TransferWidget(QWidget):
             text = '被拒绝'
         elif state == 'cancelled':
             text = '已取消'
+        elif state == 'cancelling':
+            text = '取消中…'
         else:
             text = '失败'
             if rec.get('err'):
@@ -834,3 +866,6 @@ class TransferWidget(QWidget):
             rec['bar'].setValue(1000)
         else:
             rec['bar'].setValue(int(rec['done'] * 1000 / total) if total else 0)
+        btn = rec.get('cancel_btn')
+        if btn is not None:
+            btn.setVisible(state in ('wait', 'busy'))
