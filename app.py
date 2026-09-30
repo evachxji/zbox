@@ -20,6 +20,7 @@ from PyQt5.QtWidgets import (QWidget, QFrame, QLabel, QToolButton, QVBoxLayout, 
 
 import calendar_data as cd
 import sysutil
+import transfer_ui
 from themes import THEMES, THEME_ORDER, THEME_CHOICES, AUTO, build_qss
 from version import APP_VERSION, GITHUB_URL
 
@@ -2119,7 +2120,7 @@ class FloatingPanel(QWidget):
     toggled = pyqtSignal()
     settingsRequested = pyqtSignal()
 
-    def __init__(self, cfg, hstore, tstore):
+    def __init__(self, cfg, hstore, tstore, server=None, discovery=None, device_info=None):
         super(FloatingPanel, self).__init__()
         self.cfg = cfg
         self.cn_font, self.num_font = pick_fonts()
@@ -2168,7 +2169,7 @@ class FloatingPanel(QWidget):
         bx.setContentsMargins(sc(3), sc(3), sc(3), sc(3))
         bx.setSpacing(sc(6 if resolve_theme(cfg.theme) == 'nocturne' else 2))
         self.tabs = []
-        for i, name in enumerate(['日历', '待办']):
+        for i, name in enumerate(['日历', '待办', '传输']):
             b = QToolButton()
             b.setObjectName('tab')
             b.setText(name)
@@ -2203,11 +2204,14 @@ class FloatingPanel(QWidget):
         self.cal = CalendarWidget(hstore, cfg, resolve_theme(cfg.theme))
         self.todo = TodoWidget(tstore)
         self.todo.set_theme(resolve_theme(cfg.theme))
+        self.transfer = transfer_ui.TransferWidget(cfg, server, discovery, device_info)
+        self.transfer.set_theme(resolve_theme(cfg.theme))
         # 顶部栏平时隐藏：日历左侧的时分秒 / 日期行充当窗口拖拽把手
         self.cal.clock_hm.installEventFilter(self)
         self.cal.sub.installEventFilter(self)
 
         self.single_stack = _SlideStack()
+        self.single_stack.addWidget(self.transfer)   # 常驻；双栏切换只搬日历+待办
         self.single_page = QWidget()
         sl = QVBoxLayout(self.single_page)
         sl.setContentsMargins(0, 0, 0, 0)
@@ -2332,7 +2336,9 @@ class FloatingPanel(QWidget):
     def set_tab(self, idx, save=True):
         if self._dual:
             self.set_dual(False, save=False)
-        self.single_stack.slide_to(self.cal if idx == 0 else self.todo)
+        pages = (self.cal, self.todo, self.transfer)
+        idx = idx if 0 <= idx < len(pages) else 0   # 持久化的 tab 越界时回退日历
+        self.single_stack.slide_to(pages[idx])
         for i, b in enumerate(self.tabs):
             b.setProperty('active', 'true' if i == idx else 'false')
             b.style().unpolish(b)
@@ -2362,7 +2368,8 @@ class FloatingPanel(QWidget):
             self.single_stack.addWidget(self.todo)
             self.todo.set_solo(True)
             self.content.setCurrentWidget(self.single_page)
-            self.set_tab(self.single_stack.currentIndex() if self.single_stack.currentWidget() in (self.cal, self.todo) else 0, save=False)
+            w = self.single_stack.currentWidget()
+            self.set_tab((self.cal, self.todo).index(w) if w in (self.cal, self.todo) else 0, save=False)
         self.tab_box.setVisible(not dual)  # 双栏已同屏显示日历 + 待办，tab 栏没有意义
         self.setFixedSize(sc(DUAL_W if dual else SINGLE_W), sc(PANEL_H))
         self._clamp_to_screen()
@@ -2377,6 +2384,7 @@ class FloatingPanel(QWidget):
         QApplication.instance().setStyleSheet(build_qss(real, self.cn_font, self.num_font, ui_scale(), self._icon_dir))
         self.cal.set_theme(real)
         self.todo.set_theme(real)
+        self.transfer.set_theme(real)
         if save:
             self.cfg.set('theme', key)
 

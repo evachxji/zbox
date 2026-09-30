@@ -5,6 +5,7 @@
 自检：设置环境变量 ZVIBER_SHOT=<目录> 启动，自动导出两主题截图后退出。
 """
 import os
+import platform
 import re
 import sys
 import time
@@ -20,6 +21,7 @@ import app as ui
 import calendar_data as cd
 import installer
 import sysutil
+import transfer
 from themes import THEME_ORDER
 
 IPC_KEY = sysutil.IPC_KEY
@@ -176,7 +178,26 @@ def main():
     cfg = ui.Config(os.path.join(data_dir, 'config.json'))
     hstore = cd.HolidayStore(os.path.join(data_dir, 'holidays.json'))
     tstore = ui.TodoStore(os.path.join(data_dir, 'todos.json'))
-    panel = ui.FloatingPanel(cfg, hstore, tstore)
+
+    # 局域网传输：指纹持久化在 config.json（同步进 cfg.data，防 cfg.save() 回写时丢键）；
+    # 别名默认电脑名（传输页可改）。端口被占时注入 None，传输页降级为「不可用」空态
+    fingerprint = transfer.load_or_create_fingerprint(cfg.path)
+    cfg.data['transfer_fingerprint'] = fingerprint
+    alias = cfg.transfer_alias or platform.node() or 'Zviber'
+    device_info = transfer.DeviceInfo.local(alias, fingerprint)
+    try:
+        transfer_server = transfer.TransferServer(device_info)
+    except Exception:
+        transfer_server = None   # 端口 53327 被占用
+    discovery = transfer.Discovery(device_info) if transfer_server is not None else None
+    panel = ui.FloatingPanel(cfg, hstore, tstore, transfer_server, discovery, device_info)
+
+    # 截图自检不起服务：避免网络发现/对端接入让截图不确定。
+    # 记住启动状态：未 start 过的 server 不能 stop（socketserver.shutdown() 会死等）
+    transfer_started = transfer_server is not None and not os.environ.get('ZVIBER_SHOT')
+    if transfer_started:
+        transfer_server.start()
+        discovery.start()
 
     # IPC 服务：接收 --toggle
     server = QLocalServer(qapp)
@@ -203,6 +224,23 @@ def main():
 
     tray.activated.connect(on_tray)
     tray.show()
+
+    if transfer_server is None:
+        tray.showMessage('Zviber', '传输服务启动失败：端口 53327 被占用',
+                         QSystemTrayIcon.Warning, 5000)
+
+    def _transfer_notify(title, msg):
+        try:
+            tray.showMessage(title, msg, QSystemTrayIcon.Information, 4000)
+        except Exception:
+            pass
+    panel.transfer.notify.connect(_transfer_notify)
+
+    def _stop_transfer():
+        if transfer_started:
+            discovery.stop()
+            transfer_server.stop()
+    qapp.aboutToQuit.connect(_stop_transfer)
 
     # 节假日数据：设置窗「联网更新」与导入窗里各源的「下载并导入」都走同一条后台通道
     def fetch_holidays(on_finish=None):
@@ -299,7 +337,7 @@ def _import_holidays(tray, hstore, panel, on_download):
 
 
 def _self_shot(shot_dir, panel, cfg, tstore, qapp):
-    """验证用：注入示例待办，导出两主题 × 日历/待办/双栏 截图后还原并退出。"""
+    """验证用：注入示例待办，导出两主题 × 日历/待办/传输/双栏 截图后还原并退出。"""
     os.makedirs(shot_dir, exist_ok=True)
     backup = list(tstore.items)
     today = date.today()
@@ -318,6 +356,7 @@ def _self_shot(shot_dir, panel, cfg, tstore, qapp):
     for key in THEME_ORDER:
         jobs.append((key, 'cal'))
         jobs.append((key, 'todo'))
+        jobs.append((key, 'transfer'))
         jobs.append((key, 'dual'))
     state = {'i': 0}
 
@@ -336,7 +375,7 @@ def _self_shot(shot_dir, panel, cfg, tstore, qapp):
             panel.set_dual(True, save=False)
         else:
             panel.set_dual(False, save=False)
-            panel.set_tab(0 if view == 'cal' else 1, save=False)
+            panel.set_tab({'cal': 0, 'todo': 1, 'transfer': 2}[view], save=False)
         QApplication.processEvents()
         state['i'] += 1
         QTimer.singleShot(250, lambda: _grab(shot_dir, key, view, step))
