@@ -244,7 +244,8 @@ def main():
             settings_dlg[0].activateWindow()
             return
         dlg = ui.SettingsDialog(panel, fetch_holidays,
-                                lambda: _import_holidays(tray, hstore, panel, download_source))
+                                lambda: _import_holidays(tray, hstore, panel, download_source),
+                                boxmgr)
         settings_dlg[:] = [dlg]
         dlg.show()
 
