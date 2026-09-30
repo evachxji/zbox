@@ -308,6 +308,11 @@ class BoxWindow(QWidget):
         self.pages.addWidget(page_invalid)
         root.addLayout(self.pages, 1)
 
+        # 子控件默认继承顶层窗口的光标：边缘悬停设了双箭头后划入列表不会复位。
+        # 给会盖住窗口背景的子控件装过滤器，MouseMove 时按窗口坐标同步光标。
+        for w in (self.title, self.list, self.list.viewport(), self.hint):
+            w.installEventFilter(self)
+
         # 文件夹内容变化自动刷新（300ms 去抖）
         self.watcher = QFileSystemWatcher(self)
         self._debounce = QTimer(self)
@@ -539,6 +544,31 @@ class BoxWindow(QWidget):
                 8: Qt.SizeVerCursor, 5: Qt.SizeFDiagCursor, 10: Qt.SizeFDiagCursor,
                 6: Qt.SizeBDiagCursor, 9: Qt.SizeBDiagCursor}
 
+    def _sync_cursor(self, pos):
+        """按窗口坐标刷新光标：边缘给缩放箭头，其余复位（None = 不处于可调状态）。"""
+        if self.rec.get('locked') or self.rec.get('collapsed'):
+            self.unsetCursor()
+            return
+        cur = self._CURSORS.get(self._hit_edges(pos))
+        if cur is None:
+            self.unsetCursor()
+        else:
+            self.setCursor(cur)
+
+    def eventFilter(self, obj, e):
+        # 子控件上的 MouseMove 转成窗口坐标同步光标（子控件不设光标，跟随窗口）
+        if e.type() == e.MouseMove and not self._op:
+            self._sync_cursor(obj.mapTo(self, e.pos()))
+        return super(BoxWindow, self).eventFilter(obj, e)
+
+    def enterEvent(self, e):
+        self.unsetCursor()   # 从窗外划入时复位，不残留上次的缩放箭头
+        super(BoxWindow, self).enterEvent(e)
+
+    def leaveEvent(self, e):
+        self.unsetCursor()
+        super(BoxWindow, self).leaveEvent(e)
+
     def mousePressEvent(self, e):
         if e.button() != Qt.LeftButton or self.rec.get('locked'):
             super(BoxWindow, self).mousePressEvent(e)
@@ -553,10 +583,7 @@ class BoxWindow(QWidget):
 
     def mouseMoveEvent(self, e):
         if not self._op:
-            if not self.rec.get('locked') and not self.rec.get('collapsed'):
-                self.setCursor(self._CURSORS.get(self._hit_edges(e.pos()), Qt.ArrowCursor))
-            else:
-                self.unsetCursor()
+            self._sync_cursor(e.pos())
             super(BoxWindow, self).mouseMoveEvent(e)
             return
         kind, edges, start_pos, start_geo = self._op
