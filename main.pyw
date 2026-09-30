@@ -4,6 +4,7 @@
       pythonw main.pyw --toggle   已运行则切换显隐（供桌面右键菜单调用）
 自检：设置环境变量 ZVIBER_SHOT=<目录> 启动，自动导出两主题截图后退出。
 """
+import faulthandler
 import os
 import re
 import sys
@@ -163,8 +164,20 @@ def _debug_excepthook(t, v, tb):
         pass
 
 
+# faulthandler 的输出文件句柄要活到进程结束，放模块级
+_crash_log = [None]
+
+
 def main():
     sys.excepthook = _debug_excepthook
+    # 原生崩溃（Qt/C++ 层访问冲突直接杀进程）不经过 sys.excepthook，
+    # faulthandler 能在崩溃瞬间把 Python 堆栈落盘
+    try:
+        _crash_log[0] = open(os.path.join(sysutil.appdata_dir(), 'crash_native.log'),
+                             'a', encoding='utf-8')
+        faulthandler.enable(_crash_log[0])
+    except Exception:
+        pass
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
     QApplication.setQuitOnLastWindowClosed(False)
