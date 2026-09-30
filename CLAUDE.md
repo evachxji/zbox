@@ -199,7 +199,10 @@ excepthook 时 exit 127、连输出都没有。`main()` 里那句 `sys.excepthoo
   `QFileSystemWatcher` 300ms 去抖刷新；路径失效显示「解散格子」页。
 - **视觉固定深色磨砂**，不挂主题系统（贴壁纸用，跟明暗主题都不合适）。用了
   `WA_TranslucentBackground`——面板禁用的 ClearType 问题这里接受（参考软件本身就是半透明）。
-- 桌面层级复用 `pin_to_desktop` / `sink_to_desktop`：每个格子自己跑 500ms 看门狗。
+- 桌面层级与面板同一套（`pin_to_desktop` / `sink_to_desktop` + WinEvent 钩子 + 拖拽脱离桌面带）：
+  **空闲绝不空发 SetWindowPos**——z-order 空变会触发桌面整理软件的表层反压，双方振荡就是闪烁；
+  只在「中心点被表层压住」（`_covered_by_surface`）或点击激活后失焦时沉底，表层重建靠 WinEvent
+  钩子毫秒级抬回。这套判定是从面板（app.py `_lift_if_covered` 等）原样搬过来的，改面板时记得同步。
 - **双击桌面显隐**：`DesktopClickHook` 起独立线程装 `WH_MOUSE_LL`（LL 钩子收不到
   `WM_LBUTTONDBLCLK`，自己按 GetDoubleClickTime 判双击）。命中判定先排我们自己的窗口
   （格子被 SetParent 挂到 DefView 下，父链会摸到桌面家族，必须先按 hwnd 排除），

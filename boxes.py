@@ -21,7 +21,7 @@ import subprocess
 import time
 from ctypes import wintypes
 
-from PyQt5.QtCore import (Qt, QTimer, QThread, QUrl, QPoint, QRect, QSize,
+from PyQt5.QtCore import (Qt, QTimer, QThread, QUrl, QPoint, QRect, QSize, QEvent,
                           QFileSystemWatcher, pyqtSignal)
 from PyQt5.QtGui import QIcon, QCursor, QPainter, QColor, QPen, QFont
 from PyQt5.QtWidgets import (QWidget, QListWidget, QListWidgetItem, QVBoxLayout,
@@ -235,6 +235,8 @@ class BoxWindow(QWidget):
         self.mgr = mgr
         self.rec = rec
         self._desk_pinned = False
+        self._desk_surface = None   # 探测到的第三方桌面表层（沉底锚点缓存）
+        self._floating = False      # True = 被点击激活浮起到应用窗口之上，失焦后需要沉回
         self._op = None          # ('move', 起点全局坐标, 起始几何) 或 ('resize', 边缘掩码, ...)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMouseTracking(True)
@@ -321,7 +323,12 @@ class BoxWindow(QWidget):
         self._debounce.timeout.connect(self.refresh)
         self.watcher.directoryChanged.connect(lambda _p: self._debounce.start())
 
-        # 桌面层级：归属桌面带 + 看门狗沉底（与面板同一套）
+        # 桌面层级：归属桌面带 + 看门狗沉底 + WinEvent 钩子（与面板同一套）：
+        # 桌面整理软件（TXMiniSkin）每 ~2.5s 重建表层，靠钩子毫秒级抬回，等看门狗会闪半秒
+        self._win_evt_cb = ui._WINEVENTPROC(self._on_win_event)   # 必须留引用，防 GC
+        self._win_evt_hook = ui._u32.SetWinEventHook(ui._EVENT_SHOW, ui._EVENT_REORDER,
+                                                     None, self._win_evt_cb, 0, 0, 0)
+        QApplication.instance().aboutToQuit.connect(self._unhook_win_event)
         self._sink_timer = QTimer(self)
         self._sink_timer.timeout.connect(self._desktop_tick)
         self._sink_timer.start(500)
@@ -500,6 +507,8 @@ class BoxWindow(QWidget):
         QTimer.singleShot(300, lambda: ui.sink_to_desktop(self))
 
     def _ensure_band(self):
+        if self._op is not None:
+            return   # 拖拽期间故意脱离桌面带（见 mousePressEvent），别补挂
         hwnd = int(self.winId())
         progman = ui._u32.FindWindowW('Progman', None)
         if progman and ui._u32.GetAncestor(hwnd, ui._GA_ROOT) != progman:
@@ -508,9 +517,83 @@ class BoxWindow(QWidget):
     def _desktop_tick(self):
         hwnd = int(self.winId())
         if not ui._u32.IsWindow(hwnd):
+            self._sink_timer.stop()
             return
         self._ensure_band()
-        ui.sink_to_desktop(self)
+        extra = []
+        if self.isVisible():
+            extra.append((self.x() + self.width() // 2, self.y() + self.height() // 2))
+        self._desk_surface, _t = ui.probe_desktop(skip=(hwnd,), extra=extra)
+        # 空闲时不动 z-order：空发 SetWindowPos 会触发表层反压，与桌面整理软件振荡闪烁
+        if self._covered_by_surface():
+            if self._op is None:
+                ui.sink_to_desktop(self, self._desk_surface)   # 被表层压住：无条件抬回
+        else:
+            self._ensure_desktop_level()
+
+    def _on_win_event(self, _hook, event, hwnd, idObject, _idChild, _thread, _ts):
+        """桌面带内窗口的 SHOW / 容器 REORDER 事件回调。只做轻量过滤，
+        真正的抬回动作丢回事件循环（钩子里直接动 z-order 有风险）。"""
+        try:
+            if not hwnd or not self.isVisible() or self._op is not None:
+                return
+            if hwnd == int(self.winId()):
+                return
+            if idObject not in (0, -4):   # 只看窗口本身 / 客户区级别
+                return
+            cls = ui._class_name(hwnd)
+            if cls in ui._PROG_FAMILY:
+                if event != ui._EVENT_REORDER:
+                    return
+            else:
+                sw, sh = ui._u32.GetSystemMetrics(0), ui._u32.GetSystemMetrics(1)
+                if not ui._is_desktop_surface(hwnd, sw, sh):
+                    return
+            QTimer.singleShot(0, self._lift_if_covered)
+        except Exception:
+            pass
+
+    def _unhook_win_event(self):
+        if self._win_evt_hook:
+            ui._u32.UnhookWinEvent(self._win_evt_hook)
+            self._win_evt_hook = None
+
+    def _lift_if_covered(self):
+        """表层重排后的即时抬回：没被压住就不动（自己的沉底也会触发 REORDER，防自激回路）。"""
+        if self._covered_by_surface():
+            ui.sink_to_desktop(self, self._desk_surface)
+
+    def _covered_by_surface(self):
+        """格子中心被桌面整理软件的表层压住（看不见也点不到）的判定。"""
+        if not self.isVisible():
+            return False
+        h = ui._u32.WindowFromPoint(wintypes.POINT(self.x() + self.width() // 2,
+                                                   self.y() + self.height() // 2))
+        mine = int(self.winId())
+        sw, sh = ui._u32.GetSystemMetrics(0), ui._u32.GetSystemMetrics(1)
+        while h:
+            if h == mine or ui._class_name(h) in ui._PROG_FAMILY:
+                return False
+            if ui._is_desktop_surface(h, sw, sh):
+                return True
+            h = ui._u32.GetParent(h)
+        return False
+
+    def event(self, e):
+        if e.type() == QEvent.WindowActivate:
+            self._floating = True    # 点击激活会浮到应用窗口之上，记下待沉
+        elif e.type() == QEvent.WindowDeactivate:
+            QTimer.singleShot(300, self._ensure_desktop_level)   # 失焦后压回桌面层
+        return super(BoxWindow, self).event(e)
+
+    def _ensure_desktop_level(self):
+        """格子被点击激活后会浮到普通窗口之上；空闲（未激活/未悬停/未拖拽）时压回桌面层。
+        没浮起过就不动——z-order 变动会触发表层反压，空发会振荡闪烁。"""
+        if (not self._floating or not self.isVisible() or self.isActiveWindow()
+                or self.underMouse() or self._op is not None):
+            return
+        self._floating = False
+        ui.sink_to_desktop(self, self._desk_surface)
 
     # ---------- 绘制 ----------
     def paintEvent(self, e):
@@ -580,6 +663,9 @@ class BoxWindow(QWidget):
             self._op = ('move', 0, e.globalPos(), self.geometry())
         else:
             super(BoxWindow, self).mousePressEvent(e)
+        if self._op:
+            ui.unpin_from_desktop(self)   # 拖拽期间退出桌面带：普通窗口移动不触发表层反压
+            self._desk_pinned = False
 
     def mouseMoveEvent(self, e):
         if not self._op:
@@ -611,6 +697,8 @@ class BoxWindow(QWidget):
             if not self.rec.get('collapsed'):
                 self.rec['w'], self.rec['h'] = self.width(), self.height()
             self.mgr.save_rec(self)
+            self._desk_pinned = ui.pin_to_desktop(self)   # 归位：重新归属桌面带并沉回表层之上
+            ui.sink_to_desktop(self, self._desk_surface)
         super(BoxWindow, self).mouseReleaseEvent(e)
 
     def mouseDoubleClickEvent(self, e):
@@ -780,6 +868,7 @@ class BoxManager(object):
             self.windows.remove(win)
         self.store.data['boxes'] = [r for r in self.store.data['boxes'] if r is not win.rec]
         self.store.save()
+        win._unhook_win_event()
         win.setParent(None)
         win.deleteLater()
 
