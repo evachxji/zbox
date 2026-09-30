@@ -131,7 +131,10 @@ object Sender {
                 peerAlias = device.info.alias,
                 fileName = name,
                 size = size,
-            ).also { TransferStore.add(it) }
+            ).also {
+                it.fileUri = uri.toString()
+                TransferStore.add(it)
+            }
             OutFile(meta, uri, record)
         }
         if (files.isEmpty()) return

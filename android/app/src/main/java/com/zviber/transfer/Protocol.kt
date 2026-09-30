@@ -114,6 +114,8 @@ class TransferRecord(
     var status by mutableStateOf(TransferStatus.WAITING)
     var error by mutableStateOf<String?>(null)
     var speedBps by mutableStateOf(0L)   // EMA 平滑后的传输速度（字节/秒）
+    var fileUri: String? = null          // 接收=落盘文件，发送=源文件（点击行跳所在目录用）
+    var savedTreeUri: String? = null     // 接收时选定的 SAF 目录；null 表示默认系统 Download
 
     private var lastTickAt = 0L
     private var lastTickProgress = 0L

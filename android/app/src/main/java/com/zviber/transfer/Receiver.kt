@@ -258,6 +258,8 @@ class Receiver(private val context: Context) {
         }
 
         target.finish()   // MediaStore 路径清 IS_PENDING，文件对其它应用可见
+        record.fileUri = target.uri.toString()
+        record.savedTreeUri = session.dirUri?.toString()
         record.progress = meta.size
         record.status = TransferStatus.DONE
         return TransferServer.jsonResponse(Status.OK, "")
