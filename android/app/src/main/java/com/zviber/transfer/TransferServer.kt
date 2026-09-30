@@ -2,6 +2,7 @@
 
 import fi.iki.elonen.NanoHTTPD
 import fi.iki.elonen.NanoHTTPD.Response.Status
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 
 /**
@@ -66,6 +67,10 @@ class TransferServer(private val receiver: Receiver) : NanoHTTPD(PROTOCOL_PORT) 
             NanoHTTPD.newFixedLengthResponse(status, "application/json", body)
 
         fun error(status: NanoHTTPD.Response.IStatus, message: String): Response =
-            jsonResponse(status, "{\"message\":\"$message\"}")
+            jsonResponse(status, protoJson.encodeToString(ErrorMessage(message)))
     }
 }
+
+/** 错误应答体（message 走 JSON 编码，避免裸插值破坏格式） */
+@Serializable
+private data class ErrorMessage(val message: String)

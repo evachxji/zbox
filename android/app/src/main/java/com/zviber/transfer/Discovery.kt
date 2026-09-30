@@ -101,7 +101,10 @@ class Discovery(private val context: Context, private val scope: CoroutineScope)
                 try {
                     socket.receive(packet)
                 } catch (e: Exception) {
-                    if (running) continue else break
+                    if (!running) break
+                    // 避免原地 continue 忙循环：等 1 秒再重试
+                    try { Thread.sleep(1000) } catch (_: InterruptedException) {}
+                    continue
                 }
                 val ip = packet.address?.hostAddress ?: continue
                 val text = String(packet.data, 0, packet.length, Charsets.UTF_8)

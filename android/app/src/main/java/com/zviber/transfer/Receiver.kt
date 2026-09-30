@@ -45,7 +45,7 @@ object IncomingState {
 
 /**
  * 接收方核心：prepare-upload 会话状态机 + upload 流式写入 SAF 目录 + cancel 清理半成品。
- * 错误码：400 参数/会话无效，403 拒绝或 token 错误，409 已有会话等待确认，422 会话状态不可写，500 内部错误。
+ * 错误码：400 参数/会话无效，403 拒绝或 token 错误，409 会话冲突/状态不可写，422 sha256 校验失败，500 内部错误（含短读）。
  */
 class Receiver(private val context: Context) {
 
@@ -61,7 +61,10 @@ class Receiver(private val context: Context) {
         val remoteIp: String,
         val createdAt: Long = System.currentTimeMillis(),
     ) {
+        @Volatile
         var state = SessionState.PENDING
+
+        @Volatile
         var dirUri: Uri? = null
 
         @Volatile
@@ -82,19 +85,19 @@ class Receiver(private val context: Context) {
         } catch (_: Exception) {
             return TransferServer.error(Status.BAD_REQUEST, "invalid json")
         }
+        if (request.files.isEmpty()) {
+            return TransferServer.error(Status.BAD_REQUEST, "no files")
+        }
         val ip = http.remoteIpAddress ?: ""
         DeviceStore.upsert(request.info, ip)
 
         purgeStaleSessions()
-        if (sessions.values.any { it.state == SessionState.PENDING }) {
-            return TransferServer.error(Status.CONFLICT, "another session is waiting for confirmation")
-        }
 
         val sessionId = UUID.randomUUID().toString()
         val tokens = request.files.keys.associateWith { randomToken() }
         val records = request.files.mapValues { (_, meta) ->
             TransferRecord(
-                id = meta.id,
+                id = sessionId + ":" + meta.id,
                 outgoing = false,
                 peerAlias = request.info.alias,
                 fileName = meta.fileName,
@@ -102,8 +105,23 @@ class Receiver(private val context: Context) {
             ).also { TransferStore.add(it) }
         }
         val decision = CompletableDeferred<Uri?>()
-        val session = Session(sessionId, request.info, request.files.values.toList(), tokens, decision, records, http.remoteIpAddress ?: "")
-        sessions[sessionId] = session
+        val session = Session(sessionId, request.info, request.files.values.toList(), tokens, decision, records, ip)
+        // PENDING 检查 + 插入必须原子，并发 prepare 不能双通过
+        val inserted = synchronized(sessions) {
+            if (sessions.values.any { it.state == SessionState.PENDING }) {
+                false
+            } else {
+                sessions[sessionId] = session
+                true
+            }
+        }
+        if (!inserted) {
+            records.values.forEach {
+                it.status = TransferStatus.FAILED
+                it.error = "会话冲突"
+            }
+            return TransferServer.error(Status.CONFLICT, "another session is waiting for confirmation")
+        }
 
         IncomingState.show(
             PendingRequest(
@@ -116,13 +134,23 @@ class Receiver(private val context: Context) {
         )
 
         // NanoHTTPD 工作线程上阻塞等待用户确认，最长 3 分钟
-        val dir = runBlocking { withTimeoutOrNull(180_000) { decision.await() } }
-        IncomingState.clear(sessionId)
+        val dir = try {
+            runBlocking { withTimeoutOrNull(180_000) { decision.await() } }
+        } finally {
+            // 兜底：旋转/重建不留僵尸对话框与未完结 deferred
+            IncomingState.clear(sessionId)
+            decision.complete(null)
+        }
 
         if (dir == null) {
             sessions.remove(sessionId)
             records.values.forEach { it.status = TransferStatus.REJECTED }
             return TransferServer.error(Status.FORBIDDEN, "rejected")
+        }
+
+        // 等待期间会话可能已被 cancel：不再覆盖状态、不再响应接受
+        if (session.cancelled || !sessions.containsKey(sessionId)) {
+            return TransferServer.error(Status.CONFLICT, "session cancelled")
         }
 
         session.dirUri = dir
@@ -135,37 +163,42 @@ class Receiver(private val context: Context) {
     fun handleUpload(http: NanoHTTPD.IHTTPSession): NanoHTTPD.Response {
         val params = http.parameters
         val sessionId = params["sessionId"]?.firstOrNull()
-            ?: return TransferServer.error(Status.BAD_REQUEST, "missing sessionId")
+            ?: return drainAndError(http, Status.BAD_REQUEST, "missing sessionId")
         val fileId = params["fileId"]?.firstOrNull()
-            ?: return TransferServer.error(Status.BAD_REQUEST, "missing fileId")
+            ?: return drainAndError(http, Status.BAD_REQUEST, "missing fileId")
         val token = params["token"]?.firstOrNull()
-            ?: return TransferServer.error(Status.BAD_REQUEST, "missing token")
+            ?: return drainAndError(http, Status.BAD_REQUEST, "missing token")
 
         val session = sessions[sessionId]
-            ?: return TransferServer.error(Status.FORBIDDEN, "invalid session")
+            ?: return drainAndError(http, Status.FORBIDDEN, "invalid session")
         val meta = session.files.firstOrNull { it.id == fileId }
-            ?: return TransferServer.error(Status.BAD_REQUEST, "invalid fileId")
+            ?: return drainAndError(http, Status.BAD_REQUEST, "invalid fileId")
         if (session.tokens[fileId] != token) {
-            return TransferServer.error(Status.FORBIDDEN, "invalid token")
+            return drainAndError(http, Status.FORBIDDEN, "invalid token")
         }
         // 来源 IP 必须与 prepare-upload 时一致
         if (session.remoteIp.isNotEmpty() && http.remoteIpAddress != session.remoteIp) {
-            return TransferServer.error(Status.FORBIDDEN, "ip mismatch")
+            return drainAndError(http, Status.FORBIDDEN, "ip mismatch")
         }
         if (session.cancelled || session.state != SessionState.ACTIVE) {
-            return TransferServer.error(Status.CONFLICT, "session not writable")
+            return drainAndError(http, Status.CONFLICT, "session not writable")
+        }
+
+        // 协议要求发送方必须知道长度：拒绝未知长度（chunked）的上传
+        val contentLength = http.headers["content-length"]?.toLongOrNull() ?: -1L
+        if (contentLength < 0) {
+            return TransferServer.error(Status.BAD_REQUEST, "missing content-length")
         }
 
         val record = session.records.getValue(fileId)
         record.status = TransferStatus.TRANSFERRING
 
         val dir = DocumentFile.fromTreeUri(context, session.dirUri!!)
-            ?: return TransferServer.error(Status.INTERNAL_ERROR, "save directory unavailable")
-        val doc = createUniqueFile(dir, meta.fileName)
+            ?: return fail(record, "save directory unavailable")
+        val doc = createUniqueFile(dir, sanitizeName(meta.fileName))
             ?: return fail(record, "cannot create file")
         session.currentDoc = doc
 
-        val contentLength = http.headers["content-length"]?.toLongOrNull() ?: -1L
         // 对端提供 sha256 时边写边算摘要
         val digest = if (meta.sha256.isNullOrEmpty()) null else MessageDigest.getInstance("SHA-256")
         var received = 0L
@@ -226,8 +259,13 @@ class Receiver(private val context: Context) {
     fun handleCancel(http: NanoHTTPD.IHTTPSession): NanoHTTPD.Response {
         val sessionId = http.parameters["sessionId"]?.firstOrNull()
             ?: return TransferServer.error(Status.BAD_REQUEST, "missing sessionId")
-        val session = sessions.remove(sessionId)
+        val session = sessions[sessionId]
             ?: return TransferServer.jsonResponse(Status.OK, "") // 幂等：不存在的会话直接成功
+        // 来源 IP 必须与 prepare-upload 时一致（与 upload 相同规则）
+        if (session.remoteIp.isNotEmpty() && http.remoteIpAddress != session.remoteIp) {
+            return TransferServer.error(Status.FORBIDDEN, "ip mismatch")
+        }
+        sessions.remove(sessionId)
         session.cancelled = true
         try { session.currentDoc?.delete() } catch (_: Exception) {}
         session.records.values.forEach {
@@ -239,6 +277,33 @@ class Receiver(private val context: Context) {
     // ---------- 内部工具 ----------
 
     private class CancelledException : Exception()
+
+    /** 排空请求体剩余字节再回错误，避免过早响应触发 RST 冲掉错误码（对齐 PC 端 _drain_body） */
+    private fun drainAndError(
+        http: NanoHTTPD.IHTTPSession,
+        status: NanoHTTPD.Response.IStatus,
+        message: String,
+    ): NanoHTTPD.Response {
+        try {
+            val len = http.headers["content-length"]?.toLongOrNull() ?: 0L
+            if (len > 0) {
+                val input = http.inputStream
+                val buffer = ByteArray(64 * 1024)
+                var remaining = len
+                while (remaining > 0) {
+                    val n = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+                    if (n < 0) break
+                    remaining -= n
+                }
+            }
+        } catch (_: Exception) {
+        }
+        return TransferServer.error(status, message)
+    }
+
+    /** 文件名消毒：剥掉路径分隔，防目录穿越 */
+    private fun sanitizeName(name: String): String =
+        name.substringAfterLast('/').substringAfterLast('\\').ifEmpty { "file" }
 
     private fun fail(record: TransferRecord, message: String): NanoHTTPD.Response {
         record.status = TransferStatus.FAILED
@@ -277,7 +342,7 @@ class Receiver(private val context: Context) {
     private fun purgeStaleSessions() {
         val now = System.currentTimeMillis()
         sessions.values
-            .filter { now - it.createdAt > 10 * 60_000 }
+            .filter { it.state == SessionState.PENDING && now - it.createdAt > 10 * 60_000 }
             .forEach { sessions.remove(it.sessionId) }
     }
 

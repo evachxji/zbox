@@ -44,8 +44,32 @@ object Sender {
 
         // 1. 收集元数据（id = uuid，sha256 留空）
         val files = uris.mapNotNull { uri ->
-            val (name, size) = queryMeta(context, uri)
+            val (name, size0) = queryMeta(context, uri)
             if (name == null) return@mapNotNull null
+            // 大小未知时用 AssetFileDescriptor 兜底取真实长度
+            var size = size0
+            if (size < 0) {
+                size = try {
+                    resolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
+                } catch (_: Exception) {
+                    -1L
+                }
+            }
+            if (size < 0) {
+                // 协议要求必须知道长度：拒绝该文件并在记录中提示
+                TransferRecord(
+                    id = UUID.randomUUID().toString(),
+                    outgoing = true,
+                    peerAlias = device.info.alias,
+                    fileName = name,
+                    size = -1L,
+                ).also {
+                    it.status = TransferStatus.FAILED
+                    it.error = "无法获取文件大小"
+                    TransferStore.add(it)
+                }
+                return@mapNotNull null
+            }
             val meta = FileMeta(
                 id = UUID.randomUUID().toString(),
                 fileName = name,

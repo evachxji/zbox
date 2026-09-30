@@ -1,9 +1,7 @@
 ﻿package com.zviber.transfer
 
-import android.Manifest
 import android.content.Context
 import android.content.SharedPreferences
-import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -67,44 +65,41 @@ object Settings {
 
 class MainActivity : ComponentActivity() {
 
+    private lateinit var receiver: Receiver
     private lateinit var discovery: Discovery
-    private lateinit var server: TransferServer
+    private var server: TransferServer? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Settings.init(applicationContext)
         enableEdgeToEdge()
 
-        val receiver = Receiver(applicationContext)
-        server = TransferServer(receiver)
-        try {
-            server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
-        } catch (_: Exception) {
-            // 端口被占用时降级：仅发送方功能可用
-        }
+        receiver = Receiver(applicationContext)
         discovery = Discovery(applicationContext, lifecycleScope)
-        discovery.start()
-
-        requestNotificationPermissionIfNeeded()
 
         setContent {
             ZviberApp(discovery)
         }
     }
 
-    override fun onDestroy() {
-        try { server.stop() } catch (_: Exception) {}
-        discovery.stop()
-        super.onDestroy()
+    /** 仅前台传输：回到前台才起 HTTP 服务与组播发现 */
+    override fun onStart() {
+        super.onStart()
+        val s = TransferServer(receiver)
+        try {
+            s.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
+            server = s
+        } catch (_: Exception) {
+            // 端口被占用时降级：仅发送方功能可用
+        }
+        discovery.start()
     }
 
-    /** API 33+ 运行时申请通知权限 */
-    private fun requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT >= 33 &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
-        }
+    override fun onStop() {
+        discovery.stop()
+        try { server?.stop() } catch (_: Exception) {}
+        server = null
+        super.onStop()
     }
 }
 
