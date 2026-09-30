@@ -2,6 +2,7 @@
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -68,6 +69,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var receiver: Receiver
     private lateinit var discovery: Discovery
     private var server: TransferServer? = null
+    private var wifiLock: WifiManager.WifiLock? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -85,6 +87,8 @@ class MainActivity : ComponentActivity() {
     /** 仅前台传输：回到前台才起 HTTP 服务与组播发现 */
     override fun onStart() {
         super.onStart()
+        wifiLock?.let { if (it.isHeld) it.release() }
+        wifiLock = null
         val s = TransferServer(receiver)
         try {
             s.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
@@ -96,6 +100,18 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        // 有传输在进行时保持服务与发现：息屏/切后台不中断传输、组播照常广播，
+        // 对端设备列表不会因 30 秒 TTL 把我们剔掉。WifiLock 防息屏后 WiFi 休眠断流。
+        if (receiver.hasActive() || Sender.hasActive()) {
+            if (wifiLock?.isHeld != true) {
+                val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+                @Suppress("DEPRECATION")
+                wifiLock = wifi.createWifiLock(WifiManager.WIFI_MODE_FULL, "zviber-transfer")
+                wifiLock?.acquire()
+            }
+            super.onStop()
+            return
+        }
         discovery.stop()
         try { server?.stop() } catch (_: Exception) {}
         server = null

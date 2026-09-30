@@ -76,6 +76,9 @@ class Receiver(private val context: Context) {
 
     private val sessions = ConcurrentHashMap<String, Session>()
 
+    /** 是否有正在传输中的接收会话（供 MainActivity 判断退后台是否保持服务） */
+    fun hasActive(): Boolean = sessions.values.any { it.state == SessionState.ACTIVE }
+
     /** POST /prepare-upload */
     fun handlePrepare(http: NanoHTTPD.IHTTPSession): NanoHTTPD.Response {
         val body = TransferServer.readJsonBody(http)

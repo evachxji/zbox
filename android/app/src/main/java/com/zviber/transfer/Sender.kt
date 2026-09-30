@@ -62,6 +62,9 @@ object Sender {
     // 记录 id -> 发送会话（仅进行中保留在表里）
     private val activeByRecord = ConcurrentHashMap<String, ActiveSession>()
 
+    /** 是否有正在发送中的会话（供 MainActivity 判断退后台是否保持服务） */
+    fun hasActive(): Boolean = activeByRecord.isNotEmpty()
+
     fun send(context: Context, device: PeerDevice, uris: List<Uri>, scope: CoroutineScope) {
         val session = ActiveSession()
         session.job = scope.launch(Dispatchers.IO) { doSend(context, device, uris, session) }

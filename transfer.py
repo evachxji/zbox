@@ -541,16 +541,22 @@ class Discovery(object):
         payload['announce'] = True
         data = json.dumps(payload).encode('utf-8')
         while not self._stop.is_set():
-            try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM,
-                                     socket.IPPROTO_UDP)
+            # 逐网卡发送：多网卡 / VPN TUN 接管默认路由时，不显式指定出口，
+            # 组播报文会发进隧道而不是真实局域网（对端永远收不到 announce）
+            for iface in (_local_ipv4() or {None}):
                 try:
-                    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
-                    sock.sendto(data, (MULTICAST_GROUP, PORT))
-                finally:
-                    sock.close()
-            except socket.error:
-                pass  # 组播发送失败不崩溃，降级为仅扫描
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM,
+                                         socket.IPPROTO_UDP)
+                    try:
+                        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+                        if iface:
+                            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF,
+                                            socket.inet_aton(iface))
+                        sock.sendto(data, (MULTICAST_GROUP, PORT))
+                    finally:
+                        sock.close()
+                except socket.error:
+                    pass  # 组播发送失败不崩溃，降级为仅扫描
             self._stop.wait(self.announce_interval)
 
     def _listen_loop(self):
@@ -559,9 +565,19 @@ class Discovery(object):
                                  socket.IPPROTO_UDP)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind(('', PORT))
-            mreq = struct.pack('4s4s', socket.inet_aton(MULTICAST_GROUP),
-                               socket.inet_aton('0.0.0.0'))
-            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+            # 逐网卡组加入：0.0.0.0 只落在默认网卡上，VPN/虚拟网卡在场时会漏收 LAN 组播
+            joined = False
+            for iface in (_local_ipv4() or {'0.0.0.0'}):
+                try:
+                    mreq = struct.pack('4s4s', socket.inet_aton(MULTICAST_GROUP),
+                                       socket.inet_aton(iface))
+                    sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+                    joined = True
+                except socket.error:
+                    pass
+            if not joined:
+                sock.close()
+                return  # 组播监听不可用，降级为仅扫描
             sock.settimeout(1.0)
         except socket.error:
             return  # 组播监听失败不崩溃，降级为仅扫描
@@ -622,8 +638,21 @@ class Discovery(object):
             list(pool.map(probe, targets))
 
 
+def _is_lan_ipv4(ip):
+    '''是否 RFC1918 局域网地址。排除 127 回环 / 169.254 链路本地 / 198.18.0.0/15
+    基准测试段——Clash 等代理的 TUN 虚拟网卡用 198.18 段做 fake-ip，组播会被它吞掉。'''
+    if ip.startswith('192.168.') or ip.startswith('10.'):
+        return True
+    if ip.startswith('172.'):
+        try:
+            return 16 <= int(ip.split('.')[1]) <= 31
+        except (ValueError, IndexError):
+            return False
+    return False
+
+
 def _local_ipv4():
-    '''本机所有非回环 IPv4。'''
+    '''本机局域网 IPv4（仅 RFC1918）；一个都没有时退化为所有非回环地址。'''
     ips = set()
     try:
         for item in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
@@ -644,7 +673,8 @@ def _local_ipv4():
                 ips.add(ip)
         except socket.error:
             pass
-    return ips
+    lan = set(ip for ip in ips if _is_lan_ipv4(ip))
+    return lan or ips
 
 
 def _post_json(url, payload, timeout):

@@ -12,7 +12,8 @@ import threading
 import time
 import uuid
 
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QPointF
+from PyQt5.QtGui import QColor, QPainter, QPen, QPixmap
 from PyQt5.QtWidgets import (QWidget, QFrame, QLabel, QToolButton, QPushButton,
                              QVBoxLayout, QHBoxLayout, QLineEdit, QProgressBar,
                              QScrollArea, QFileDialog, QSizePolicy)
@@ -35,6 +36,63 @@ def _fmt_size(n):
             return ('%.0f' if unit == 'B' else '%.1f') % n + ' ' + unit
         n /= 1024.0
     return '%.1f TB' % n
+
+
+def _fmt_speed(bps):
+    '''字节/秒转可读速度。'''
+    return _fmt_size(bps) + '/s'
+
+
+def _fmt_eta(seconds):
+    '''剩余秒数转可读时间（<=0 或非法返回空串）。'''
+    if seconds is None or seconds != seconds or seconds <= 0:
+        return ''
+    seconds = int(seconds)
+    if seconds < 60:
+        return '%d 秒' % max(1, seconds)
+    if seconds < 3600:
+        return '%d 分 %d 秒' % (seconds // 60, seconds % 60)
+    return '%d 小时 %d 分' % (seconds // 3600, seconds % 3600 // 60)
+
+
+_CHIP_CACHE = {}
+
+
+def _dir_chip(direction, theme):
+    '''记录行方向图标：accent 淡底圆角块 + 粗箭头（↑发 ↓收），按主题/DPI 缓存。'''
+    key = (direction, theme, ui.ui_scale())
+    pm = _CHIP_CACHE.get(key)
+    if pm is not None:
+        return pm
+    s = ui.sc(22)
+    pm = QPixmap(s, s)
+    pm.fill(Qt.transparent)
+    accents = {'nocturne': ('#e8a33d', '#7fb069'),
+               'mica': ('#0067c0', '#107c10')}
+    color = QColor(accents.get(theme, accents['nocturne'])[0 if direction == 'up' else 1])
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    tint = QColor(color)
+    tint.setAlpha(38)
+    p.setPen(Qt.NoPen)
+    p.setBrush(tint)
+    r = ui.sc(6)
+    p.drawRoundedRect(0, 0, s, s, r, r)
+    pen = QPen(color, max(2.0, ui.sc(2)), Qt.SolidLine, Qt.RoundCap)
+    p.setPen(pen)
+    cx = s / 2.0
+    if direction == 'up':
+        y0, y1 = s * 0.74, s * 0.26   # 杆：下 -> 上
+    else:
+        y0, y1 = s * 0.26, s * 0.74   # 杆：上 -> 下
+    p.drawLine(QPointF(cx, y0), QPointF(cx, y1))
+    w = s * 0.20                     # 箭头两翼
+    off = w if direction == 'up' else -w
+    p.drawLine(QPointF(cx, y1), QPointF(cx - w, y1 + off))
+    p.drawLine(QPointF(cx, y1), QPointF(cx + w, y1 + off))
+    p.end()
+    _CHIP_CACHE[key] = pm
+    return pm
 
 
 def _default_save_dir(cfg):
@@ -204,15 +262,32 @@ class TransferWidget(QWidget):
         self.recv = QFrame(self)
         self.recv.setObjectName('recvDialog')
         rl = QVBoxLayout(self.recv)
-        rl.setContentsMargins(ui.sc(18), ui.sc(16), ui.sc(18), ui.sc(16))
-        rl.setSpacing(ui.sc(8))
+        rl.setContentsMargins(ui.sc(18), ui.sc(16), ui.sc(18), ui.sc(14))
+        rl.setSpacing(ui.sc(10))
         title = QLabel('收到文件')
         title.setObjectName('transferTitle')
+        # 发送方卡片：别名（强调色）+ 文件数与总大小（弱化）
+        from_card = QFrame()
+        from_card.setObjectName('recvFromCard')
+        fc = QVBoxLayout(from_card)
+        fc.setContentsMargins(ui.sc(12), ui.sc(8), ui.sc(12), ui.sc(8))
+        fc.setSpacing(ui.sc(2))
         self.recv_from = QLabel()
         self.recv_from.setObjectName('recvFrom')
+        self.recv_meta = QLabel()
+        self.recv_meta.setObjectName('recvMeta')
+        fc.addWidget(self.recv_from)
+        fc.addWidget(self.recv_meta)
+        # 文件清单卡片：吸满中部空间，替代空荡的留白
+        file_card = QFrame()
+        file_card.setObjectName('recvFileCard')
+        fl = QVBoxLayout(file_card)
+        fl.setContentsMargins(ui.sc(12), ui.sc(9), ui.sc(12), ui.sc(9))
         self.recv_files = QLabel()
         self.recv_files.setObjectName('recvFiles')
         self.recv_files.setWordWrap(True)
+        self.recv_files.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        fl.addWidget(self.recv_files)
         dir_row = QHBoxLayout()
         dir_row.setSpacing(ui.sc(6))
         self.recv_dir = QLabel()
@@ -236,8 +311,8 @@ class TransferWidget(QWidget):
         btn_row.addWidget(no)
         btn_row.addWidget(yes)
         rl.addWidget(title)
-        rl.addWidget(self.recv_from)
-        rl.addWidget(self.recv_files, 1)
+        rl.addWidget(from_card)
+        rl.addWidget(file_card, 1)
         rl.addLayout(dir_row)
         rl.addLayout(btn_row)
         self.recv.hide()
@@ -272,8 +347,15 @@ class TransferWidget(QWidget):
     # ---------------- 通用 ----------------
 
     def set_theme(self, key):
-        '''主题切换：颜色全走 QSS，这里只记住键（与 TodoWidget 接口一致）。'''
+        '''主题切换：颜色全走 QSS；方向图标是绘制的位图，这里按主题重刷。'''
         self.theme_key = key
+        try:
+            for rec in getattr(self, '_records', {}).values():
+                lab = rec.get('dir_lab')
+                if lab is not None:
+                    lab.setPixmap(_dir_chip(rec['direction'], key))
+        except Exception:
+            pass
 
     def resizeEvent(self, e):
         super(TransferWidget, self).resizeEvent(e)
@@ -626,7 +708,9 @@ class TransferWidget(QWidget):
                 rec['session_id'] = view['session_id']
             self._pending = (view['session_id'], key, result, event)
             self._save_dir = _default_save_dir(self.cfg)
-            self.recv_from.setText('来自 %s · 共 %s' % (view['alias'], _fmt_size(view['total'])))
+            self.recv_from.setText(view['alias'])
+            self.recv_meta.setText('%d 个文件 · 共 %s' % (len(view['names']),
+                                                        _fmt_size(view['total'])))
             shown = view['names'][:8]
             text = '\n'.join(shown)
             if len(view['names']) > len(shown):
@@ -791,8 +875,10 @@ class TransferWidget(QWidget):
         lay.setSpacing(ui.sc(3))
         top = QHBoxLayout()
         top.setSpacing(ui.sc(6))
-        arrow = QLabel('↑' if direction == 'up' else '↓')
+        arrow = QLabel()
         arrow.setObjectName('transferDir')
+        arrow.setFixedSize(ui.sc(22), ui.sc(22))
+        arrow.setPixmap(_dir_chip(direction, getattr(self, 'theme_key', 'nocturne')))
         name = QLabel(display)
         name.setObjectName('transferName')
         name.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
@@ -825,6 +911,7 @@ class TransferWidget(QWidget):
         rec = {'key': key, 'direction': direction, 'name': display, 'total': total,
                'done': 0, 'files': {}, 'saved': [], 'state': 'wait', 'err': '',
                'session_id': None, 'row': row, 'bar': bar, 'state_lab': state,
+               'dir_lab': arrow,
                'cancel_btn': cancel_btn, 'cancel_event': cancel_event}
         self._records[key] = rec
         self._rec_keys.insert(0, key)
@@ -844,7 +931,22 @@ class TransferWidget(QWidget):
         if state == 'wait':
             text = '等待对方确认' if rec['direction'] == 'up' else '等待你确认'
         elif state == 'busy':
-            text = '传输中 %d%%' % (int(rec['done'] * 100 / total) if total else 0)
+            pct = int(rec['done'] * 100 / total) if total else 0
+            text = '传输中 %d%%' % pct
+            now = time.time()
+            tick = rec.get('_tick')
+            if tick is None:
+                rec['_tick'] = (now, rec['done'])      # 首个进度帧只建立基准
+            else:
+                last_ts, last_done = tick
+                if rec['done'] > last_done and now - last_ts > 0.2:
+                    speed = (rec['done'] - last_done) / (now - last_ts)
+                    prev = rec.get('_speed') or 0.0
+                    rec['_speed'] = speed if not prev else prev * 0.5 + speed * 0.5
+                    rec['_tick'] = (now, rec['done'])
+            if rec.get('_speed') and total and rec['done'] < total:
+                eta = (total - rec['done']) / rec['_speed']
+                text += ' · %s · 剩 %s' % (_fmt_speed(rec['_speed']), _fmt_eta(eta))
         elif state == 'done':
             text = '完成'
         elif state == 'rejected':

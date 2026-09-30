@@ -6,6 +6,8 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!-- 传输中息屏保持 WiFi 不休眠（退后台保活路径用） -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- usesCleartextTraffic：协议走明文 HTTP（仅局域网），Android 9+ 默认拦截明文流量 -->
     <application

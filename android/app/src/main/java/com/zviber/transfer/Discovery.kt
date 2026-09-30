@@ -10,6 +10,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -73,11 +74,12 @@ class Discovery(private val context: Context, private val scope: CoroutineScope)
         multicastLock = null
     }
 
-    /** 手动刷新：立即发一次 announce，并对本机 /24 子网逐 IP POST /register 扫描 */
-    fun refresh() {
+    /** 手动刷新：立即发一次 announce，并对本机 /24 子网逐 IP POST /register 扫描；完成后在主线程回调 onDone */
+    fun refresh(onDone: (() -> Unit)? = null) {
         scope.launch(Dispatchers.IO) {
             sendAnnounce()
             scanSubnet()
+            onDone?.let { withContext(Dispatchers.Main) { it() } }
         }
     }
 
