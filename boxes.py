@@ -513,6 +513,8 @@ class BoxWindow(QWidget):
     def _ensure_band(self):
         if self._op is not None:
             return   # 拖拽期间故意脱离桌面带（见 mousePressEvent），别补挂
+        if self._floating:
+            return   # 浮起期间（激活中/刚拖完）保持普通顶层窗口，别挂回桌面带
         hwnd = int(self.winId())
         progman = ui._u32.FindWindowW('Progman', None)
         if progman and ui._u32.GetAncestor(hwnd, ui._GA_ROOT) != progman:
@@ -606,6 +608,7 @@ class BoxWindow(QWidget):
                 or self.underMouse() or self._op is not None):
             return
         self._floating = False
+        self._repin()   # 沉底前先挂回桌面带（Win+D 免疫恢复）
         ui.sink_to_desktop(self, self._desk_surface)
 
     # ---------- 绘制 ----------
@@ -717,8 +720,10 @@ class BoxWindow(QWidget):
             if not self.rec.get('collapsed'):
                 self.rec['w'], self.rec['h'] = self.width(), self.height()
             self.mgr.save_rec(self)
-            self._repin()   # 归位：重新归属桌面带并沉回表层之上
-            ui.sink_to_desktop(self, self._desk_surface)
+            # 松手不挂回桌面带：挂回动作本身会把格子压回桌面层（应用窗口之下），
+            # 落在其它窗口区域时瞬间被盖住——用户眼里就是「拖完消失」。
+            # 保持普通顶层窗口浮着（拖拽已激活，_floating=True），
+            # 挂带+沉底交给失焦空闲路径（WindowDeactivate → _ensure_desktop_level）。
         super(BoxWindow, self).mouseReleaseEvent(e)
 
     def _clamp_to_screen(self):
