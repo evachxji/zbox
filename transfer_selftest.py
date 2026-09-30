@@ -423,6 +423,40 @@ def case_ip_mismatch(ctx):
         shutil.rmtree(root, ignore_errors=True)
 
 
+def case_bad_size_meta(ctx):
+    # 用例 12：prepare 元数据缺 size 或 size 非非负整数 → 400（回调不应被触发）
+    bad_files = [
+        {'f1': {'id': 'f1', 'fileName': 'a.bin',
+                'fileType': 'application/octet-stream'}},               # 缺 size
+        {'f1': {'id': 'f1', 'fileName': 'a.bin', 'size': -5,
+                'fileType': 'application/octet-stream'}},               # 负数
+        {'f1': {'id': 'f1', 'fileName': 'a.bin', 'size': 'abc',
+                'fileType': 'application/octet-stream'}},               # 非整数
+    ]
+    for files in bad_files:
+        try:
+            post_json(ctx.url_b('prepare-upload'),
+                      {'info': ctx.info_a.to_dict(), 'files': files})
+            check(False, '坏 size 元数据不应成功: %r' % (files,))
+        except urllib.error.HTTPError as exc:
+            check(exc.code == 400,
+                  '坏 size 应回 400，实际 %d（%r）' % (exc.code, files))
+    # 合法 prepare 仍可用（校验没有误伤）
+    root = tempfile.mkdtemp(prefix='zviber_case12_')
+    try:
+        ctx.box_b['dir'] = root
+        meta = {'f1': {'id': 'f1', 'fileName': 'ok.bin', 'size': 0,
+                       'fileType': 'application/octet-stream'}}
+        status, body = post_json(ctx.url_b('prepare-upload'),
+                                 {'info': ctx.info_a.to_dict(), 'files': meta})
+        check(status == 200, 'size=0 的合法 prepare 应回 200，实际 %d' % status)
+        post_raw(ctx.url_b('cancel?' + urllib.parse.urlencode(
+            {'sessionId': body['sessionId']})), b'')
+    finally:
+        ctx.box_b['dir'] = None
+        shutil.rmtree(root, ignore_errors=True)
+
+
 CASES = [
     ('register 互见设备', case_register),
     ('GET /info 字段完整', case_info),
@@ -435,6 +469,7 @@ CASES = [
     ('坏 port register 回 400 且不影响后续登记', case_bad_port),
     ('Content-Length 与声明 size 不符回 400', case_size_mismatch),
     ('来源 IP 不符回 403', case_ip_mismatch),
+    ('坏 size 元数据 prepare 回 400', case_bad_size_meta),
 ]
 
 

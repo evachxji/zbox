@@ -227,6 +227,7 @@ class _ApiHandler(BaseHTTPRequestHandler):
             else:
                 self._send_json(404, {'message': 'not found'})
         except _BodyTooLarge:
+            self._drain_body()  # 与其它拒绝路径一致，先排空再响应
             self._send_json(413, {'message': 'payload too large'})
         except ValueError:
             self._send_json(400, {'message': 'bad request'})
@@ -262,6 +263,11 @@ class _ApiHandler(BaseHTTPRequestHandler):
         if not isinstance(info_dict, dict) or not isinstance(files, dict) or not files:
             self._send_json(400, {'message': 'missing info or files'})
             return
+        for meta in files.values():
+            size = meta.get('size') if isinstance(meta, dict) else None
+            if not isinstance(size, int) or size < 0:
+                self._send_json(400, {'message': 'invalid file size'})
+                return
         session_id = uuid.uuid4().hex
         session = {
             'id': session_id,
@@ -273,7 +279,7 @@ class _ApiHandler(BaseHTTPRequestHandler):
             'save_dir': None,
             'saved': {},                                 # {fileId: 已落盘路径}
             'partial': {},                               # {fileId: 半成品路径}
-            'created_at': time.time(),
+            'created_at': time.time(),                   # 最后活跃时间（prepare 时初始化）
             'lock': threading.Lock(),
         }
         # 回调由 UI 层注入并阻塞弹窗，核心层只管调用
@@ -318,6 +324,8 @@ class _ApiHandler(BaseHTTPRequestHandler):
         if self.client_address[0] != session['ip']:
             reject(403, 'ip mismatch')
             return
+        # 刷新最后活跃时间：批量长传输总时长超 TTL 也不能误杀自己的会话
+        session['created_at'] = time.time()
 
         meta = session['files'][file_id]
         session['state'] = 'transferring'
@@ -421,7 +429,7 @@ class _ApiHandler(BaseHTTPRequestHandler):
             session['state'] = 'cancelled'
             # 只删正在传输的半成品，已完整落盘的文件保留；
             # 若半成品正被上传线程占用（Windows 删不动），由其中断清理路径兜底删除
-            for partial in session['partial'].values():
+            for partial in list(session['partial'].values()):
                 try:
                     os.remove(partial)
                 except OSError:
@@ -465,16 +473,20 @@ class TransferServer(ThreadingHTTPServer):
         self.server_close()
 
     def sweep_sessions(self):
-        '''清理超过 SESSION_TTL 的陈旧会话，并删除其半成品文件。'''
+        '''清理超过 SESSION_TTL 未活跃的陈旧会话，并删除其半成品文件。
+
+        created_at 语义为最后活跃时间；传输中的会话跳过（双保险，
+        其自身有 socket 超时兜底，不会真成孤儿）。'''
         now = time.time()
         with self.sessions_lock:
             stale = [s for s in self.sessions.values()
-                     if now - s['created_at'] > SESSION_TTL]
+                     if now - s['created_at'] > SESSION_TTL
+                     and s['state'] != 'transferring']
             for s in stale:
                 self.sessions.pop(s['id'], None)
         for s in stale:
             s['state'] = 'cancelled'
-            for p in s['partial'].values():
+            for p in list(s['partial'].values()):
                 try:
                     os.remove(p)
                 except OSError:
