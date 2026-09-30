@@ -12,6 +12,7 @@ Zviber 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），P
 - `transfer_ui.py` — 面板「传输」tab：设备列表、文件多选 + 拖拽发送、传输记录、接收确认层
 - `transfer_selftest.py` — 传输协议自动化自检（12 用例，动态端口，不依赖组播/Qt）
 - `themes.py` — 两套主题 QSS（深色 `nocturne` / 浅色 `mica`）加 `auto` 伪主题；`%CN%`/`%NUM%` 为字体占位符
+- `version.py` — 版本号唯一来源：关于窗、设置窗左下角、安装向导、卸载注册表项共用 `APP_VERSION`，发版只改这一个文件
 - `sysutil.py` — 注册表集成：开机自启、桌面右键菜单、应用列表卸载项（默认 HKCU，免管理员）
 - `installer.py` — exe 安装向导与自安装/卸载（只在 frozen 时生效）
 - `install.py` — 源码方式的系统集成（只装开机自启）

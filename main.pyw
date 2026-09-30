@@ -12,7 +12,7 @@ import time
 from datetime import date, datetime, timedelta
 
 
-from PyQt5.QtCore import Qt, QTimer, QThread, QUrl, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, QThread, QUrl, pyqtSignal, QCoreApplication
 from PyQt5.QtGui import QIcon, QCursor, QDesktopServices
 from PyQt5.QtNetwork import QLocalServer, QLocalSocket
 from PyQt5.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QFileDialog
@@ -25,6 +25,11 @@ import transfer
 from themes import THEME_ORDER
 
 IPC_KEY = sysutil.IPC_KEY
+
+# Qt5 在含非 ASCII 字符的安装路径下会把插件目录里的用户名算成 ??，导致
+# "no Qt platform plugin could be initialized"；这里按真实路径手动补正。
+QCoreApplication.addLibraryPath(
+    os.path.join(os.path.dirname(__import__('PyQt5').__file__), 'Qt5', 'plugins'))
 
 _worker = []   # 当前后台抓取线程：留引用防 GC，也用来判断是否已在抓
 
