@@ -194,20 +194,21 @@ excepthook 时 exit 127、连输出都没有。`main()` 里那句 `sys.excepthoo
 `BoxStore` 存 `%APPDATA%\ZviberPanel\boxes.json`（`visible` + 格子记录列表）。
 托盘菜单有「新建格子 / 新建文件夹格子 / 显示隐藏格子」；截图自检模式不创建格子。
 
+- **格子是普通顶层 Tool 窗口，不挂桌面带、永不动 z-order**。Tool 窗口天然免疫 Win+D
+  （本机 Win11 实测存活）；挂带的方案（pin_to_desktop + 沉底 + WinEvent 抬回）试过又拆了——
+  桌面带成员必然被压到所有应用窗口之下，格子拖到被窗口覆盖的位置就「消失」，与
+  「格子永不消失」的诉求根本冲突。面板那套桌面带机制是面板自己的，别往格子上套。
 - **空白格子是真实文件夹**（`Boxes\<id>\`）：拖入 = `shutil.move` 进去，解散 = 全部还原回
   桌面（SHGetFolderPath 取真桌面，处理 OneDrive 重定向），不删文件。映射格子只读目录、
   `QFileSystemWatcher` 300ms 去抖刷新；路径失效显示「解散格子」页。
 - **视觉固定深色磨砂**，不挂主题系统（贴壁纸用，跟明暗主题都不合适）。用了
   `WA_TranslucentBackground`——面板禁用的 ClearType 问题这里接受（参考软件本身就是半透明）。
-- 桌面层级与面板同一套（`pin_to_desktop` / `sink_to_desktop` + WinEvent 钩子 + 拖拽脱离桌面带）：
-  **空闲绝不空发 SetWindowPos**——z-order 空变会触发桌面整理软件的表层反压，双方振荡就是闪烁；
-  只在「中心点被表层压住」（`_covered_by_surface`）或点击激活后失焦时沉底，表层重建靠 WinEvent
-  钩子毫秒级抬回。这套判定是从面板（app.py `_lift_if_covered` 等）原样搬过来的，改面板时记得同步。
 - **双击桌面显隐**：`DesktopClickHook` 起独立线程装 `WH_MOUSE_LL`（LL 钩子收不到
-  `WM_LBUTTONDBLCLK`，自己按 GetDoubleClickTime 判双击）。命中判定先排我们自己的窗口
-  （格子被 SetParent 挂到 DefView 下，父链会摸到桌面家族，必须先按 hwnd 排除），
-  再认 Progman 家族 + `SysListView32` + **全屏工具窗**（腾讯桌面整理的 TXMiniSkin
-  覆盖层会挡在所有桌面命中之上，漏了它在装了腾讯整理机器上双击永远无效）。
+  `WM_LBUTTONDBLCLK`，自己按 GetDoubleClickTime 判双击）。两个判定点都是坑：
+  ① 命中链上先碰到我们自己的窗口（格子/面板）要排除——格子不在桌面带也照样要按 hwnd 排；
+  ② 要认 Progman 家族 + `SysListView32` + 全屏工具窗（腾讯整理的 TXMiniSkin 覆盖层）。
+  ③ **第一击也必须落在桌面上**——否则「拖开格子 → 快速点它腾出来的空位」会被误判双击桌面，
+  全部格子被隐藏（真实的用户 bug 报告）。
 - **凡是进 ctypes 的 Win32 函数都要显式声明 restype/argtypes**（含 GetMessageW 这类消息
   循环函数）——windll 默认按 32 位截断，64 位下指针参数高位丢失，钩子线程静默失效。
 - `boxes.json` 读取用 `utf-8-sig`：用户拿记事本改完会带 BOM，`utf-8` 读失败后 save
