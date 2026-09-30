@@ -176,7 +176,7 @@ def main():
     # 通知归属独立应用身份：Windows 按进程/AUMID 缓存气泡图标，
     # 旧版「黄底日期」图标就是这么残留在通知里的；独立 AUMID 绕开旧缓存
     try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('Zviber.Panel')
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('Zviber')
     except Exception:
         pass
 

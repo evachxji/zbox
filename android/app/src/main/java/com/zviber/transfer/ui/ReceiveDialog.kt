@@ -83,15 +83,15 @@ fun ReceiveDialogHost() {
                     onClick = { dirPicker.launch(defaultTreeUri()) },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    val label = pending.dirUri?.let { dirName(it) } ?: "选择保存位置"
+                    val label = pending.dirUri?.let { "保存到：" + dirName(it) } ?: "保存到：Download（系统默认，点我更改）"
                     Text(text = label, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { pending.dirUri?.let { pending.onAccept(it) } },
-                enabled = pending.dirUri != null,
+                // 未选目录也能直接接受：默认存到系统 Download（API 29+）
+                onClick = { pending.onAccept(pending.dirUri) },
             ) {
                 Text("接受")
             }

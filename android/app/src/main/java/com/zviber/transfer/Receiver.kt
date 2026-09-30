@@ -1,6 +1,10 @@
 ﻿package com.zviber.transfer
 
+import android.content.ContentValues
 import android.content.Context
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.net.Uri
 import android.webkit.MimeTypeMap
 import androidx.compose.runtime.getValue
@@ -22,7 +26,7 @@ class PendingRequest(
     val sessionId: String,
     val fromAlias: String,
     val files: List<FileMeta>,
-    val onAccept: (Uri) -> Unit,
+    val onAccept: (Uri?) -> Unit,
     val onReject: () -> Unit,
 ) {
     var dirUri by mutableStateOf<Uri?>(null)
@@ -71,7 +75,7 @@ class Receiver(private val context: Context) {
         var cancelled = false
 
         @Volatile
-        var currentDoc: DocumentFile? = null
+        var currentTarget: SaveTarget? = null
     }
 
     private val sessions = ConcurrentHashMap<String, Session>()
@@ -131,7 +135,7 @@ class Receiver(private val context: Context) {
                 sessionId = sessionId,
                 fromAlias = request.info.alias,
                 files = session.files,
-                onAccept = { uri -> decision.complete(uri) },
+                onAccept = { uri -> decision.complete(uri ?: Uri.EMPTY) },   // 未选目录 = 默认系统 Download
                 onReject = { decision.complete(null) },
             )
         )
@@ -156,7 +160,7 @@ class Receiver(private val context: Context) {
             return TransferServer.error(Status.CONFLICT, "session cancelled")
         }
 
-        session.dirUri = dir
+        session.dirUri = if (dir == Uri.EMPTY) null else dir   // null = 默认系统 Download
         session.state = SessionState.ACTIVE
         val payload = protoJson.encodeToString(PrepareResponse(sessionId, tokens))
         return TransferServer.jsonResponse(Status.OK, payload)
@@ -196,17 +200,16 @@ class Receiver(private val context: Context) {
         val record = session.records.getValue(fileId)
         record.status = TransferStatus.TRANSFERRING
 
-        val dir = DocumentFile.fromTreeUri(context, session.dirUri!!)
-            ?: return fail(record, "save directory unavailable")
-        val doc = createUniqueFile(dir, sanitizeName(meta.fileName))
+        // 保存目标：用户选定目录（SAF）；未选则默认系统 Download（MediaStore）
+        val target = openSaveTarget(session.dirUri, sanitizeName(meta.fileName), meta.fileType)
             ?: return fail(record, "cannot create file")
-        session.currentDoc = doc
+        session.currentTarget = target
 
         // 对端提供 sha256 时边写边算摘要
         val digest = if (meta.sha256.isNullOrEmpty()) null else MessageDigest.getInstance("SHA-256")
         var received = 0L
         try {
-            context.contentResolver.openOutputStream(doc.uri, "w")?.use { out ->
+            context.contentResolver.openOutputStream(target.uri, "w")?.use { out ->
                 val input = http.inputStream
                 val buffer = ByteArray(64 * 1024)
                 var remaining = contentLength
@@ -224,19 +227,19 @@ class Receiver(private val context: Context) {
                 }
             } ?: return fail(record, "cannot open output stream")
         } catch (_: CancelledException) {
-            doc.delete()
+            target.deleter()
             record.status = TransferStatus.CANCELED
             return TransferServer.error(Status.BAD_REQUEST, "cancelled")
         } catch (e: Exception) {
-            doc.delete()
+            target.deleter()
             return fail(record, e.message ?: "write error")
         } finally {
-            session.currentDoc = null
+            session.currentTarget = null
         }
 
         // 短读校验：实收字节数必须等于 Content-Length，否则删除半成品回 500
         if (contentLength >= 0 && received != contentLength) {
-            doc.delete()
+            target.deleter()
             record.status = TransferStatus.FAILED
             record.error = "字节数不足：" + received + "/" + contentLength
             return TransferServer.error(Status.INTERNAL_ERROR, "incomplete body")
@@ -246,13 +249,14 @@ class Receiver(private val context: Context) {
         if (digest != null) {
             val actual = digest.digest().joinToString("") { "%02x".format(it) }
             if (!actual.equals(meta.sha256, ignoreCase = true)) {
-                doc.delete()
+                target.deleter()
                 record.status = TransferStatus.FAILED
                 record.error = "sha256 校验失败"
                 return TransferServer.error(TransferServer.STATUS_422, "sha256 mismatch")
             }
         }
 
+        target.finish()   // MediaStore 路径清 IS_PENDING，文件对其它应用可见
         record.progress = meta.size
         record.status = TransferStatus.DONE
         return TransferServer.jsonResponse(Status.OK, "")
@@ -270,7 +274,7 @@ class Receiver(private val context: Context) {
         }
         sessions.remove(sessionId)
         session.cancelled = true
-        try { session.currentDoc?.delete() } catch (_: Exception) {}
+        try { session.currentTarget?.deleter?.invoke() } catch (_: Exception) {}
         session.records.values.forEach {
             if (it.status != TransferStatus.DONE) it.status = TransferStatus.CANCELED
         }
@@ -278,6 +282,9 @@ class Receiver(private val context: Context) {
     }
 
     // ---------- 内部工具 ----------
+
+    /** 保存目标：文件 Uri + 删除半成品 + 完成收尾（MediaStore 需清 IS_PENDING） */
+    private class SaveTarget(val uri: Uri, val deleter: () -> Unit, val finish: () -> Unit = {})
 
     private class CancelledException : Exception()
 
@@ -312,6 +319,57 @@ class Receiver(private val context: Context) {
         record.status = TransferStatus.FAILED
         record.error = message
         return TransferServer.error(Status.INTERNAL_ERROR, message)
+    }
+
+    /** 打开保存目标：用户选定的 SAF 目录；未选（null）时默认系统 Download（MediaStore，API 29+ 免权限） */
+    private fun openSaveTarget(dirUri: Uri?, fileName: String, mime: String?): SaveTarget? {
+        if (dirUri != null) {
+            val dir = DocumentFile.fromTreeUri(context, dirUri) ?: return null
+            val doc = createUniqueFile(dir, fileName) ?: return null
+            return SaveTarget(doc.uri, { doc.delete() })
+        }
+        return createDownloadFile(fileName, mime)
+    }
+
+    /** 默认保存到系统 Download 根目录；API 26-28 无 MediaStore.Downloads 免权限写入，返回 null 走失败提示 */
+    private fun createDownloadFile(fileName: String, mime: String?): SaveTarget? {
+        if (Build.VERSION.SDK_INT < 29) return null
+        val resolver = context.contentResolver
+        var candidate = fileName
+        var index = 2
+        while (downloadExists(candidate)) {
+            val dot = fileName.lastIndexOf('.')
+            candidate = if (dot > 0) {
+                fileName.substring(0, dot) + " (" + index + ")" + fileName.substring(dot)
+            } else {
+                fileName + " (" + index + ")"
+            }
+            index++
+        }
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, candidate)
+            put(MediaStore.Downloads.MIME_TYPE, mime ?: "application/octet-stream")
+            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+            put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            ?: return null
+        return SaveTarget(uri, { resolver.delete(uri, null, null) }, {
+            val done = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
+            try { resolver.update(uri, done, null, null) } catch (_: Exception) {}
+        })
+    }
+
+    /** Download 根目录下是否已有同名文件（重名加 " (2)" 后缀用） */
+    private fun downloadExists(name: String): Boolean {
+        val cursor = context.contentResolver.query(
+            MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+            arrayOf(MediaStore.Downloads._ID),
+            MediaStore.Downloads.DISPLAY_NAME + "=? AND " + MediaStore.Downloads.RELATIVE_PATH + "=?",
+            arrayOf(name, Environment.DIRECTORY_DOWNLOADS + "/"),
+            null,
+        ) ?: return false
+        cursor.use { return it.count > 0 }
     }
 
     /** 在 SAF 目录中创建不重名的文件（同名加 " (2)" 后缀） */
