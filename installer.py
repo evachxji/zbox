@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
-"""exe 安装包：深色主题安装向导（路径/范围/空间/进度）+ 自安装 + 卸载（含应用列表注册）。
+"""exe 安装包：深色主题安装向导（路径/范围/空间/进度）+ 自安装 + 卸载向导（可选删除个人数据）。
 仅冻结为 exe 时生效；源码运行（pythonw main.pyw）不受影响，仍走 install.py。
 样式复用 themes.py NOCTURNE 主题与 #settingsPanel/#setBtn/#setSave 规范，仅补充少量同配色控件样式。
+onedir 说明：build.py 打出的 dist\\ZviberPanel\\ 目录自身即安装包（exe + _internal\\ 依赖），
+安装 = 把该目录整体复制到目标位置（按字节回报进度）。
 """
 import os
 import shutil
@@ -20,7 +22,7 @@ import sysutil
 APP_EXE = 'ZviberPanel.exe'
 APP_TITLE = 'Zviber 桌面日历'
 
-# 安装向导补充样式：沿用 NOCTURNE 深色配色（#e8a33d 强调色），%CN% 运行时替换
+# 向导补充样式：沿用 NOCTURNE 深色配色（#e8a33d 强调色，#e05252 危险色），%CN%/%NUM% 运行时替换
 _EXTRA_QSS = """
 QLineEdit#pathEdit {
     background: rgba(255,255,255,24); border: 1.5px solid rgba(255,255,255,40); border-radius: 8px;
@@ -33,6 +35,15 @@ QProgressBar {
     min-height: 10px; max-height: 10px; color: transparent;
 }
 QProgressBar::chunk { background: #e8a33d; border-radius: 5px; }
+QLabel#pctText { color: #e8a33d; font: 700 30px "%NUM%"; }
+QLabel#finishMark { color: #e8a33d; font: 600 40px "%CN%"; }
+QLabel#warnLabel { color: #b8924a; font: 11px "%CN%"; }
+QPushButton#dangerBtn {
+    background: #d64545; border: none; border-radius: 10px;
+    color: #fff; font: 600 13px "%CN%"; padding: 7px 18px;
+}
+QPushButton#dangerBtn:hover { background: #e05252; }
+QPushButton#dangerBtn:pressed { background: #b93a3a; }
 """
 
 
@@ -60,8 +71,25 @@ def relaunch_elevated(args):
                                                ' '.join(args), None, 1) > 32
 
 
+def _bundle_dir():
+    """frozen onedir 的程序目录（exe 与 _internal\\ 所在目录）。"""
+    return os.path.dirname(os.path.abspath(sys.executable))
+
+
 def _exe_dir():
-    return os.path.normcase(os.path.dirname(os.path.abspath(sys.executable)))
+    return os.path.normcase(_bundle_dir())
+
+
+def _dir_size(path):
+    """目录总字节数（onedir 程序目录体积，供空间预估与卸载项 EstimatedSize）。"""
+    total = 0
+    for base, _dirs, names in os.walk(path):
+        for n in names:
+            try:
+                total += os.path.getsize(os.path.join(base, n))
+            except OSError:
+                pass
+    return total
 
 
 def is_installed():
@@ -112,31 +140,44 @@ def _gen_icon(path):
     return ui.make_icon().pixmap(64, 64).save(path, 'ICO')
 
 
-def _copy_with_progress(src, dst, cb):
-    total = os.path.getsize(src)
+def _copy_tree_with_progress(src_root, dst_root, cb):
+    """整目录复制，按已复制字节数回报 0-100（逐文件回调，变化时才报）。"""
+    files = []
+    total = 0
+    for base, _dirs, names in os.walk(src_root):
+        for n in names:
+            p = os.path.join(base, n)
+            files.append(p)
+            total += os.path.getsize(p)
     done = 0
-    with open(src, 'rb') as f, open(dst, 'wb') as out:
-        while True:
-            buf = f.read(1 << 19)
-            if not buf:
-                break
-            out.write(buf)
-            done += len(buf)
-            cb(done * 100 // total)
-    shutil.copystat(src, dst)
+    last = -1
+    for p in files:
+        out = os.path.join(dst_root, os.path.relpath(p, src_root))
+        d = os.path.dirname(out)
+        if not os.path.isdir(d):
+            os.makedirs(d)
+        shutil.copy2(p, out)
+        done += os.path.getsize(p)
+        pct = done * 100 // total if total else 100
+        if pct != last:
+            last = pct
+            cb(pct)
 
 
 def install(path_dir, all_users=False, autostart=True, shortcut=True, progress=None):
-    """把当前 exe 安装到指定目录并注册系统集成，返回安装后的 exe 路径。
+    """把当前 onedir 程序目录整体复制到指定目录并注册系统集成，返回安装后的 exe 路径。
+    目标目录里已有旧安装（含 ZviberPanel.exe，_check_dir 保证无用户文件）时先清空再复制。
     progress(pct, text) 回报进度。"""
     def report(pct, text):
         if progress:
             progress(pct, text)
-    if not os.path.isdir(path_dir):
-        os.makedirs(path_dir)
+    src = _bundle_dir()
+    if os.path.normcase(src) != os.path.normcase(os.path.abspath(path_dir)):
+        if os.path.isfile(os.path.join(path_dir, APP_EXE)):
+            shutil.rmtree(path_dir)  # 覆盖重装：清掉旧版全部文件（含残留的 _internal）
+        os.makedirs(path_dir, exist_ok=True)
+        _copy_tree_with_progress(src, path_dir, lambda p: report(p * 7 // 10, '正在复制程序文件…'))
     dst = os.path.join(path_dir, APP_EXE)
-    if os.path.normcase(os.path.abspath(sys.executable)) != os.path.normcase(dst):
-        _copy_with_progress(sys.executable, dst, lambda p: report(p * 7 // 10, '正在复制程序文件…'))
     report(72, '正在生成图标…')
     # 此计算机安装时图标放安装目录（其他用户读不到安装者的 %APPDATA%）
     icon = os.path.join(path_dir if all_users else sysutil.appdata_dir(), 'icon.ico')
@@ -152,23 +193,33 @@ def install(path_dir, all_users=False, autostart=True, shortcut=True, progress=N
     else:
         sysutil.autostart_remove()
     report(93, '正在写入卸载信息…')
-    sysutil.uninstall_reg_install(dst, all_users=all_users)
+    sysutil.uninstall_reg_install(dst, all_users=all_users, size_kb=_dir_size(path_dir) // 1024)
     report(100, '完成')
     return dst
 
 
-def uninstall():
-    """清除全部注册表集成（HKCU/HKLM 均尝试）并延迟删除安装目录（exe 运行中无法删除自身）。
-    用户数据（%APPDATA%\\ZviberPanel）保留，重装后配置与待办不丢。"""
+def uninstall(remove_user_data=False, progress=None):
+    """清除全部注册表集成（HKCU/HKLM 均尝试）、桌面快捷方式，并延迟删除安装目录（exe 运行中无法删除自身）。
+    remove_user_data=True 时连同 %APPDATA%\\ZviberPanel（待办、格子、配置）一起删除；默认保留，重装不丢。
+    progress(pct, text) 回报进度。"""
+    def report(pct, text):
+        if progress:
+            progress(pct, text)
+    report(10, '正在移除系统集成…')
     sysutil.uninstall_reg_remove()
     sysutil.context_menu_remove()
     sysutil.autostart_remove()
+    report(35, '正在删除桌面快捷方式…')
     remove_desktop_shortcut()
+    if remove_user_data:
+        report(60, '正在删除个人数据…')
+        shutil.rmtree(sysutil.appdata_dir(), ignore_errors=True)
     if is_installed():
-        # exe 运行中无法删除自身：延迟 + 四轮重试（覆盖卸载完成提示框存活期）
-        target = os.path.dirname(os.path.abspath(sys.executable))
-        seq = ['ping 127.0.0.1 -n 4 > nul', 'rmdir /s /q "%s"' % target] * 4
+        report(85, '正在清理程序文件…')
+        # exe 运行中无法删除自身：延迟 + 六轮重试（覆盖卸载向导完成页的存活期）
+        seq = ['ping 127.0.0.1 -n 4 > nul', 'rmdir /s /q "%s"' % _bundle_dir()] * 6
         subprocess.Popen('cmd /c ' + ' & '.join(seq), creationflags=subprocess.CREATE_NO_WINDOW)
+    report(100, '完成')
 
 
 def _desktop_dir():
@@ -207,18 +258,11 @@ def _relaunch(path):
 
 
 def _uninstall_flow():
-    """--uninstall 入口（也供 Windows 应用列表调用）：HKLM 安装需提权；先请运行中的实例退出。"""
+    """--uninstall 入口（也供 Windows 应用列表调用）：HKLM 安装需提权；卸载向导与安装向导同风格。"""
     if sysutil.uninstall_reg_get('InstallLocation', True) and not is_admin():
         relaunch_elevated(['--uninstall'])
         return
-    request_quit()
-    time.sleep(1.0)
-    uninstall()
-    box = QMessageBox(QMessageBox.Information, '卸载 Zviber',
-                      '卸载完成。\n待办与配置数据保留在 %APPDATA%\\ZviberPanel。')
-    from PyQt5.QtCore import QTimer
-    QTimer.singleShot(3000, box.close)  # 3 秒自动关闭，免点击
-    box.exec_()
+    UninstallWizard().exec_()
 
 
 def maybe_install():
@@ -269,29 +313,25 @@ def _fmt_size(n):
     return '%.0f MB' % (n / (1 << 20))
 
 
-class InstallWizard(QDialog):
-    """安装向导（深色主题，与程序一致）：选项页 → 进度页 → 完成页。"""
+class _WizardBase(QDialog):
+    """安装/卸载向导共用骨架：NOCTURNE 主题、无边框圆角卡片、可拖标题栏、页面栈。"""
 
-    _KEEP = set([APP_EXE.lower(), 'icon.ico'])  # 覆盖安装时允许已存在的文件
-
-    def __init__(self):
+    def __init__(self, action):
         super().__init__()
         import app as ui
         from themes import build_qss
         self.setObjectName('settingsDlg')  # 复用主题对话框底色
-        self.setWindowTitle('安装 %s' % APP_TITLE)
+        self.setWindowTitle('%s %s' % (action, APP_TITLE))
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)  # 圆角外透明显示，避免首帧白闪
         self.setFixedWidth(_sc(480))
         self._drag = None
-        self._dst = None
-        self._path_touched = False
 
         cn, num = ui.pick_fonts()
         scale = ui.ui_scale()
         # 与 app.py 应用主题时参数一致：indicator 对勾/圆点图标与设置面板完全相同
         qss = build_qss('nocturne', cn, num, scale, ui._indicator_icons())
-        self.setStyleSheet(qss + _scale_qss(_EXTRA_QSS, scale).replace('%CN%', cn))
+        self.setStyleSheet(qss + _scale_qss(_EXTRA_QSS, scale).replace('%CN%', cn).replace('%NUM%', num))
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -327,11 +367,9 @@ class InstallWizard(QDialog):
         lay.addWidget(self.titlebar)
 
         self._stack = QStackedLayout()
-        self._stack.addWidget(self._build_options_page())
-        self._stack.addWidget(self._build_progress_page())
-        self._stack.addWidget(self._build_finish_page())
         lay.addLayout(self._stack)
-        self._update_space_info()
+
+    def _show_centered(self):
         # 无边框 Tool 窗口不会被系统居中，显式居中避免出现在屏幕边缘/半屏外
         self.adjustSize()
         scr = QApplication.primaryScreen().availableGeometry()
@@ -350,12 +388,100 @@ class InstallWizard(QDialog):
     def mouseReleaseEvent(self, e):
         self._drag = None
 
-    # ---- 选项页 ----
     def _section(self, text):
         lb = QLabel(text)
         lb.setObjectName('setLabel')
         return lb
 
+    # ---- 共用页面 ----
+    def _build_progress_page(self, status_text):
+        """进度页：居中大号百分比 + 状态行 + 进度条。"""
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(_sc(2), _sc(26), _sc(4), _sc(24))
+        lay.setSpacing(_sc(8))
+        self._pct = QLabel('0%')
+        self._pct.setObjectName('pctText')
+        self._pct.setAlignment(Qt.AlignCenter)
+        self._status = QLabel(status_text)
+        self._status.setObjectName('setLabel')
+        self._status.setAlignment(Qt.AlignCenter)
+        self._bar = QProgressBar()
+        self._bar.setRange(0, 100)
+        self._bar.setTextVisible(False)
+        lay.addStretch(1)
+        lay.addWidget(self._pct)
+        lay.addWidget(self._status)
+        lay.addSpacing(_sc(6))
+        lay.addWidget(self._bar)
+        lay.addStretch(1)
+        return page
+
+    def _build_finish_page(self, title, checkbox=None):
+        """完成页：居中 ✓ 标记 + 标题 + 副说明 +（可选）勾选框 + 完成按钮。"""
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(_sc(2), _sc(16), _sc(4), 0)
+        lay.setSpacing(_sc(6))
+        mark = QLabel('✓')
+        mark.setObjectName('finishMark')
+        mark.setAlignment(Qt.AlignCenter)
+        self._finish_title = QLabel(title)
+        self._finish_title.setObjectName('setTitle')
+        self._finish_title.setAlignment(Qt.AlignCenter)
+        self._finish_sub = QLabel()
+        self._finish_sub.setObjectName('setLabel')
+        self._finish_sub.setAlignment(Qt.AlignCenter)
+        self._finish_sub.setWordWrap(True)
+        lay.addStretch(1)
+        lay.addWidget(mark)
+        lay.addSpacing(_sc(2))
+        lay.addWidget(self._finish_title)
+        lay.addWidget(self._finish_sub)
+        lay.addSpacing(_sc(8))
+        if checkbox is not None:
+            lay.addWidget(checkbox, 0, Qt.AlignCenter)
+            lay.addSpacing(_sc(4))
+        lay.addStretch(1)
+        btns = QHBoxLayout()
+        btns.addStretch(1)
+        done = QPushButton('完成')
+        done.setObjectName('setSave')
+        done.setFixedWidth(_sc(84))
+        done.setDefault(True)
+        done.clicked.connect(self._on_finish)
+        btns.addWidget(done)
+        btns.addStretch(1)
+        lay.addLayout(btns)
+        return page
+
+    def _report_progress(self, pct, text):
+        """安装/卸载共用的进度回报：刷界面保证复制大文件时进度可见。"""
+        self._status.setText(text)
+        self._bar.setValue(pct)
+        self._pct.setText('%d%%' % pct)
+        QApplication.processEvents()
+
+    def _on_finish(self):
+        self.accept()
+
+
+class InstallWizard(_WizardBase):
+    """安装向导（深色主题，与程序一致）：选项页 → 进度页 → 完成页。"""
+
+    def __init__(self):
+        super().__init__('安装')
+        self._dst = None
+        self._path_touched = False
+        self._run_now = QCheckBox('立即启动 %s' % APP_TITLE)
+        self._run_now.setChecked(True)
+        self._stack.addWidget(self._build_options_page())
+        self._stack.addWidget(self._build_progress_page('正在安装…'))
+        self._stack.addWidget(self._build_finish_page('安装完成', checkbox=self._run_now))
+        self._update_space_info()
+        self._show_centered()
+
+    # ---- 选项页 ----
     def _build_options_page(self):
         page = QWidget()
         lay = QVBoxLayout(page)
@@ -420,48 +546,6 @@ class InstallWizard(QDialog):
         lay.addLayout(btns)
         return page
 
-    # ---- 进度页 / 完成页 ----
-    def _build_progress_page(self):
-        page = QWidget()
-        lay = QVBoxLayout(page)
-        lay.setContentsMargins(_sc(2), _sc(34), _sc(4), _sc(30))
-        lay.setSpacing(_sc(12))
-        self._status = QLabel('正在安装…')
-        self._status.setObjectName('setTitle')
-        self._bar = QProgressBar()
-        self._bar.setRange(0, 100)
-        lay.addWidget(self._status)
-        lay.addWidget(self._bar)
-        lay.addStretch(1)
-        return page
-
-    def _build_finish_page(self):
-        # 主流安装器收尾页：居中标题 + 居中「立即启动」勾选 + 居中完成按钮
-        page = QWidget()
-        lay = QVBoxLayout(page)
-        lay.setContentsMargins(_sc(2), _sc(14), _sc(4), 0)
-        lay.setSpacing(_sc(10))
-        self._finish_title = QLabel('安装完成')
-        self._finish_title.setObjectName('setTitle')
-        self._run_now = QCheckBox('立即启动 %s' % APP_TITLE)
-        self._run_now.setChecked(True)
-        lay.addStretch(1)
-        lay.addWidget(self._finish_title, 0, Qt.AlignCenter)
-        lay.addSpacing(_sc(18))
-        lay.addWidget(self._run_now, 0, Qt.AlignCenter)
-        lay.addStretch(1)
-        btns = QHBoxLayout()
-        btns.addStretch(1)
-        done = QPushButton('完成')
-        done.setObjectName('setSave')
-        done.setFixedWidth(_sc(84))
-        done.setDefault(True)
-        done.clicked.connect(self._on_finish)
-        btns.addWidget(done)
-        btns.addStretch(1)
-        lay.addLayout(btns)
-        return page
-
     # ---- 选项页交互 ----
     def _on_scope_changed(self):
         if not self._path_touched:
@@ -480,14 +564,14 @@ class InstallWizard(QDialog):
             self._update_space_info()
 
     def _check_dir(self, path):
-        """只允许空目录/新目录（含覆盖重装），避免卸载时误删用户文件。"""
+        """只允许空目录/新目录/覆盖重装（目录里有 ZviberPanel.exe 视为旧安装），避免卸载时误删用户文件。"""
         if not path.strip():
             return '请输入安装路径'
         if not os.path.splitdrive(path)[1].strip('\\/'):
             return '不能安装到磁盘根目录'
         if os.path.isdir(path):
-            extras = [f for f in os.listdir(path) if f.lower() not in self._KEEP]
-            if extras:
+            names = [f.lower() for f in os.listdir(path)]
+            if names and APP_EXE.lower() not in names:
                 return '目标文件夹不为空，请选择空文件夹或新文件夹'
         return None
 
@@ -503,7 +587,7 @@ class InstallWizard(QDialog):
                 p = p2
             try:
                 free = shutil.disk_usage(p).free
-                need = os.path.getsize(sys.executable)
+                need = _dir_size(_bundle_dir())
                 drive = os.path.splitdrive(os.path.abspath(p))[0]
                 if need > free:
                     err = '磁盘空间不足：需要 %s，%s 盘仅剩 %s' % (_fmt_size(need), drive, _fmt_size(free))
@@ -538,13 +622,8 @@ class InstallWizard(QDialog):
         """执行安装并切换到进度/完成页（提权实例直接调用）。"""
         self._stack.setCurrentIndex(1)
         self._all_users = all_users
-
-        def prog(pct, text):
-            self._status.setText(text)
-            self._bar.setValue(pct)
-            QApplication.processEvents()
         try:
-            self._dst = install(path, all_users, shortcut, autostart, progress=prog)
+            self._dst = install(path, all_users, shortcut, autostart, progress=self._report_progress)
         except Exception as e:
             QMessageBox.critical(self, '安装失败', str(e))
             self._stack.setCurrentIndex(0)
@@ -559,3 +638,69 @@ class InstallWizard(QDialog):
             else:
                 _relaunch(self._dst)
         self.accept()
+
+
+class UninstallWizard(_WizardBase):
+    """卸载向导（与安装向导同风格）：确认页（可选删除个人数据）→ 进度页 → 完成页。"""
+
+    def __init__(self):
+        super().__init__('卸载')
+        self._stack.addWidget(self._build_confirm_page())
+        self._stack.addWidget(self._build_progress_page('正在卸载…'))
+        self._stack.addWidget(self._build_finish_page('卸载完成'))
+        self._show_centered()
+
+    # ---- 确认页 ----
+    def _build_confirm_page(self):
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(_sc(2), _sc(8), _sc(4), 0)
+        lay.setSpacing(_sc(8))
+        t = QLabel('卸载 %s' % APP_TITLE)
+        t.setObjectName('setTitle')
+        lay.addWidget(t)
+        desc = QLabel('将从电脑中移除程序、开机自启、桌面右键菜单与桌面快捷方式。')
+        desc.setObjectName('setLabel')
+        desc.setWordWrap(True)
+        lay.addWidget(desc)
+        lay.addSpacing(_sc(8))
+        self._del_data = QCheckBox('同时删除个人数据')
+        lay.addWidget(self._del_data)
+        hint = QLabel('勾选后将删除 %%APPDATA%%\\ZviberPanel 下的待办事项、桌面格子与全部配置，'
+                      '此操作不可恢复；不勾选则保留，重装后自动恢复。')
+        hint.setObjectName('warnLabel')
+        hint.setWordWrap(True)
+        lay.addWidget(hint)
+        lay.addStretch(1)
+        btns = QHBoxLayout()
+        btns.setSpacing(_sc(8))
+        btns.addStretch(1)
+        cancel = QPushButton('取消')
+        cancel.setObjectName('setBtn')
+        cancel.setFixedWidth(_sc(84))
+        cancel.clicked.connect(self.reject)
+        ok = QPushButton('卸载')
+        ok.setObjectName('dangerBtn')
+        ok.setFixedWidth(_sc(84))
+        ok.setDefault(True)
+        ok.clicked.connect(self._on_uninstall)
+        btns.addWidget(cancel)
+        btns.addWidget(ok)
+        lay.addLayout(btns)
+        return page
+
+    # ---- 卸载执行 ----
+    def _on_uninstall(self):
+        self._stack.setCurrentIndex(1)
+        request_quit()  # 先请运行中的面板退出，避免文件占用
+        self._report_progress(5, '正在等待面板退出…')
+        time.sleep(1.0)
+        try:
+            uninstall(remove_user_data=self._del_data.isChecked(), progress=self._report_progress)
+        except Exception as e:
+            QMessageBox.critical(self, '卸载失败', str(e))
+            self._stack.setCurrentIndex(0)
+            return
+        self._finish_sub.setText('个人数据已一并删除。' if self._del_data.isChecked()
+                                 else '待办与配置已保留，重装后可继续使用。')
+        self._stack.setCurrentIndex(2)

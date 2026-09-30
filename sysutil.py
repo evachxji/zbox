@@ -99,8 +99,10 @@ def context_menu_remove():
                 pass
 
 
-def uninstall_reg_install(exe_path, all_users=False):
-    """写入「设置→应用→安装的应用」卸载项。"""
+def uninstall_reg_install(exe_path, all_users=False, size_kb=None):
+    """写入「设置→应用→安装的应用」卸载项。size_kb 不给时按 exe 自身大小估算。"""
+    if size_kb is None:
+        size_kb = os.path.getsize(exe_path) // 1024
     vals = [
         ('DisplayName', winreg.REG_SZ, 'Zviber 桌面日历'),
         ('DisplayVersion', winreg.REG_SZ, APP_VERSION),
@@ -110,7 +112,7 @@ def uninstall_reg_install(exe_path, all_users=False):
         ('UninstallString', winreg.REG_SZ, '"%s" --uninstall' % exe_path),
         ('NoModify', winreg.REG_DWORD, 1),
         ('NoRepair', winreg.REG_DWORD, 1),
-        ('EstimatedSize', winreg.REG_DWORD, os.path.getsize(exe_path) // 1024),
+        ('EstimatedSize', winreg.REG_DWORD, size_kb),
     ]
     with winreg.CreateKey(_root(all_users), UNINSTALL_KEY) as k:
         for name, vtype, val in vals:

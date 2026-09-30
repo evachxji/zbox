@@ -43,10 +43,11 @@ if errorlevel 1 goto :build_failed
 
 echo.
 echo   [完成] 产物已生成：
-echo       %~dp0dist\ZviberPanel.exe
+echo       %~dp0dist\ZviberPanel\        （程序目录）
+echo       %~dp0dist\ZviberPanel-v*.zip   （分发包）
 echo.
-echo   该 exe 本身就是安装包：双击即可安装到本机，
-echo   也可以直接发给别人，对方无需安装 Python。
+echo   分发方式：把 zip 发给别人，解压后双击 ZviberPanel.exe
+echo   即可弹出安装向导，对方无需安装 Python。
 echo.
 pause
 exit /b 0

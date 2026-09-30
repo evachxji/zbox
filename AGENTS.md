@@ -91,9 +91,9 @@ Zviber 是 Windows 桌面悬浮面板（日历 + 待办），PyQt5，Python 3.8+
 - `themes.py` — 两套主题 QSS（深色 `nocturne` / 浅色 `mica`）加 `auto` 伪主题；`%CN%`/`%NUM%` 为字体占位符
 - `version.py` — 版本号唯一来源：关于窗、设置窗左下角、安装向导、卸载注册表项共用 `APP_VERSION`，发版只改这一个文件
 - `sysutil.py` — 注册表集成：开机自启、桌面右键菜单、应用列表卸载项（默认 HKCU，免管理员）
-- `installer.py` — exe 安装向导与自安装/卸载（只在 frozen 时生效）
+- `installer.py` — exe 安装向导（选项/进度/完成页）、自安装与卸载向导（可选删除个人数据；只在 frozen 时生效）
 - `install.py` — 源码方式的系统集成（只装开机自启）
-- `build.py` / `build.cmd` — 生成图标与 DPI 清单，PyInstaller 打包 `dist\ZviberPanel.exe`
+- `build.py` / `build.cmd` — 生成图标与 DPI 清单，PyInstaller 打包 onedir 到 `dist\ZviberPanel\` 并自动打成 `dist\ZviberPanel-v<版本>-<架构>.zip` 分发包（架构标识跟随打包用的 Python：x64 / x86 / arm64）
 - `run.cmd` — 双击启动面板；已在运行则切换显隐
 - `designs/` — 两套主题的设计稿（HTML，浏览器可直接打开）
 
@@ -285,8 +285,8 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
   没有任何安装记录就清掉菜单残留（旧版 install.py 的源码安装、向导取消、半卸载）。
 - `sysutil.launcher_cmd()` 区分 frozen（直接启自身）与源码（优先 `pythonw.exe` 实现无窗口静默）。
 - `installer.py` 的向导与自安装**只在 frozen 时生效**；源码运行走 `install.py`。
-- 卸载用延迟 `rmdir`（exe 运行中删不掉自己），只清程序与系统集成，
-  `%APPDATA%\ZviberPanel` 的用户数据保留。
+- 安装 = 把 onedir 程序目录（exe + `_internal\`）**整体复制**到目标位置，按字节回报进度；目标目录已有旧安装（含 `ZviberPanel.exe`）时先整体清空再复制——`_check_dir` 只放行空目录/新目录/含 `ZviberPanel.exe` 的旧安装目录，别放宽这个签名判断，否则覆盖重装与卸载会误删用户文件。
+- 卸载走与安装同风格的**卸载向导**（确认页 → 进度页 → 完成页）：确认页 checkbox「同时删除个人数据」勾选后连同 `%APPDATA%\ZviberPanel`（待办、格子、配置）一起 rmtree，默认保留；程序目录用延迟 `rmdir` 删除（exe 运行中删不掉自己）。
 
 ### 桌面格子（`boxes.py`）
 
