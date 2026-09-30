@@ -1270,6 +1270,17 @@ _u32.AttachThreadInput.restype = ctypes.c_int
 _u32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
 _u32.SetFocus.restype = ctypes.c_void_p
 _u32.SetFocus.argtypes = [ctypes.c_void_p]
+_u32.SetWinEventHook.restype = ctypes.c_void_p
+_u32.SetWinEventHook.argtypes = [wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+                                 ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD]
+_u32.UnhookWinEvent.restype = ctypes.c_int
+_u32.UnhookWinEvent.argtypes = [ctypes.c_void_p]
+
+# 桌面表层重排事件（桌面整理软件每 ~2.5s 重建表层：HIDE → REORDER → SHOW）
+_EVENT_SHOW = 0x8002
+_EVENT_REORDER = 0x8004
+_WINEVENTPROC = ctypes.WINFUNCTYPE(None, ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p,
+                                   wintypes.LONG, wintypes.LONG, wintypes.DWORD, wintypes.DWORD)
 
 _GW_HWNDPREV = 3
 _GW_HWNDNEXT = 2
@@ -1360,6 +1371,14 @@ def pin_to_desktop(win):
         return _u32.GetAncestor(hwnd, _GA_ROOT) == progman
     except Exception:
         return False
+
+
+def unpin_from_desktop(win):
+    """脱离桌面带，恢复为普通顶层窗口（拖拽期间临时用：普通窗口不会被桌面整理的表层反压）。"""
+    try:
+        _u32.SetParent(int(win.winId()), None)
+    except Exception:
+        pass
 
 
 def sink_to_desktop(win, anchor=None):
@@ -2132,6 +2151,7 @@ class FloatingPanel(QWidget):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool)
         self._desk_pinned = False   # True = 已归属桌面带（SHELLDLL_DefView 的属主 popup）
         self._desk_surface = None   # 探测到的第三方桌面表层（沉底锚点缓存）
+        self._floating = False      # True = 被点击激活浮起到应用窗口之上，失焦后需要沉回
         self._drag = None           # 窗口拖拽偏移（globalPos - topLeft）；None = 未在拖拽
         self.setObjectName('panelRoot')
 
@@ -2238,6 +2258,11 @@ class FloatingPanel(QWidget):
 
         # 桌面层级：归属桌面带（Win+D 免疫）+ 看门狗维护 z-order 与挂接健康
         self._ensure_band()
+        # WinEvent 钩子：桌面整理软件的表层重建时立刻把面板抬回（等看门狗会闪 0.3~0.6s）
+        self._win_evt_cb = _WINEVENTPROC(self._on_win_event)   # 必须留引用，防 GC
+        self._win_evt_hook = _u32.SetWinEventHook(_EVENT_SHOW, _EVENT_REORDER,
+                                                  None, self._win_evt_cb, 0, 0, 0)
+        QApplication.instance().aboutToQuit.connect(self._unhook_win_event)
         self._sink_timer = QTimer(self)
         self._sink_timer.timeout.connect(self._desktop_mode_tick)
         self._sink_timer.start(500)   # 桌面整理软件会在 Win+D 等时机重排表层，要快些跟上
@@ -2247,6 +2272,8 @@ class FloatingPanel(QWidget):
     # --- 桌面层级 ---
     def _ensure_band(self):
         """确保面板归属桌面带（属主 = 桌面图标窗 SHELLDLL_DefView）。挂接丢失时补挂。"""
+        if self._drag is not None:
+            return   # 拖拽期间故意脱离桌面带（见 eventFilter），别补挂
         hwnd = int(self.winId())
         progman = _u32.FindWindowW('Progman', None)
         if not progman:
@@ -2268,10 +2295,44 @@ class FloatingPanel(QWidget):
         covered = self._covered_by_surface()
         _dbg('tick: pinned=%s surface=%s covered=%s active=%s undermouse=%s' % (
             self._desk_pinned, self._desk_surface, covered, self.isActiveWindow(), self.underMouse()))
-        if covered:
+        if covered and self._drag is None:
             sink_to_desktop(self, self._desk_surface)   # 被桌面表层压住：无条件抬上来
-        else:
+        elif not covered:
             self._ensure_desktop_level()
+
+    def _on_win_event(self, _hook, event, hwnd, idObject, _idChild, _thread, _ts):
+        """桌面带内窗口的 SHOW / 容器 REORDER 事件回调。只做轻量过滤，
+        真正的抬回动作丢回事件循环（钩子里直接动 z-order 有风险）。"""
+        try:
+            if not hwnd or not self.isVisible() or self._drag is not None:
+                return
+            if hwnd == int(self.winId()) or hwnd == int(self.titlebar.winId()):
+                return
+            if idObject not in (0, -4):   # 只看窗口本身 / 客户区级别
+                return
+            cls = _class_name(hwnd)
+            if cls in _PROG_FAMILY:
+                if event != _EVENT_REORDER:
+                    return
+            else:
+                sw, sh = _u32.GetSystemMetrics(0), _u32.GetSystemMetrics(1)
+                if not _is_desktop_surface(hwnd, sw, sh):
+                    return
+            QTimer.singleShot(0, self._lift_if_covered)
+        except Exception:
+            pass
+
+    def _unhook_win_event(self):
+        if self._win_evt_hook:
+            _u32.UnhookWinEvent(self._win_evt_hook)
+            self._win_evt_hook = None
+
+    def _lift_if_covered(self):
+        """表层重排后的即时抬回：只抬不换锚点；没被压住就不动（我们自己的沉底也会触发
+        REORDER 事件，靠这道判断防自激回路）。"""
+        if self._covered_by_surface():
+            _dbg('lift: 表层重排事件触发抬回')
+            sink_to_desktop(self, self._desk_surface)
 
     def _covered_by_surface(self):
         """面板中心被桌面整理软件的表层压住（看不见也点不到）的判定。
@@ -2309,16 +2370,20 @@ class FloatingPanel(QWidget):
 
 
     def event(self, e):
-        if e.type() == QEvent.WindowDeactivate:
+        if e.type() == QEvent.WindowActivate:
+            self._floating = True    # 点击激活会浮到应用窗口之上，记下待沉
+        elif e.type() == QEvent.WindowDeactivate:
             QTimer.singleShot(300, self._ensure_desktop_level)   # 失焦后压回桌面层
         return super(FloatingPanel, self).event(e)
 
     def _ensure_desktop_level(self):
         """面板被点击激活后会浮到普通窗口之上；空闲（未激活/未悬停/未拖拽）时压回桌面层，
-        让其它窗口可以正常遮挡它。正在使用时不动，避免打字/拖拽途中被其它窗口盖住。"""
-        if (not self.isVisible() or self.isActiveWindow() or self.underMouse()
+        让其它窗口可以正常遮挡它。正在使用时不动，避免打字/拖拽途中被其它窗口盖住。
+        没浮起过就不动——z-order 变动会触发桌面整理软件的表层反压，空发会振荡闪烁。"""
+        if (not self._floating or not self.isVisible() or self.isActiveWindow() or self.underMouse()
                 or self._drag is not None or self.titlebar.underMouse()):
             return
+        self._floating = False
         sink_to_desktop(self, self._desk_surface)
         if self.titlebar.isVisible():
             _place_below(self.titlebar, self)   # 面板沉层后栏窗要重新压回它正下方
@@ -2428,6 +2493,7 @@ class FloatingPanel(QWidget):
 
     # --- 顶部栏：默认收起，悬浮时从面板顶边向上展开 ---
     def enterEvent(self, e):
+        _dbg('enterEvent')
         self._slide_titlebar(True)
         super(FloatingPanel, self).enterEvent(e)
 
@@ -2446,6 +2512,7 @@ class FloatingPanel(QWidget):
 
     def _slide_titlebar(self, on):
         """栏窗高 0↔H 动画（从当前高度续滑，中途反向不打断）；只改栏窗几何，主窗口不动。"""
+        _dbg('slide_titlebar on=%s panelVis=%s tbVis=%s' % (on, self.isVisible(), self.titlebar.isVisible()))
         if on and not self.isVisible():
             return   # 面板已收起就不再弹出栏窗（面板隐藏后光标划过原位置也会触发栏窗 Enter）
         self._tb_anim.stop()
@@ -2484,6 +2551,8 @@ class FloatingPanel(QWidget):
             return False
         if t == QEvent.MouseButtonPress and ev.button() == Qt.LeftButton:
             self._drag = ev.globalPos() - self.frameGeometry().topLeft()
+            unpin_from_desktop(self)   # 拖拽期间临时退出桌面带：普通窗口移动不会触发表层反压
+            self._desk_pinned = False
             return True
         if t == QEvent.MouseMove and self._drag is not None and ev.buttons() & Qt.LeftButton:
             self.move(ev.globalPos() - self._drag)
@@ -2491,6 +2560,10 @@ class FloatingPanel(QWidget):
         if t == QEvent.MouseButtonRelease and self._drag is not None:
             self._drag = None
             self._save_pos()
+            self._desk_pinned = pin_to_desktop(self)   # 归位：重新归属桌面带并沉到表层之上
+            sink_to_desktop(self, self._desk_surface)
+            if self.titlebar.isVisible():
+                _place_below(self.titlebar, self)
             return True
         return super(FloatingPanel, self).eventFilter(obj, ev)
 
