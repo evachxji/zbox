@@ -290,7 +290,7 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
 
 ### 桌面格子（`boxes.py`）
 
-仿腾讯桌面整理的格子：`BoxManager` 总管（恢复/新建/解散/显隐），`BoxWindow` 单格，
+桌面文件归类格子：`BoxManager` 总管（恢复/新建/解散/显隐），`BoxWindow` 单格，
 `BoxStore` 存 `%APPDATA%\ZviberPanel\boxes.json`（`visible` + 格子记录列表）。
 托盘菜单有「新建格子 / 新建文件夹格子 / 显示隐藏格子」；截图自检模式不创建格子。
 
@@ -318,7 +318,7 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
   图标显隐 = ShowWindow 桌面的 `SysListView32`（`find_desktop_listview` 定位，Progman
   找不到再扫 WorkerW）。`DesktopClickHook` 独立线程装 `WH_MOUSE_LL`（LL 钩子收不到
   `WM_LBUTTONDBLCLK`，自己按 GetDoubleClickTime 判双击）。坑：① 命中链先排我们自己的窗口；
-  ② 认 Progman 家族 + `SysListView32` + 全屏工具窗（腾讯整理 TXMiniSkin 覆盖层）；
+  ② 认 Progman 家族 + `SysListView32` + 全屏工具窗（桌面整理软件覆盖层）；
   ③ **`SysListView32` 要过跨进程 `LVM_HITTEST`**：点在图标/文件夹上不算空白（结构体开在
   explorer 地址空间里 SendMessage 才读得到）；
   ④ **第一击也必须落在桌面上**，否则「拖开格子 → 快速点它腾出的空位」会误判双击桌面，

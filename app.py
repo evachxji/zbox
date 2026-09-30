@@ -1364,7 +1364,7 @@ def probe_desktop(skip=(), extra=()):
 def pin_to_desktop(win):
     """把窗口的属主设为桌面图标窗（SHELLDLL_DefView）：加入「桌面带」，
     Win+D / 显示桌面会跳过桌面带（Win11 24H2 上顶层窗口一律被收，桌面带成员豁免——
-    桌面整理软件的 TXMiniSkin 就是这个结构）。
+    桌面整理软件的全屏覆盖层就是这个结构）。
     保持 WS_POPUP 不改样式：坐标仍是屏幕绝对坐标，绘制/DWM 圆角/键盘焦点全走正常路径。
     成功返回 True。"""
     try:

@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""桌面格子：仿腾讯桌面整理的桌面格子功能。
+"""桌面格子：桌面文件归类格子功能。
 
 - 空白格子：背后对应 %APPDATA%\\ZviberPanel\\Boxes\\<id>\\ 真实文件夹，
   拖入 = 把文件移动进去；解散 = 把文件全部还原回桌面（不删文件）。
 - 文件夹映射格子：实时映射任意磁盘文件夹，QFileSystemWatcher 监听内容变化自动刷新；
-  路径失效时显示提示 + 「解散格子」按钮（对齐腾讯桌面整理的表现）。
+  路径失效时显示提示 + 「解散格子」按钮。
 - 窗口：无边框 Tool 窗，半透明磨砂；挂桌面带免疫 Win+D（面板同款 pin_to_desktop）。
   与面板的差异：永不主动沉底（格子沉到应用窗口之下 = 用户眼里的「消失」）；
   只在被桌面整理软件表层压住时由 WinEvent 钩子/看门狗抬回表层之上。
@@ -1228,7 +1228,7 @@ class DesktopClickHook(QThread):
                     return cls == 'SHELLDLL_DefView' or not _desktop_icon_at(h, pt)
                 if cls in ui._PROG_FAMILY:
                     return True
-                # 桌面整理软件的全屏覆盖层（腾讯 TXMiniSkin 等）：与 app.probe_desktop 同一判定
+                # 桌面整理软件的全屏覆盖层：与 app.probe_desktop 同一判定
                 if ui._is_desktop_surface(h, sw, sh):
                     return True
                 h = ui._u32.GetParent(h)
