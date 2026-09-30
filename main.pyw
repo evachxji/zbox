@@ -4,6 +4,7 @@
       pythonw main.pyw --toggle   已运行则切换显隐（供桌面右键菜单调用）
 自检：设置环境变量 ZVIBER_SHOT=<目录> 启动，自动导出两主题截图后退出。
 """
+import ctypes
 import os
 import platform
 import re
@@ -172,6 +173,12 @@ def main():
     QApplication.setQuitOnLastWindowClosed(False)
     qapp = QApplication(sys.argv)
     qapp.setApplicationName('ZviberPanel')
+    # 通知归属独立应用身份：Windows 按进程/AUMID 缓存气泡图标，
+    # 旧版「黄底日期」图标就是这么残留在通知里的；独立 AUMID 绕开旧缓存
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('Zviber.Panel')
+    except Exception:
+        pass
 
     installer.sync_context_menu()  # 右键菜单只属于已安装的程序，未安装时清掉残留
     if installer.maybe_install():
@@ -252,7 +259,8 @@ def main():
 
     def _transfer_notify(title, msg):
         try:
-            tray.showMessage(title, msg, QSystemTrayIcon.Information, 4000)
+            # 显式传应用图标：不用系统默认 Information 图标，也不吃旧图标缓存
+            tray.showMessage(title, msg, ui.make_icon(), 4000)
         except Exception:
             pass
     panel.transfer.notify.connect(_transfer_notify)
