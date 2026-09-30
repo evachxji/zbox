@@ -72,6 +72,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var discovery: Discovery
     private var server: TransferServer? = null
     private var wifiLock: WifiManager.WifiLock? = null
+    private var lastAutoScanAt = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -99,6 +100,12 @@ class MainActivity : ComponentActivity() {
             // 端口被占用时降级：仅发送方功能可用
         }
         discovery.start()
+        // 进入主界面自动刷新一次设备列表（announce + 子网扫描）；10 秒节流防快速切前后台频发
+        val now = System.currentTimeMillis()
+        if (now - lastAutoScanAt > 10_000) {
+            lastAutoScanAt = now
+            discovery.refresh()
+        }
     }
 
     override fun onStop() {
