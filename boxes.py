@@ -238,6 +238,8 @@ class BoxWindow(QWidget):
         self._desk_surface = None   # 探测到的第三方桌面表层（沉底锚点缓存）
         self._floating = False      # True = 被点击激活浮起到应用窗口之上，失焦后需要沉回
         self._op = None          # ('move', 起点全局坐标, 起始几何) 或 ('resize', 边缘掩码, ...)
+        self._press_pos = None   # 拖拽起点（全局坐标），用于区分点击与拖动
+        self._last_drag_ts = 0.0   # 最近一次发生位移的拖拽结束时间（抑制拖拽连带的双击收起）
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMouseTracking(True)
         self.setMinimumSize(ui.sc(MIN_W), ui.sc(TITLE_H) + ui.sc(60))
@@ -664,6 +666,7 @@ class BoxWindow(QWidget):
         else:
             super(BoxWindow, self).mousePressEvent(e)
         if self._op:
+            self._press_pos = e.globalPos()
             ui.unpin_from_desktop(self)   # 拖拽期间退出桌面带：普通窗口移动不触发表层反压
             self._desk_pinned = False
 
@@ -692,7 +695,13 @@ class BoxWindow(QWidget):
 
     def mouseReleaseEvent(self, e):
         if self._op:
+            op, _edges, start_pos, _geo = self._op
             self._op = None
+            if self._press_pos is not None and \
+                    (e.globalPos() - self._press_pos).manhattanLength() > 4:
+                self._last_drag_ts = time.time()
+            self._press_pos = None
+            self._clamp_to_screen()   # 拖出屏幕会再也够不着标题栏，钳回来
             self.rec['x'], self.rec['y'] = self.x(), self.y()
             if not self.rec.get('collapsed'):
                 self.rec['w'], self.rec['h'] = self.width(), self.height()
@@ -701,7 +710,19 @@ class BoxWindow(QWidget):
             ui.sink_to_desktop(self, self._desk_surface)
         super(BoxWindow, self).mouseReleaseEvent(e)
 
+    def _clamp_to_screen(self):
+        """保证至少标题栏露在屏幕内（面板同款思路，见 FloatingPanel._clamp_to_screen）。"""
+        ag = QApplication.primaryScreen().availableGeometry()
+        x = min(max(self.x(), ag.left() - self.width() + 80), ag.right() - 80)
+        y = min(max(self.y(), ag.top()), ag.bottom() - 40)
+        if (x, y) != (self.x(), self.y()):
+            self.move(x, y)
+
     def mouseDoubleClickEvent(self, e):
+        # 快速连续两次点标题拖拽时，第二次 press 会被系统判成双击：
+        # 若前一次点击发生了位移（是在拖不是在点），或在拖拽途中，都不收起
+        if self._op is not None or time.time() - self._last_drag_ts < 0.5:
+            return super(BoxWindow, self).mouseDoubleClickEvent(e)
         if e.pos().y() < ui.sc(TITLE_H) and not self._hit_edges(e.pos()):
             self.set_collapsed(not self.rec['collapsed'])
         super(BoxWindow, self).mouseDoubleClickEvent(e)
