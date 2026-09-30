@@ -48,6 +48,8 @@ _h32.TranslateMessage.restype = wintypes.BOOL
 _h32.TranslateMessage.argtypes = [ctypes.c_void_p]
 _h32.DispatchMessageW.restype = ctypes.c_longlong
 _h32.DispatchMessageW.argtypes = [ctypes.c_void_p]
+_h32.ShowWindow.restype = wintypes.BOOL
+_h32.ShowWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
 
 SORT_CHOICES = [('name', '按名称'), ('type', '按类型'), ('mtime', '按修改时间')]
 
@@ -514,7 +516,16 @@ class BoxWindow(QWidget):
         hwnd = int(self.winId())
         progman = ui._u32.FindWindowW('Progman', None)
         if progman and ui._u32.GetAncestor(hwnd, ui._GA_ROOT) != progman:
-            self._desk_pinned = ui.pin_to_desktop(self)
+            self._repin()
+
+    def _repin(self):
+        """归属桌面带。对已可见的窗口 SetParent 后 win32 侧 WS_VISIBLE 会丢
+        （Qt 仍认为可见，不重绘 = 窗口消失），补一句 ShowWindow(SW_SHOWNA) 恢复。
+        面板在 init 时挂接（窗口还没 show）所以没踩到；格子拖拽后是可见窗口重挂，必踩。"""
+        self._desk_pinned = ui.pin_to_desktop(self)
+        hwnd = int(self.winId())
+        if self.isVisible() and not ui._u32.IsWindowVisible(hwnd):
+            _h32.ShowWindow(hwnd, 8)   # SW_SHOWNA：恢复可见但不抢焦点
 
     def _desktop_tick(self):
         hwnd = int(self.winId())
@@ -706,7 +717,7 @@ class BoxWindow(QWidget):
             if not self.rec.get('collapsed'):
                 self.rec['w'], self.rec['h'] = self.width(), self.height()
             self.mgr.save_rec(self)
-            self._desk_pinned = ui.pin_to_desktop(self)   # 归位：重新归属桌面带并沉回表层之上
+            self._repin()   # 归位：重新归属桌面带并沉回表层之上
             ui.sink_to_desktop(self, self._desk_surface)
         super(BoxWindow, self).mouseReleaseEvent(e)
 
