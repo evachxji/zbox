@@ -2493,6 +2493,7 @@ class FloatingPanel(QWidget):
 
     # --- 顶部栏：默认收起，悬浮时从面板顶边向上展开 ---
     def enterEvent(self, e):
+        _dbg('enterEvent')
         self._slide_titlebar(True)
         super(FloatingPanel, self).enterEvent(e)
 
@@ -2511,6 +2512,7 @@ class FloatingPanel(QWidget):
 
     def _slide_titlebar(self, on):
         """栏窗高 0↔H 动画（从当前高度续滑，中途反向不打断）；只改栏窗几何，主窗口不动。"""
+        _dbg('slide_titlebar on=%s panelVis=%s tbVis=%s' % (on, self.isVisible(), self.titlebar.isVisible()))
         if on and not self.isVisible():
             return   # 面板已收起就不再弹出栏窗（面板隐藏后光标划过原位置也会触发栏窗 Enter）
         self._tb_anim.stop()
