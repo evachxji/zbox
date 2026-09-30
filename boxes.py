@@ -8,8 +8,8 @@
 - 窗口：无边框 Tool 窗，半透明磨砂；挂桌面带免疫 Win+D（面板同款 pin_to_desktop）。
   与面板的差异：永不主动沉底（格子沉到应用窗口之下 = 用户眼里的「消失」）；
   只在被桌面整理软件表层压住时由 WinEvent 钩子/看门狗抬回表层之上。
-- 双击桌面空白处显隐全部格子：WH_MOUSE_LL 低级钩子自判双击，命中桌面家族窗口才算数。
-  （双击桌面图标上也会触发，与腾讯桌面整理行为一致。）
+- 双击桌面空白处显隐「桌面图标 + 全部格子 + 面板」：WH_MOUSE_LL 低级钩子自判双击，
+  命中桌面家族窗口才算数；点在图标/文件夹上经跨进程 LVM_HITTEST 排除，不算空白。
 - 视觉固定深色磨砂：格子贴在壁纸上，跟随面板明暗主题都不合适，故不挂主题系统。
   注意 WA_TranslucentBackground 会禁用 ClearType（app.py 面板因此不用它），
   格子文字少且参考软件本身就是半透明的，这里接受这个取舍。
@@ -25,10 +25,10 @@ from ctypes import wintypes
 from PyQt5.QtCore import (Qt, QTimer, QThread, QUrl, QPoint, QRect, QSize,
                           QFileSystemWatcher, pyqtSignal)
 from PyQt5.QtGui import QIcon, QCursor, QPainter, QColor, QPen, QFont
-from PyQt5.QtWidgets import (QWidget, QListWidget, QListWidgetItem, QVBoxLayout,
+from PyQt5.QtWidgets import (QWidget, QDialog, QListWidget, QListWidgetItem, QVBoxLayout,
                              QHBoxLayout, QGridLayout, QLabel, QToolButton,
                              QPushButton, QStackedLayout, QMenu, QActionGroup,
-                             QInputDialog, QMessageBox, QFileDialog,
+                             QInputDialog, QMessageBox, QFileDialog, QLineEdit,
                              QAbstractItemView, QApplication, QStyle)
 
 import app as ui   # sc / _PROG_FAMILY / _class_name / _is_desktop_surface
@@ -49,6 +49,25 @@ _h32.TranslateMessage.restype = wintypes.BOOL
 _h32.TranslateMessage.argtypes = [ctypes.c_void_p]
 _h32.DispatchMessageW.restype = ctypes.c_longlong
 _h32.DispatchMessageW.argtypes = [ctypes.c_void_p]
+_h32.ShowWindow.restype = wintypes.BOOL
+_h32.ShowWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
+_h32.ScreenToClient.restype = wintypes.BOOL
+_h32.ScreenToClient.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+_h32.SendMessageW.restype = ctypes.c_longlong
+_h32.SendMessageW.argtypes = [ctypes.c_void_p, wintypes.UINT, ctypes.c_size_t, ctypes.c_void_p]
+_k32 = ctypes.windll.kernel32
+_k32.OpenProcess.restype = ctypes.c_void_p
+_k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+_k32.VirtualAllocEx.restype = ctypes.c_void_p
+_k32.VirtualAllocEx.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
+                                wintypes.DWORD, wintypes.DWORD]
+_k32.VirtualFreeEx.restype = wintypes.BOOL
+_k32.VirtualFreeEx.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, wintypes.DWORD]
+_k32.WriteProcessMemory.restype = wintypes.BOOL
+_k32.WriteProcessMemory.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+                                    ctypes.c_size_t, ctypes.c_void_p]
+_k32.CloseHandle.restype = wintypes.BOOL
+_k32.CloseHandle.argtypes = [ctypes.c_void_p]
 
 SORT_CHOICES = [('name', '按名称'), ('type', '按类型'), ('mtime', '按修改时间')]
 
@@ -70,6 +89,10 @@ QLabel#boxInvalid2 { color: rgba(255,255,255,160); font-size: @HFS@px; }
 QToolButton { color: rgba(255,255,255,170); background: transparent; border: none;
               font-size: @BFS@px; padding: 0px; }
 QToolButton:hover { background: rgba(255,255,255,28); border-radius: 4px; }
+QLineEdit#boxNameEdit { color: rgba(255,255,255,235); background: rgba(255,255,255,24);
+                        border: 1px solid rgba(255,255,255,70); border-radius: 3px;
+                        font-size: @TFS@px; font-weight: bold; padding: 0px 2px;
+                        selection-background-color: rgba(255,255,255,90); }
 QListWidget { background: transparent; border: none; outline: none;
               color: rgba(255,255,255,225); font-size: @LFS@px; }
 QListWidget::item { height: @IH@px; border-radius: 4px; padding-left: 4px; }
@@ -81,6 +104,8 @@ QScrollBar::handle:vertical { background: rgba(255,255,255,70); border-radius: @
 QScrollBar::handle:vertical:hover { background: rgba(255,255,255,110); }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
+QMessageBox { background: #26282f; }
+QMessageBox QLabel { color: rgba(255,255,255,225); font-size: @HFS@px; }
 QMenu { background: #26282f; color: #e8e6e1; border: 1px solid rgba(255,255,255,30);
         padding: 4px; }
 QMenu::item { padding: 6px 22px; border-radius: 4px; }
@@ -228,6 +253,97 @@ class BoxList(QListWidget):
             menu.exec_(e.globalPos())
 
 
+class BoxConfirmDialog(QDialog):
+    """格子内的二次确认弹窗：无边框 Tool 窗，结构参考面板的「关于」窗
+    （可拖标题栏 + ✕ 关闭 + 右下按钮），视觉与格子本体一致——固定深色磨砂，
+    不走全局主题（格子本身就不走，见模块 docstring）。"""
+
+    def __init__(self, box, title, text, ok_text):
+        super(BoxConfirmDialog, self).__init__(box, Qt.FramelessWindowHint | Qt.Tool)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setStyleSheet(_box_qss())
+        self._drag = None
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(1, 1, 1, 1)
+        root.setSpacing(0)
+
+        # 标题栏（可拖动）：标题 + ✕
+        self.titlebar = QWidget()
+        self.titlebar.setFixedHeight(ui.sc(TITLE_H))
+        tb = QHBoxLayout(self.titlebar)
+        tb.setContentsMargins(ui.sc(10), 0, ui.sc(6), 0)
+        t = QLabel(title)
+        t.setObjectName('boxName')
+        tb.addWidget(t)
+        tb.addStretch(1)
+        close = QToolButton()
+        close.setText('✕')
+        close.setFixedSize(ui.sc(22), ui.sc(20))
+        close.setToolTip('关闭')
+        close.clicked.connect(self.reject)
+        tb.addWidget(close)
+        root.addWidget(self.titlebar)
+
+        # 正文
+        body = QLabel(text)
+        body.setObjectName('boxInvalid1')
+        body.setWordWrap(True)
+        bd = QHBoxLayout()
+        bd.setContentsMargins(ui.sc(12), ui.sc(6), ui.sc(12), 0)
+        bd.addWidget(body, 1)
+        root.addLayout(bd)
+
+        # 右下按钮：取消 + 确认（回车默认确认，Esc 取消）
+        btns = QHBoxLayout()
+        btns.setContentsMargins(ui.sc(12), ui.sc(12), ui.sc(10), ui.sc(10))
+        btns.setSpacing(ui.sc(8))
+        btns.addStretch(1)
+        ok = QPushButton(ok_text)
+        ok.setCursor(Qt.PointingHandCursor)
+        ok.setDefault(True)
+        ok.clicked.connect(self.accept)
+        btns.addWidget(ok)
+        cancel = QPushButton('取消')
+        cancel.setCursor(Qt.PointingHandCursor)
+        cancel.clicked.connect(self.reject)
+        btns.addWidget(cancel)
+        root.addLayout(btns)
+
+        self.setFixedWidth(ui.sc(300))
+        self.adjustSize()
+        # 居中在格子窗口上
+        self.move(box.geometry().center() - self.rect().center())
+
+    def paintEvent(self, e):
+        # 与 BoxWindow 同款磨砂圆角，只是更不透明一点（弹窗要压得住下面的内容）
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = self.rect().adjusted(0, 0, -1, -1)
+        p.setBrush(QColor(25, 28, 34, 235))
+        p.setPen(QPen(QColor(255, 255, 255, 70), 1))
+        p.drawRoundedRect(r, ui.sc(8), ui.sc(8))
+        p.end()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton and e.pos().y() < self.titlebar.height():
+            self._drag = e.globalPos() - self.frameGeometry().topLeft()
+            e.accept()
+        else:
+            super(BoxConfirmDialog, self).mousePressEvent(e)
+
+    def mouseMoveEvent(self, e):
+        if self._drag is not None:
+            self.move(e.globalPos() - self._drag)
+            e.accept()
+        else:
+            super(BoxConfirmDialog, self).mouseMoveEvent(e)
+
+    def mouseReleaseEvent(self, e):
+        self._drag = None
+        super(BoxConfirmDialog, self).mouseReleaseEvent(e)
+
+
 class BoxWindow(QWidget):
     """单个桌面格子窗口。"""
 
@@ -259,10 +375,21 @@ class BoxWindow(QWidget):
         self.icon = QLabel()
         self.icon.setFixedSize(ui.sc(16), ui.sc(16))
         self.icon.setScaledContents(True)
+        if rec['kind'] == 'folder':
+            # 映射格子：点图标打开所在文件夹（本地临时格子是背地里的存储目录，不给入口）
+            self.icon.setCursor(Qt.PointingHandCursor)
+            self.icon.setToolTip('打开所在文件夹')
         tb.addWidget(self.icon)
         self.name = QLabel(rec['name'])
         self.name.setObjectName('boxName')
         tb.addWidget(self.name, 1)
+        # 双击名称后原地替换成的重命名输入框
+        self.edit = QLineEdit(rec['name'])
+        self.edit.setObjectName('boxNameEdit')
+        self.edit.hide()
+        self.edit.editingFinished.connect(self._finish_rename)
+        tb.addWidget(self.edit, 1)
+        self._edit_cancel = False
         self.btn_collapse = QToolButton()
         self.btn_collapse.setFixedSize(ui.sc(22), ui.sc(20))
         self.btn_collapse.clicked.connect(lambda: self.set_collapsed(not self.rec['collapsed']))
@@ -314,7 +441,7 @@ class BoxWindow(QWidget):
 
         # 子控件默认继承顶层窗口的光标：边缘悬停设了双箭头后划入列表不会复位。
         # 给会盖住窗口背景的子控件装过滤器，MouseMove 时按窗口坐标同步光标。
-        for w in (self.title, self.list, self.list.viewport(), self.hint):
+        for w in (self.title, self.icon, self.name, self.edit, self.list, self.list.viewport(), self.hint):
             w.installEventFilter(self)
 
         # 文件夹内容变化自动刷新（300ms 去抖）
@@ -469,8 +596,40 @@ class BoxWindow(QWidget):
             self.name.setText(name)
             self.mgr.save_rec(self)
 
+    def _start_rename(self):
+        """双击名称 → 原地变输入框重命名（回车/失焦确认，Esc 取消）。"""
+        if self.edit.isVisible():
+            return
+        self._edit_cancel = False
+        self.edit.setText(self.rec['name'])
+        self.name.hide()
+        self.edit.show()
+        self.edit.setFocus()
+        self.edit.selectAll()
+
+    def _finish_rename(self):
+        self.edit.hide()
+        self.name.show()
+        name = self.edit.text().strip()
+        if not self._edit_cancel and name and name != self.rec['name']:
+            self.rec['name'] = name
+            self.name.setText(name)
+            self.mgr.save_rec(self)
+
+    def _confirm_dissolve(self):
+        """解散二次确认：空白格子提示文件会还原回桌面，映射格子提示不影响原文件夹。"""
+        if self.rec['kind'] == 'blank':
+            detail = '里面的文件会自动还原回桌面。'
+        else:
+            detail = '只移除格子，不影响文件夹本身。'
+        dlg = BoxConfirmDialog(self, '解散格子',
+                               '解散格子「%s」？%s' % (self.rec['name'], detail), '解散')
+        return dlg.exec_() == QDialog.Accepted
+
     def dissolve(self):
         """解散格子：空白格子把文件还原回桌面后删掉背后的存储目录；映射格子直接移除。"""
+        if not self._confirm_dissolve():
+            return
         if self.rec['kind'] == 'blank' and os.path.isdir(self.rec['path']):
             desk = desktop_dir()
             try:
@@ -632,6 +791,24 @@ class BoxWindow(QWidget):
             self.setCursor(cur)
 
     def eventFilter(self, obj, e):
+        # 映射格子的文件夹图标：左键按下打开所在文件夹。
+        # 三类鼠标事件都吃掉——按下不放给父窗口（否则进拖动）、双击不收起、
+        # 双击的第二次松开也不再开一次
+        if obj is self.icon and self.rec['kind'] == 'folder':
+            if e.type() == e.MouseButtonPress and e.button() == Qt.LeftButton:
+                self.open_path(self.rec['path'])
+                return True
+            if e.type() in (e.MouseButtonRelease, e.MouseButtonDblClick):
+                return True
+        # 名称标签双击 → 内联重命名；吃掉事件，不再传给父窗口触发收起
+        if obj is self.name and e.type() == e.MouseButtonDblClick:
+            self._start_rename()
+            return True
+        # 输入框里 Esc 取消：失焦会触发 editingFinished，借 _edit_cancel 跳过提交
+        if obj is self.edit and e.type() == e.KeyPress and e.key() == Qt.Key_Escape:
+            self._edit_cancel = True
+            self.edit.clearFocus()
+            return True
         # 子控件上的 MouseMove 转成窗口坐标同步光标（子控件不设光标，跟随窗口）
         if e.type() == e.MouseMove and not self._op:
             self._sync_cursor(obj.mapTo(self, e.pos()))
@@ -717,6 +894,62 @@ class BoxWindow(QWidget):
         super(BoxWindow, self).mouseDoubleClickEvent(e)
 
 
+def find_desktop_listview():
+    """桌面图标所在的 SysListView32：通常在 Progman/SHELLDLL_DefView 下，
+    部分环境（壁纸软件等）会被挪到某个 WorkerW 下。找不到返回 None。"""
+    def _lv_under(parent):
+        if not parent:
+            return None
+        dv = ui._u32.FindWindowExW(parent, None, 'SHELLDLL_DefView', None)
+        return ui._u32.FindWindowExW(dv, None, 'SysListView32', None) if dv else None
+    lv = _lv_under(ui._u32.FindWindowW('Progman', None))
+    if lv:
+        return lv
+    w = None
+    while True:
+        w = ui._u32.FindWindowExW(None, w, 'WorkerW', None)
+        if not w:
+            return None
+        lv = _lv_under(w)
+        if lv:
+            return lv
+
+
+_LVM_HITTEST = 0x1012
+
+def _desktop_icon_at(lv, pt):
+    """SysListView32 上 pt（屏幕坐标）是否命中图标：跨进程 LVM_HITTEST
+    （结构体必须开在 explorer 的地址空间里，SendMessage 才读得到）。
+    命中返回 True；任何一步失败按未命中处理——宁可当空白处。"""
+    class _LVHITTESTINFO(ctypes.Structure):
+        _fields_ = [('pt', wintypes.POINT), ('flags', wintypes.UINT),
+                    ('iItem', ctypes.c_int)]
+    cpt = wintypes.POINT(pt.x, pt.y)
+    _h32.ScreenToClient(lv, ctypes.byref(cpt))
+    pid = wintypes.DWORD()
+    ui._u32.GetWindowThreadProcessId(lv, ctypes.byref(pid))
+    # PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ
+    hp = _k32.OpenProcess(0x0008 | 0x0020 | 0x0010, False, pid.value)
+    if not hp:
+        return False
+    try:
+        buf = _k32.VirtualAllocEx(hp, None, ctypes.sizeof(_LVHITTESTINFO),
+                                  0x1000, 0x04)   # MEM_COMMIT | PAGE_READWRITE
+        if not buf:
+            return False
+        try:
+            info = _LVHITTESTINFO(cpt, 0, -1)
+            nw = ctypes.c_size_t()
+            if not _k32.WriteProcessMemory(hp, buf, ctypes.byref(info),
+                                           ctypes.sizeof(info), ctypes.byref(nw)):
+                return False
+            return _h32.SendMessageW(lv, _LVM_HITTEST, 0, buf) != -1
+        finally:
+            _k32.VirtualFreeEx(hp, buf, 0, 0x8000)   # MEM_RELEASE
+    finally:
+        _k32.CloseHandle(hp)
+
+
 class DesktopClickHook(QThread):
     """双击桌面空白处 → 显隐全部格子。
     WH_MOUSE_LL 看不到 WM_LBUTTONDBLCLK（它是投递时才合成的），
@@ -758,7 +991,10 @@ class DesktopClickHook(QThread):
                 if h in own:
                     return False
                 cls = ui._class_name(h)
-                if cls in ui._PROG_FAMILY or cls == 'SysListView32':
+                if cls == 'SysListView32':
+                    # 点在图标/文件夹上不算空白：双击文件夹不能触发显隐
+                    return not _desktop_icon_at(h, pt)
+                if cls in ui._PROG_FAMILY:
                     return True
                 # 桌面整理软件的全屏覆盖层（腾讯 TXMiniSkin 等）：与 app.probe_desktop 同一判定
                 if ui._is_desktop_surface(h, sw, sh):
@@ -813,8 +1049,9 @@ class BoxManager(object):
         self.panel = panel
         self.windows = []
         self.hook = DesktopClickHook(self.own_hwnds)
-        self.hook.double_clicked.connect(self.toggle_visible)
-        self.hook.start()
+        self.hook.double_clicked.connect(self.toggle_all)
+        if panel.cfg.data.get('box_dblclick', True):
+            self.hook.start()
         self.restore()
 
     def own_hwnds(self):
@@ -887,6 +1124,36 @@ class BoxManager(object):
         self.store.save()
         win.setParent(None)
         win.deleteLater()
+
+    def set_dblclick_enabled(self, on):
+        """设置窗开关：启停「双击桌面显隐格子」的低级鼠标钩子。
+        QThread 停止后可再次 start；stop() 会等线程退出，重启是安全的。"""
+        if on and not self.hook.isRunning():
+            self.hook.start()
+        elif not on and self.hook.isRunning():
+            self.hook.stop()
+
+    def toggle_all(self):
+        """双击桌面空白处：桌面图标 + 全部格子 + 面板一起显隐。
+        任一还可见就算「显示中」，全部收起来；全收了再一起放出来。
+        图标显隐 = ShowWindow 桌面 SysListView32（与右键菜单的勾选状态无关）。"""
+        lv = find_desktop_listview()
+        showing = (self.panel.isVisible()
+                   or any(w.isVisible() for w in self.windows)
+                   or bool(lv and ui._u32.IsWindowVisible(lv)))
+        show = not showing
+        self.store.data['visible'] = show
+        self.store.save()
+        for w in self.windows:
+            w.setVisible(show)
+        if show:   # 与 panel.toggle_visible 的显示分支一致
+            self.panel.show()
+            self.panel.raise_()
+            self.panel.activateWindow()
+        else:
+            self.panel.close_panel()   # 顶部栏是独立小窗，必须跟着收
+        if lv:
+            ui._u32.ShowWindow(lv, 5 if show else 0)   # SW_SHOW / SW_HIDE
 
     def toggle_visible(self):
         show = not any(w.isVisible() for w in self.windows)
