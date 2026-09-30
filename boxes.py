@@ -32,6 +32,7 @@ from PyQt5.QtWidgets import (QWidget, QDialog, QListWidget, QListWidgetItem, QVB
                              QAbstractItemView, QApplication, QStyle)
 
 import app as ui   # sc / _PROG_FAMILY / _class_name / _is_desktop_surface
+import sysutil
 
 # 64 位安全的 ctypes 签名（windll 默认按 32 位 int 截断，句柄/指针高位会丢）
 _h32 = ctypes.windll.user32
@@ -984,6 +985,19 @@ def _desktop_icon_at(lv, pt):
         _k32.CloseHandle(hp)
 
 
+def _log_hook_error():
+    """WH_MOUSE_LL 回调异常落盘。ctypes 回调里的异常不走 sys.excepthook，
+    被 ctypes 吞掉打印到 stderr（pythonw 下不可见），还会向系统返回垃圾值。"""
+    try:
+        import traceback
+        p = os.path.join(sysutil.appdata_dir(), 'debug_due.log')
+        with open(p, 'a', encoding='utf-8') as f:
+            f.write('--- DesktopClickHook ---\n')
+            f.write(traceback.format_exc())
+    except Exception:
+        pass
+
+
 class DesktopClickHook(QThread):
     """双击桌面空白处 → 显隐全部格子。
     WH_MOUSE_LL 看不到 WM_LBUTTONDBLCLK（它是投递时才合成的），
@@ -1049,22 +1063,27 @@ class DesktopClickHook(QThread):
             return False
 
         def proc(nCode, wParam, lParam):
-            if nCode == 0 and wParam == 0x0201:   # WM_LBUTTONDOWN
-                s = ctypes.cast(lParam, ctypes.POINTER(MSLLHOOKSTRUCT)).contents
-                now = s.time
-                on_desktop = _is_desktop(s.pt)
-                if (on_desktop and state['t'] and now - state['t'] <= dbl_t
-                        and abs(s.pt.x - state['x']) <= dbl_x
-                        and abs(s.pt.y - state['y']) <= dbl_y):
-                    state['t'] = 0
-                    self.double_clicked.emit()
-                elif on_desktop:
-                    state['t'], state['x'], state['y'] = now, s.pt.x, s.pt.y
-                else:
-                    # 第一击也必须落在桌面上：点在格子/窗口上要把双击序列清零，
-                    # 否则「拖开格子 → 快速点它腾出来的空位」会被误判成双击桌面，
-                    # 全部格子被隐藏——用户眼里就是拖完格子消失了
-                    state['t'] = 0
+            # 钩子回调有系统时间预算，异常必须当场兜住：落盘 + 照常放行，
+            # 不能留给 ctypes（吞掉后返回垃圾值，且格式化 traceback 拖慢鼠标）
+            try:
+                if nCode == 0 and wParam == 0x0201:   # WM_LBUTTONDOWN
+                    s = ctypes.cast(lParam, ctypes.POINTER(MSLLHOOKSTRUCT)).contents
+                    now = s.time
+                    on_desktop = _is_desktop(s.pt)
+                    if (on_desktop and state['t'] and now - state['t'] <= dbl_t
+                            and abs(s.pt.x - state['x']) <= dbl_x
+                            and abs(s.pt.y - state['y']) <= dbl_y):
+                        state['t'] = 0
+                        self.double_clicked.emit()
+                    elif on_desktop:
+                        state['t'], state['x'], state['y'] = now, s.pt.x, s.pt.y
+                    else:
+                        # 第一击也必须落在桌面上：点在格子/窗口上要把双击序列清零，
+                        # 否则「拖开格子 → 快速点它腾出来的空位」会被误判成双击桌面，
+                        # 全部格子被隐藏——用户眼里就是拖完格子消失了
+                        state['t'] = 0
+            except Exception:
+                _log_hook_error()
             return _h32.CallNextHookEx(None, nCode, wParam, lParam)
 
         self._proc = proc_t(proc)   # 留引用防 GC
@@ -1094,13 +1113,18 @@ class BoxManager(object):
         self.box_root = os.path.join(data_dir, 'Boxes')
         self.panel = panel
         self.windows = []
+        self._own_hwnd_cache = frozenset()
         self.hook = DesktopClickHook(self.own_hwnds)
         self.hook.double_clicked.connect(self.toggle_all)
         if panel.cfg.data.get('box_dblclick', True):
             self.hook.start()
         self.restore()
+        self._refresh_own_hwnds()
 
-    def own_hwnds(self):
+    def _refresh_own_hwnds(self):
+        """重建本进程窗口句柄快照。只能在 GUI 线程调：winId() 可能现场创建原生窗口，
+        钩子线程里调会 QWaitCondition 等主线程刷窗口事件，而主线程绘制又在等 GIL
+        （钩子线程持有），直接死锁——必须在这里（GUI 线程）提前算好。"""
         s = set()
         for w in [self.panel, getattr(self.panel, 'titlebar', None)] + self.windows:
             if w is not None:
@@ -1108,7 +1132,11 @@ class BoxManager(object):
                     s.add(int(w.winId()))
                 except Exception:
                     pass
-        return s
+        self._own_hwnd_cache = frozenset(s)   # 整体换引用，钩子线程读到的总是完整快照
+
+    def own_hwnds(self):
+        """钩子线程专用：只读主线程预建的快照，绝不碰 Qt 对象（见 _refresh_own_hwnds）。"""
+        return self._own_hwnd_cache
 
     def restore(self):
         ag = QApplication.primaryScreen().virtualGeometry()
@@ -1120,6 +1148,7 @@ class BoxManager(object):
             self.windows.append(win)
             if self.store.data.get('visible', True):
                 win.show()
+        self._refresh_own_hwnds()
 
     def _new_rec(self, kind, name, path):
         rec = {'id': 'b%d' % int(time.time() * 1000), 'kind': kind, 'name': name,
@@ -1159,6 +1188,7 @@ class BoxManager(object):
         win.show()
         if not self.store.data.get('visible', True):
             win.hide()
+        self._refresh_own_hwnds()
 
     def save_rec(self, _win):
         self.store.save()
@@ -1166,6 +1196,7 @@ class BoxManager(object):
     def remove(self, win):
         if win in self.windows:
             self.windows.remove(win)
+            self._refresh_own_hwnds()
         self.store.data['boxes'] = [r for r in self.store.data['boxes'] if r is not win.rec]
         self.store.save()
         win.setParent(None)
