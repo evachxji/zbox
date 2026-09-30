@@ -13,6 +13,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.encodeToString
+import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -57,6 +58,7 @@ class Receiver(private val context: Context) {
         val tokens: Map<String, String>,
         val decision: CompletableDeferred<Uri?>,
         val records: Map<String, TransferRecord>,
+        val remoteIp: String,
         val createdAt: Long = System.currentTimeMillis(),
     ) {
         var state = SessionState.PENDING
@@ -100,7 +102,7 @@ class Receiver(private val context: Context) {
             ).also { TransferStore.add(it) }
         }
         val decision = CompletableDeferred<Uri?>()
-        val session = Session(sessionId, request.info, request.files.values.toList(), tokens, decision, records)
+        val session = Session(sessionId, request.info, request.files.values.toList(), tokens, decision, records, http.remoteIpAddress ?: "")
         sessions[sessionId] = session
 
         IncomingState.show(
@@ -140,14 +142,18 @@ class Receiver(private val context: Context) {
             ?: return TransferServer.error(Status.BAD_REQUEST, "missing token")
 
         val session = sessions[sessionId]
-            ?: return TransferServer.error(Status.BAD_REQUEST, "invalid session")
+            ?: return TransferServer.error(Status.FORBIDDEN, "invalid session")
         val meta = session.files.firstOrNull { it.id == fileId }
             ?: return TransferServer.error(Status.BAD_REQUEST, "invalid fileId")
         if (session.tokens[fileId] != token) {
             return TransferServer.error(Status.FORBIDDEN, "invalid token")
         }
+        // 来源 IP 必须与 prepare-upload 时一致
+        if (session.remoteIp.isNotEmpty() && http.remoteIpAddress != session.remoteIp) {
+            return TransferServer.error(Status.FORBIDDEN, "ip mismatch")
+        }
         if (session.cancelled || session.state != SessionState.ACTIVE) {
-            return TransferServer.error(TransferServer.STATUS_422, "session not writable")
+            return TransferServer.error(Status.CONFLICT, "session not writable")
         }
 
         val record = session.records.getValue(fileId)
@@ -160,20 +166,25 @@ class Receiver(private val context: Context) {
         session.currentDoc = doc
 
         val contentLength = http.headers["content-length"]?.toLongOrNull() ?: -1L
+        // 对端提供 sha256 时边写边算摘要
+        val digest = if (meta.sha256.isNullOrEmpty()) null else MessageDigest.getInstance("SHA-256")
+        var received = 0L
         try {
             context.contentResolver.openOutputStream(doc.uri, "w")?.use { out ->
                 val input = http.inputStream
                 val buffer = ByteArray(64 * 1024)
                 var remaining = contentLength
                 while (true) {
+                    if (session.cancelled) throw CancelledException()
                     val want = if (remaining < 0) buffer.size else minOf(buffer.size.toLong(), remaining).toInt()
                     if (want == 0) break
                     val n = input.read(buffer, 0, want)
                     if (n < 0) break
-                    if (session.cancelled) throw CancelledException()
                     out.write(buffer, 0, n)
+                    digest?.update(buffer, 0, n)
                     if (remaining > 0) remaining -= n
-                    record.progress += n
+                    received += n
+                    record.progress = received
                 }
             } ?: return fail(record, "cannot open output stream")
         } catch (_: CancelledException) {
@@ -187,6 +198,25 @@ class Receiver(private val context: Context) {
             session.currentDoc = null
         }
 
+        // 短读校验：实收字节数必须等于 Content-Length，否则删除半成品回 500
+        if (contentLength >= 0 && received != contentLength) {
+            doc.delete()
+            record.status = TransferStatus.FAILED
+            record.error = "字节数不足：" + received + "/" + contentLength
+            return TransferServer.error(Status.INTERNAL_ERROR, "incomplete body")
+        }
+
+        // sha256 校验：不匹配删文件回 422
+        if (digest != null) {
+            val actual = digest.digest().joinToString("") { "%02x".format(it) }
+            if (!actual.equals(meta.sha256, ignoreCase = true)) {
+                doc.delete()
+                record.status = TransferStatus.FAILED
+                record.error = "sha256 校验失败"
+                return TransferServer.error(TransferServer.STATUS_422, "sha256 mismatch")
+            }
+        }
+
         record.progress = meta.size
         record.status = TransferStatus.DONE
         return TransferServer.jsonResponse(Status.OK, "")
@@ -197,7 +227,7 @@ class Receiver(private val context: Context) {
         val sessionId = http.parameters["sessionId"]?.firstOrNull()
             ?: return TransferServer.error(Status.BAD_REQUEST, "missing sessionId")
         val session = sessions.remove(sessionId)
-            ?: return TransferServer.error(Status.BAD_REQUEST, "invalid session")
+            ?: return TransferServer.jsonResponse(Status.OK, "") // 幂等：不存在的会话直接成功
         session.cancelled = true
         try { session.currentDoc?.delete() } catch (_: Exception) {}
         session.records.values.forEach {

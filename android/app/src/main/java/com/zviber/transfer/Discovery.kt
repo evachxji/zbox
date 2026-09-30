@@ -42,7 +42,7 @@ class Discovery(private val context: Context, private val scope: CoroutineScope)
         .connectTimeout(500, TimeUnit.MILLISECONDS)
         .readTimeout(500, TimeUnit.MILLISECONDS)
         .writeTimeout(500, TimeUnit.MILLISECONDS)
-        .callTimeout(1_500, TimeUnit.MILLISECONDS)
+        .callTimeout(800, TimeUnit.MILLISECONDS)
         .build()
 
     // register 应答客户端
