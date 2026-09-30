@@ -311,6 +311,118 @@ def case_conflict_rename(ctx):
         shutil.rmtree(root, ignore_errors=True)
 
 
+def case_path_sanitize(ctx):
+    # 用例 8：fileName 目录穿越净化为纯文件名，落盘不越出保存目录
+    root = tempfile.mkdtemp(prefix='zviber_case8_')
+    try:
+        recv = os.path.join(root, 'recv')
+        os.makedirs(recv)
+        ctx.box_b['dir'] = recv
+        meta = {
+            'f1': {'id': 'f1', 'fileName': '../../evil.txt', 'size': 3,
+                   'fileType': 'text/plain'},
+            'f2': {'id': 'f2', 'fileName': '..\\..\\evil.txt', 'size': 3,
+                   'fileType': 'text/plain'},
+        }
+        status, body = post_json(ctx.url_b('prepare-upload'),
+                                 {'info': ctx.info_a.to_dict(), 'files': meta})
+        check(status == 200, 'prepare 应回 200，实际 %d' % status)
+        sid = body['sessionId']
+        for fid in ('f1', 'f2'):
+            status = post_raw(ctx.url_b('upload?' + urllib.parse.urlencode(
+                {'sessionId': sid, 'fileId': fid,
+                 'token': body['files'][fid]})), b'abc')
+            check(status == 200, 'upload %s 应回 200，实际 %d' % (fid, status))
+        names = sorted(os.listdir(recv))
+        check(names == ['evil (2).txt', 'evil.txt'],
+              '穿越文件名应净化落盘为 evil.txt / evil (2).txt，实际 %r' % (names,))
+        check(not os.path.exists(os.path.join(root, 'evil.txt')),
+              '不应在保存目录之外落盘')
+    finally:
+        ctx.box_b['dir'] = None
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def case_bad_port(ctx):
+    # 用例 9：坏 port（"abc"）的 register 回 400；from_dict 安全回退保证监听线程不死
+    bad = ctx.info_b.to_dict()
+    bad['port'] = 'abc'
+    try:
+        post_json(ctx.url_a('register'), bad)
+        check(False, '坏 port 的 register 不应成功')
+    except urllib.error.HTTPError as exc:
+        check(exc.code == 400, '坏 port 应回 400，实际 %d' % exc.code)
+    # 监听线程解析同款坏包不应崩溃：from_dict 回退默认端口
+    info = transfer.DeviceInfo.from_dict(bad)
+    check(info.port == transfer.PORT, '坏 port 应回退默认端口，实际 %r' % info.port)
+    check(info.fingerprint == ctx.info_b.fingerprint, '其余字段应正常解析')
+    # 再发正常 register 仍能登记（处理路径未被坏包破坏）
+    before = len(ctx.found_on_a)
+    status, _ = post_json(ctx.url_a('register'), ctx.info_b.to_dict())
+    check(status == 200, '正常 register 应回 200，实际 %d' % status)
+    deadline = time.time() + 3.0
+    while len(ctx.found_on_a) <= before and time.time() < deadline:
+        time.sleep(0.05)
+    check(len(ctx.found_on_a) > before, '坏包之后正常包应仍能登记')
+
+
+def case_size_mismatch(ctx):
+    # 用例 10：upload 的 Content-Length 与 prepare 声明的 size 不符 → 400
+    root = tempfile.mkdtemp(prefix='zviber_case10_')
+    try:
+        recv = os.path.join(root, 'recv')
+        os.makedirs(recv)
+        ctx.box_b['dir'] = recv
+        meta = {'f1': {'id': 'f1', 'fileName': 'm.bin', 'size': 100,
+                       'fileType': 'application/octet-stream'}}
+        status, body = post_json(ctx.url_b('prepare-upload'),
+                                 {'info': ctx.info_a.to_dict(), 'files': meta})
+        check(status == 200, 'prepare 应回 200，实际 %d' % status)
+        sid = body['sessionId']
+        try:
+            post_raw(ctx.url_b('upload?' + urllib.parse.urlencode(
+                {'sessionId': sid, 'fileId': 'f1',
+                 'token': body['files']['f1']})), b'1234')  # 实际 4 字节 != 声明 100
+            check(False, 'size 不符不应成功')
+        except urllib.error.HTTPError as exc:
+            check(exc.code == 400, 'size 不符应回 400，实际 %d' % exc.code)
+        check(not os.listdir(recv), 'size 不符不应落盘任何文件')
+        post_raw(ctx.url_b('cancel?' + urllib.parse.urlencode({'sessionId': sid})), b'')
+    finally:
+        ctx.box_b['dir'] = None
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def case_ip_mismatch(ctx):
+    # 用例 11：来源 IP 与 prepare 不一致的 upload → 403
+    # 本机只有一个回环地址，直接篡改服务端登记的来源 IP 模拟异机抢传
+    root = tempfile.mkdtemp(prefix='zviber_case11_')
+    try:
+        recv = os.path.join(root, 'recv')
+        os.makedirs(recv)
+        ctx.box_b['dir'] = recv
+        meta = {'f1': {'id': 'f1', 'fileName': 'ip.bin', 'size': 4,
+                       'fileType': 'application/octet-stream'}}
+        status, body = post_json(ctx.url_b('prepare-upload'),
+                                 {'info': ctx.info_a.to_dict(), 'files': meta})
+        check(status == 200, 'prepare 应回 200，实际 %d' % status)
+        sid = body['sessionId']
+        with ctx.srv_b.sessions_lock:
+            ctx.srv_b.sessions[sid]['ip'] = '10.9.8.7'
+        try:
+            post_raw(ctx.url_b('upload?' + urllib.parse.urlencode(
+                {'sessionId': sid, 'fileId': 'f1',
+                 'token': body['files']['f1']})), b'1234')
+            check(False, 'IP 不符不应成功')
+        except urllib.error.HTTPError as exc:
+            check(exc.code == 403, 'IP 不符应回 403，实际 %d' % exc.code)
+        check(not os.listdir(recv), 'IP 不符不应落盘任何文件')
+        post_raw(ctx.url_b('cancel?' + urllib.parse.urlencode({'sessionId': sid})), b'')
+    finally:
+        ctx.box_b['dir'] = None
+        shutil.rmtree(root, ignore_errors=True)
+
+
 CASES = [
     ('register 互见设备', case_register),
     ('GET /info 字段完整', case_info),
@@ -319,6 +431,10 @@ CASES = [
     ('错误 token 回 403', case_bad_token),
     ('cancel 删除半成品', case_cancel),
     ('同名文件自动加 " (2)" 后缀', case_conflict_rename),
+    ('fileName 目录穿越净化', case_path_sanitize),
+    ('坏 port register 回 400 且不影响后续登记', case_bad_port),
+    ('Content-Length 与声明 size 不符回 400', case_size_mismatch),
+    ('来源 IP 不符回 403', case_ip_mismatch),
 ]
 
 

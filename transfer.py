@@ -39,6 +39,8 @@ DEVICE_TTL = 30.0                        # 设备最后出现超过该秒数视�
 SCAN_TIMEOUT = 0.5                       # 子网扫描单 IP 超时
 SCAN_WORKERS = 64                        # 子网扫描并发数
 NET_TIMEOUT = 10.0                       # 普通网络请求超时上限
+MAX_JSON_BODY = 1048576                    # JSON 请求体上限 1MB
+SESSION_TTL = 600.0                        # 会话超过 10 分钟未完成视为陈旧
 
 
 def _safe_call(callback, *args):
@@ -79,10 +81,14 @@ class DeviceInfo(object):
     def from_dict(cls, data):
         if not isinstance(data, dict):
             data = {}
+        try:
+            port = int(data.get('port') or PORT)
+        except (TypeError, ValueError):
+            port = PORT  # 伪造的坏端口（如 "abc"）安全回退，不杀死调用线程
         return cls(
             alias=data.get('alias') or '',
             fingerprint=data.get('fingerprint') or '',
-            port=data.get('port') or PORT,
+            port=port,
             device_model=data.get('deviceModel') or '',
             device_type=data.get('deviceType') or 'desktop',
             version=data.get('version') or '2.0',
@@ -121,18 +127,24 @@ def load_or_create_fingerprint(cfg_path):
     return fp
 
 
-def _unique_path(directory, name):
-    '''文件名冲突时自动加 " (2)" / " (3)" 后缀，不覆盖已有文件。'''
-    target = os.path.join(directory, name)
-    if not os.path.exists(target):
-        return target
+def _create_unique(directory, name):
+    '''原子占位创建（O_EXCL），冲突时自动加 " (2)" / " (3)" 后缀。
+
+    返回 (fd, 路径)；并发上传同名文件也不会互相覆盖。'''
     base, ext = os.path.splitext(name)
-    n = 2
+    n = 1
     while True:
-        candidate = os.path.join(directory, '%s (%d)%s' % (base, n, ext))
-        if not os.path.exists(candidate):
-            return candidate
-        n += 1
+        candidate = os.path.join(
+            directory, name if n == 1 else '%s (%d)%s' % (base, n, ext))
+        try:
+            fd = os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            return fd, candidate
+        except FileExistsError:
+            n += 1
+
+
+class _BodyTooLarge(Exception):
+    '''JSON 请求体超过 MAX_JSON_BODY。'''
 
 
 class _ApiHandler(BaseHTTPRequestHandler):
@@ -140,6 +152,11 @@ class _ApiHandler(BaseHTTPRequestHandler):
 
     protocol_version = 'HTTP/1.1'
     server_version = 'ZviberTransfer/1.0'
+
+    def setup(self):
+        BaseHTTPRequestHandler.setup(self)
+        # 默认连接超时：慢速/僵死连接不能无限挂住 handler 线程
+        self.connection.settimeout(NET_TIMEOUT)
 
     def log_message(self, fmt, *args):
         pass  # 静默，不写 stderr
@@ -162,8 +179,23 @@ class _ApiHandler(BaseHTTPRequestHandler):
 
     def _read_json(self):
         length = int(self.headers.get('Content-Length') or 0)
+        if length > MAX_JSON_BODY:
+            raise _BodyTooLarge()
         raw = self.rfile.read(length) if length > 0 else b''
         return json.loads(raw.decode('utf-8'))
+
+    def _drain_body(self):
+        '''丢弃未读的请求体。拒绝类响应若不先排空，Windows 关连接时的
+        RST 可能把已发出的响应一起冲掉（客户端表现为连接中断而非状态码）。'''
+        try:
+            length = int(self.headers.get('Content-Length') or 0)
+            while length > 0:
+                chunk = self.rfile.read(min(CHUNK_SIZE, length))
+                if not chunk:
+                    break
+                length -= len(chunk)
+        except Exception:
+            pass
 
     @staticmethod
     def _query_first(query, key):
@@ -193,6 +225,8 @@ class _ApiHandler(BaseHTTPRequestHandler):
                 self._handle_cancel(query)
             else:
                 self._send_json(404, {'message': 'not found'})
+        except _BodyTooLarge:
+            self._send_json(413, {'message': 'payload too large'})
         except ValueError:
             self._send_json(400, {'message': 'bad request'})
         except Exception:
@@ -205,7 +239,15 @@ class _ApiHandler(BaseHTTPRequestHandler):
     # ---- 五个路由 ----
 
     def _handle_register(self):
-        info = DeviceInfo.from_dict(self._read_json())
+        raw = self._read_json()
+        raw_port = raw.get('port') if isinstance(raw, dict) else None
+        if raw_port is not None:
+            try:
+                int(raw_port)
+            except (TypeError, ValueError):
+                self._send_json(400, {'message': 'invalid port'})
+                return
+        info = DeviceInfo.from_dict(raw)
         ip = self.client_address[0]
         own = self.server.device_info
         if info.fingerprint and info.fingerprint != own.fingerprint:
@@ -229,7 +271,8 @@ class _ApiHandler(BaseHTTPRequestHandler):
             'state': 'pending',
             'save_dir': None,
             'saved': {},                                 # {fileId: 已落盘路径}
-            'partial': None,                             # 正在写入的半成品路径
+            'partial': {},                               # {fileId: 半成品路径}
+            'created_at': time.time(),
             'lock': threading.Lock(),
         }
         # 回调由 UI 层注入并阻塞弹窗，核心层只管调用
@@ -248,25 +291,31 @@ class _ApiHandler(BaseHTTPRequestHandler):
         session_id = self._query_first(query, 'sessionId')
         file_id = self._query_first(query, 'fileId')
         token = self._query_first(query, 'token')
+
+        def reject(code, message):
+            self._drain_body()  # 先排空请求体再拒绝，避免 RST 冲掉响应
+            self._send_json(code, {'message': message})
+
         if not session_id or not file_id or token is None:
-            self._send_json(400, {'message': 'missing sessionId/fileId/token'})
+            reject(400, 'missing sessionId/fileId/token')
             return
+        self.server.sweep_sessions()
         with self.server.sessions_lock:
             session = self.server.sessions.get(session_id)
         if session is None or session['state'] in ('rejected', 'cancelled'):
-            self._send_json(403, {'message': 'invalid session'})
+            reject(403, 'invalid session')
             return
         if session['state'] not in ('accepted', 'transferring'):
-            self._send_json(409, {'message': 'session conflict'})
+            reject(409, 'session conflict')
             return
         if file_id not in session['files']:
-            self._send_json(400, {'message': 'unknown fileId'})
+            reject(400, 'unknown fileId')
             return
         if session['tokens'].get(file_id) != token:
-            self._send_json(403, {'message': 'invalid token'})
+            reject(403, 'invalid token')
             return
         if self.client_address[0] != session['ip']:
-            self._send_json(403, {'message': 'ip mismatch'})
+            reject(403, 'ip mismatch')
             return
 
         meta = session['files'][file_id]
@@ -274,11 +323,29 @@ class _ApiHandler(BaseHTTPRequestHandler):
         # 防目录穿越：只取文件名部分
         file_name = os.path.basename(meta.get('fileName') or '') or file_id
         with session['lock']:
-            target = _unique_path(session['save_dir'], file_name)
-            session['partial'] = target
+            fd, target = _create_unique(session['save_dir'], file_name)
+            session['partial'][file_id] = target
+
+        # Content-Length 非法或与 prepare 声明的 size 不符：清占位回 400
+        length_header = self.headers.get('Content-Length')
+        try:
+            total = int(length_header or meta.get('size') or 0)
+            declared = int(meta['size']) if meta.get('size') is not None else None
+        except (TypeError, ValueError):
+            total, declared = None, None
+        if total is None or (length_header is not None
+                             and declared is not None and declared != total):
+            with session['lock']:
+                session['partial'].pop(file_id, None)
+            os.close(fd)  # 占位 fd 尚未 fdopen，先关掉才能删（Windows 占用锁）
+            try:
+                os.remove(target)
+            except OSError:
+                pass
+            reject(400, 'bad or mismatched content-length')
+            return
 
         sha = hashlib.sha256()
-        total = int(self.headers.get('Content-Length') or meta.get('size') or 0)
         done = 0
         ok = False
         # 慢速/断连客户端不能让 handler 线程无限挂住；超时按传输中断处理
@@ -286,7 +353,7 @@ class _ApiHandler(BaseHTTPRequestHandler):
         try:
             # 客户端总会带 Content-Length，按长度精确读取
             remaining = total
-            with open(target, 'wb') as f:
+            with os.fdopen(fd, 'wb') as f:
                 while remaining > 0:
                     if session['state'] == 'cancelled':
                         break  # 对端已取消，走下方中断清理
@@ -302,13 +369,13 @@ class _ApiHandler(BaseHTTPRequestHandler):
         except Exception:
             ok = False
         try:
-            self.connection.settimeout(None)  # 读完恢复，避免影响 keep-alive
+            self.connection.settimeout(NET_TIMEOUT)  # 恢复默认超时
         except OSError:
             pass
         if not ok:
             # 传输中断：删半成品
             with session['lock']:
-                session['partial'] = None
+                session['partial'].pop(file_id, None)
             try:
                 os.remove(target)
             except OSError:
@@ -319,7 +386,7 @@ class _ApiHandler(BaseHTTPRequestHandler):
         expected = meta.get('sha256')
         if expected and sha.hexdigest() != expected:
             with session['lock']:
-                session['partial'] = None
+                session['partial'].pop(file_id, None)
             try:
                 os.remove(target)
             except OSError:
@@ -328,7 +395,7 @@ class _ApiHandler(BaseHTTPRequestHandler):
             return
 
         with session['lock']:
-            session['partial'] = None
+            session['partial'].pop(file_id, None)
             session['saved'][file_id] = target
         _safe_call(self.server.on_file_done, session_id, file_id, target)
         self._send_json(200, {'message': 'ok'})
@@ -346,14 +413,14 @@ class _ApiHandler(BaseHTTPRequestHandler):
         if not session_id:
             self._send_json(400, {'message': 'missing sessionId'})
             return
+        self.server.sweep_sessions()
         with self.server.sessions_lock:
             session = self.server.sessions.pop(session_id, None)
         if session is not None:
             session['state'] = 'cancelled'
             # 只删正在传输的半成品，已完整落盘的文件保留；
             # 若半成品正被上传线程占用（Windows 删不动），由其中断清理路径兜底删除
-            partial = session.get('partial')
-            if partial:
+            for partial in session['partial'].values():
                 try:
                     os.remove(partial)
                 except OSError:
@@ -395,6 +462,22 @@ class TransferServer(ThreadingHTTPServer):
     def stop(self):
         self.shutdown()
         self.server_close()
+
+    def sweep_sessions(self):
+        '''清理超过 SESSION_TTL 的陈旧会话，并删除其半成品文件。'''
+        now = time.time()
+        with self.sessions_lock:
+            stale = [s for s in self.sessions.values()
+                     if now - s['created_at'] > SESSION_TTL]
+            for s in stale:
+                self.sessions.pop(s['id'], None)
+        for s in stale:
+            s['state'] = 'cancelled'
+            for p in s['partial'].values():
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
 
     def handle_error(self, request, client_address):
         # 客户端中途断连（cancel / 超时）属常态，不打堆栈；业务异常已在分发层兜底
