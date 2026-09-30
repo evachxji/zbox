@@ -188,6 +188,28 @@ excepthook 时 exit 127、连输出都没有。`main()` 里那句 `sys.excepthoo
 - 卸载用延迟 `rmdir`（exe 运行中删不掉自己），只清程序与系统集成，
   `%APPDATA%\ZviberPanel` 的用户数据保留。
 
+### 桌面格子（`boxes.py`）
+
+仿腾讯桌面整理的格子：`BoxManager` 总管（恢复/新建/解散/显隐），`BoxWindow` 单格，
+`BoxStore` 存 `%APPDATA%\ZviberPanel\boxes.json`（`visible` + 格子记录列表）。
+托盘菜单有「新建格子 / 新建文件夹格子 / 显示隐藏格子」；截图自检模式不创建格子。
+
+- **空白格子是真实文件夹**（`Boxes\<id>\`）：拖入 = `shutil.move` 进去，解散 = 全部还原回
+  桌面（SHGetFolderPath 取真桌面，处理 OneDrive 重定向），不删文件。映射格子只读目录、
+  `QFileSystemWatcher` 300ms 去抖刷新；路径失效显示「解散格子」页。
+- **视觉固定深色磨砂**，不挂主题系统（贴壁纸用，跟明暗主题都不合适）。用了
+  `WA_TranslucentBackground`——面板禁用的 ClearType 问题这里接受（参考软件本身就是半透明）。
+- 桌面层级复用 `pin_to_desktop` / `sink_to_desktop`：每个格子自己跑 500ms 看门狗。
+- **双击桌面显隐**：`DesktopClickHook` 起独立线程装 `WH_MOUSE_LL`（LL 钩子收不到
+  `WM_LBUTTONDBLCLK`，自己按 GetDoubleClickTime 判双击）。命中判定先排我们自己的窗口
+  （格子被 SetParent 挂到 DefView 下，父链会摸到桌面家族，必须先按 hwnd 排除），
+  再认 Progman 家族 + `SysListView32` + **全屏工具窗**（腾讯桌面整理的 TXMiniSkin
+  覆盖层会挡在所有桌面命中之上，漏了它在装了腾讯整理机器上双击永远无效）。
+- **凡是进 ctypes 的 Win32 函数都要显式声明 restype/argtypes**（含 GetMessageW 这类消息
+  循环函数）——windll 默认按 32 位截断，64 位下指针参数高位丢失，钩子线程静默失效。
+- `boxes.json` 读取用 `utf-8-sig`：用户拿记事本改完会带 BOM，`utf-8` 读失败后 save
+  会用空数据覆盖原文件（`config.json` 在 app.py 里有同样的坑，暂未动）。
+
 ## 代码风格
 
 - 每个模块首行 `# -*- coding: utf-8 -*-`，4 空格缩进
