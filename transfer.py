@@ -1,0 +1,648 @@
+﻿# -*- coding: utf-8 -*-
+'''局域网文件传输协议核心（LocalSend Protocol v2.2 HTTP 模式的私有实例）。
+
+纯标准库实现，不依赖 Qt，可独立测试。组播地址与端口为自定义值，
+与官方 LocalSend 完全隔离：
+
+- UDP 组播 224.0.0.168，TCP HTTP 与 UDP 同端口 53327
+- API 前缀 /api/localsend/v2/
+
+组件：
+- DeviceInfo      设备信息（发现与握手）
+- TransferServer  HTTP 服务端：register / info / prepare-upload / upload / cancel
+- Discovery       UDP 组播发现 + /24 子网回退扫描
+- send_files      发送方客户端
+'''
+
+import hashlib
+import http.client
+import json
+import mimetypes
+import os
+import platform
+import socket
+import struct
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+MULTICAST_GROUP = '224.0.0.168'          # UDP 组播地址（自定义，与官方隔离）
+PORT = 53327                             # TCP HTTP 与 UDP 组播同端口
+API_PREFIX = '/api/localsend/v2/'
+CHUNK_SIZE = 65536                       # 流式读写块大小 64KB
+DEVICE_TTL = 30.0                        # 设备最后出现超过该秒数视为离线
+SCAN_TIMEOUT = 0.5                       # 子网扫描单 IP 超时
+SCAN_WORKERS = 64                        # 子网扫描并发数
+NET_TIMEOUT = 10.0                       # 普通网络请求超时上限
+
+
+def _safe_call(callback, *args):
+    # 回调由 UI 层注入，异常不能拖垮网络线程
+    if callback is None:
+        return None
+    try:
+        return callback(*args)
+    except Exception:
+        return None
+
+
+class DeviceInfo(object):
+    '''设备信息：发现组播与 register 握手的载体。'''
+
+    def __init__(self, alias, fingerprint, port=PORT, device_model=None,
+                 device_type='desktop', version='2.0', protocol='http'):
+        self.alias = alias
+        self.version = version
+        self.device_model = device_model or ''
+        self.device_type = device_type
+        self.fingerprint = fingerprint
+        self.port = int(port)
+        self.protocol = protocol
+
+    def to_dict(self):
+        return {
+            'alias': self.alias,
+            'version': self.version,
+            'deviceModel': self.device_model,
+            'deviceType': self.device_type,
+            'fingerprint': self.fingerprint,
+            'port': self.port,
+            'protocol': self.protocol,
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        if not isinstance(data, dict):
+            data = {}
+        return cls(
+            alias=data.get('alias') or '',
+            fingerprint=data.get('fingerprint') or '',
+            port=data.get('port') or PORT,
+            device_model=data.get('deviceModel') or '',
+            device_type=data.get('deviceType') or 'desktop',
+            version=data.get('version') or '2.0',
+            protocol=data.get('protocol') or 'http',
+        )
+
+    @classmethod
+    def local(cls, alias, fingerprint):
+        '''构造本机信息，deviceModel 取 Windows 版本（如 "Windows 10"）。'''
+        return cls(alias=alias, fingerprint=fingerprint,
+                   device_model='Windows %s' % platform.release())
+
+
+def load_or_create_fingerprint(cfg_path):
+    '''从 cfg_path 的 JSON 里读 transfer_fingerprint，没有则生成并写回。
+
+    只操作调用方传入的路径，其它配置键原样保留。
+    '''
+    cfg = {}
+    if os.path.isfile(cfg_path):
+        try:
+            with open(cfg_path, 'r', encoding='utf-8') as f:
+                cfg = json.load(f)
+        except (ValueError, OSError):
+            cfg = {}
+    fp = cfg.get('transfer_fingerprint')
+    if isinstance(fp, str) and fp:
+        return fp
+    fp = uuid.uuid4().hex
+    cfg['transfer_fingerprint'] = fp
+    parent = os.path.dirname(os.path.abspath(cfg_path))
+    if not os.path.isdir(parent):
+        os.makedirs(parent)
+    with open(cfg_path, 'w', encoding='utf-8') as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+    return fp
+
+
+def _unique_path(directory, name):
+    '''文件名冲突时自动加 " (2)" / " (3)" 后缀，不覆盖已有文件。'''
+    target = os.path.join(directory, name)
+    if not os.path.exists(target):
+        return target
+    base, ext = os.path.splitext(name)
+    n = 2
+    while True:
+        candidate = os.path.join(directory, '%s (%d)%s' % (base, n, ext))
+        if not os.path.exists(candidate):
+            return candidate
+        n += 1
+
+
+class _ApiHandler(BaseHTTPRequestHandler):
+    '''TransferServer 的请求分发器，只认 API_PREFIX 下的五个路由。'''
+
+    protocol_version = 'HTTP/1.1'
+    server_version = 'ZviberTransfer/1.0'
+
+    def log_message(self, fmt, *args):
+        pass  # 静默，不写 stderr
+
+    def do_GET(self):
+        self._dispatch('GET')
+
+    def do_POST(self):
+        self._dispatch('POST')
+
+    # ---- 基础工具 ----
+
+    def _send_json(self, code, obj):
+        body = json.dumps(obj).encode('utf-8')
+        self.send_response(code)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _read_json(self):
+        length = int(self.headers.get('Content-Length') or 0)
+        raw = self.rfile.read(length) if length > 0 else b''
+        return json.loads(raw.decode('utf-8'))
+
+    @staticmethod
+    def _query_first(query, key):
+        values = query.get(key)
+        return values[0] if values else None
+
+    # ---- 路由分发 ----
+
+    def _dispatch(self, method):
+        try:
+            parsed = urllib.parse.urlparse(self.path)
+            path = parsed.path
+            query = urllib.parse.parse_qs(parsed.query)
+            if not path.startswith(API_PREFIX):
+                self._send_json(404, {'message': 'not found'})
+                return
+            route = path[len(API_PREFIX):]
+            if method == 'GET' and route == 'info':
+                self._send_json(200, self.server.device_info.to_dict())
+            elif method == 'POST' and route == 'register':
+                self._handle_register()
+            elif method == 'POST' and route == 'prepare-upload':
+                self._handle_prepare()
+            elif method == 'POST' and route == 'upload':
+                self._handle_upload(query)
+            elif method == 'POST' and route == 'cancel':
+                self._handle_cancel(query)
+            else:
+                self._send_json(404, {'message': 'not found'})
+        except ValueError:
+            self._send_json(400, {'message': 'bad request'})
+        except Exception:
+            # 未知异常统一 500；响应已发出则只能断开连接
+            try:
+                self._send_json(500, {'message': 'internal error'})
+            except Exception:
+                pass
+
+    # ---- 五个路由 ----
+
+    def _handle_register(self):
+        info = DeviceInfo.from_dict(self._read_json())
+        ip = self.client_address[0]
+        own = self.server.device_info
+        if info.fingerprint and info.fingerprint != own.fingerprint:
+            _safe_call(self.server.on_device_found, info, ip)
+        self._send_json(200, own.to_dict())
+
+    def _handle_prepare(self):
+        body = self._read_json()
+        info_dict = body.get('info') if isinstance(body, dict) else None
+        files = body.get('files') if isinstance(body, dict) else None
+        if not isinstance(info_dict, dict) or not isinstance(files, dict) or not files:
+            self._send_json(400, {'message': 'missing info or files'})
+            return
+        session_id = uuid.uuid4().hex
+        session = {
+            'id': session_id,
+            'info': DeviceInfo.from_dict(info_dict),
+            'ip': self.client_address[0],
+            'files': files,                              # {fileId: 元数据}
+            'tokens': {fid: uuid.uuid4().hex for fid in files},
+            'state': 'pending',
+            'save_dir': None,
+            'saved': {},                                 # {fileId: 已落盘路径}
+            'partial': None,                             # 正在写入的半成品路径
+            'lock': threading.Lock(),
+        }
+        # 回调由 UI 层注入并阻塞弹窗，核心层只管调用
+        save_dir = _safe_call(self.server.on_receive_request, session)
+        if not isinstance(save_dir, str) or not save_dir:
+            session['state'] = 'rejected'
+            self._send_json(403, {'message': 'rejected'})
+            return
+        session['state'] = 'accepted'
+        session['save_dir'] = save_dir
+        with self.server.sessions_lock:
+            self.server.sessions[session_id] = session
+        self._send_json(200, {'sessionId': session_id, 'files': session['tokens']})
+
+    def _handle_upload(self, query):
+        session_id = self._query_first(query, 'sessionId')
+        file_id = self._query_first(query, 'fileId')
+        token = self._query_first(query, 'token')
+        if not session_id or not file_id or token is None:
+            self._send_json(400, {'message': 'missing sessionId/fileId/token'})
+            return
+        with self.server.sessions_lock:
+            session = self.server.sessions.get(session_id)
+        if session is None or session['state'] in ('rejected', 'cancelled'):
+            self._send_json(403, {'message': 'invalid session'})
+            return
+        if session['state'] not in ('accepted', 'transferring'):
+            self._send_json(409, {'message': 'session conflict'})
+            return
+        if file_id not in session['files']:
+            self._send_json(400, {'message': 'unknown fileId'})
+            return
+        if session['tokens'].get(file_id) != token:
+            self._send_json(403, {'message': 'invalid token'})
+            return
+        if self.client_address[0] != session['ip']:
+            self._send_json(403, {'message': 'ip mismatch'})
+            return
+
+        meta = session['files'][file_id]
+        session['state'] = 'transferring'
+        # 防目录穿越：只取文件名部分
+        file_name = os.path.basename(meta.get('fileName') or '') or file_id
+        with session['lock']:
+            target = _unique_path(session['save_dir'], file_name)
+            session['partial'] = target
+
+        sha = hashlib.sha256()
+        total = int(self.headers.get('Content-Length') or meta.get('size') or 0)
+        done = 0
+        ok = False
+        try:
+            # 客户端总会带 Content-Length，按长度精确读取
+            remaining = total
+            with open(target, 'wb') as f:
+                while remaining > 0:
+                    chunk = self.rfile.read(min(CHUNK_SIZE, remaining))
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    sha.update(chunk)
+                    done += len(chunk)
+                    remaining -= len(chunk)
+                    _safe_call(self.server.on_progress, session_id, file_id, done, total)
+            ok = (done >= total)
+        except Exception:
+            ok = False
+        if not ok:
+            # 传输中断：删半成品
+            with session['lock']:
+                session['partial'] = None
+            try:
+                os.remove(target)
+            except OSError:
+                pass
+            self._send_json(500, {'message': 'transfer failed'})
+            return
+
+        expected = meta.get('sha256')
+        if expected and sha.hexdigest() != expected:
+            with session['lock']:
+                session['partial'] = None
+            try:
+                os.remove(target)
+            except OSError:
+                pass
+            self._send_json(422, {'message': 'sha256 mismatch'})
+            return
+
+        with session['lock']:
+            session['partial'] = None
+            session['saved'][file_id] = target
+        _safe_call(self.server.on_file_done, session_id, file_id, target)
+        self._send_json(200, {'message': 'ok'})
+
+        with session['lock']:
+            finished = all(fid in session['saved'] for fid in session['files'])
+        if finished:
+            session['state'] = 'done'
+            with self.server.sessions_lock:
+                self.server.sessions.pop(session_id, None)
+            _safe_call(self.server.on_session_done, session_id)
+
+    def _handle_cancel(self, query):
+        session_id = self._query_first(query, 'sessionId')
+        if not session_id:
+            self._send_json(400, {'message': 'missing sessionId'})
+            return
+        with self.server.sessions_lock:
+            session = self.server.sessions.pop(session_id, None)
+        if session is not None:
+            session['state'] = 'cancelled'
+            paths = list(session['saved'].values())
+            if session.get('partial'):
+                paths.append(session['partial'])
+            for p in paths:
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+            _safe_call(self.server.on_cancelled, session_id)
+        self._send_json(200, {'message': 'cancelled'})
+
+
+class TransferServer(ThreadingHTTPServer):
+    '''HTTP 接收服务端，守护线程运行 serve_forever。'''
+
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def __init__(self, device_info, port=PORT, host='',
+                 on_device_found=None, on_receive_request=None,
+                 on_progress=None, on_file_done=None,
+                 on_session_done=None, on_cancelled=None):
+        self.device_info = device_info
+        self.on_device_found = on_device_found          # (info, ip)
+        self.on_receive_request = on_receive_request    # (session) -> 保存目录 | None
+        self.on_progress = on_progress                  # (session_id, file_id, done, total)
+        self.on_file_done = on_file_done                # (session_id, file_id, saved_path)
+        self.on_session_done = on_session_done          # (session_id)
+        self.on_cancelled = on_cancelled                # (session_id)
+        self.sessions = {}
+        self.sessions_lock = threading.Lock()
+        ThreadingHTTPServer.__init__(self, (host, port), _ApiHandler)
+        self.port = self.server_address[1]              # port=0 时读系统分配的实际端口
+        self.device_info.port = self.port
+        self._thread = None
+
+    def start(self):
+        self._thread = threading.Thread(target=self.serve_forever,
+                                        name='transfer-server')
+        self._thread.daemon = True
+        self._thread.start()
+
+    def stop(self):
+        self.shutdown()
+        self.server_close()
+
+
+class Discovery(object):
+    '''UDP 组播发现 + /24 子网回退扫描，守护线程运行。
+
+    组播不可用（AP 隔离等）时不崩溃，降级为仅扫描。
+    '''
+
+    def __init__(self, device_info, on_device_found=None, announce_interval=5.0):
+        self.device_info = device_info
+        self.on_device_found = on_device_found
+        self.announce_interval = announce_interval
+        self.devices = {}            # {fingerprint: (DeviceInfo, ip, last_seen)}
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._threads = []
+
+    def start(self):
+        for target in (self._announce_loop, self._listen_loop):
+            t = threading.Thread(target=target, name='discovery')
+            t.daemon = True
+            t.start()
+            self._threads.append(t)
+
+    def stop(self):
+        self._stop.set()
+
+    def get_devices(self):
+        '''剔除 DEVICE_TTL 秒未见的设备，返回 {fingerprint: (DeviceInfo, ip)}。'''
+        now = time.time()
+        with self._lock:
+            stale = [fp for fp, (_, _, seen) in self.devices.items()
+                     if now - seen > DEVICE_TTL]
+            for fp in stale:
+                del self.devices[fp]
+            return {fp: (info, ip) for fp, (info, ip, _) in self.devices.items()}
+
+    def _register_seen(self, info, ip):
+        with self._lock:
+            self.devices[info.fingerprint] = (info, ip, time.time())
+
+    def _announce_loop(self):
+        payload = self.device_info.to_dict()
+        payload['announce'] = True
+        data = json.dumps(payload).encode('utf-8')
+        while not self._stop.is_set():
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM,
+                                     socket.IPPROTO_UDP)
+                try:
+                    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+                    sock.sendto(data, (MULTICAST_GROUP, PORT))
+                finally:
+                    sock.close()
+            except socket.error:
+                pass  # 组播发送失败不崩溃，降级为仅扫描
+            self._stop.wait(self.announce_interval)
+
+    def _listen_loop(self):
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM,
+                                 socket.IPPROTO_UDP)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(('', PORT))
+            mreq = struct.pack('4s4s', socket.inet_aton(MULTICAST_GROUP),
+                               socket.inet_aton('0.0.0.0'))
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+            sock.settimeout(1.0)
+        except socket.error:
+            return  # 组播监听失败不崩溃，降级为仅扫描
+        while not self._stop.is_set():
+            try:
+                data, addr = sock.recvfrom(65535)
+            except socket.timeout:
+                continue
+            except socket.error:
+                break
+            try:
+                msg = json.loads(data.decode('utf-8'))
+            except ValueError:
+                continue
+            info = DeviceInfo.from_dict(msg)
+            if not info.fingerprint or info.fingerprint == self.device_info.fingerprint:
+                continue
+            ip = addr[0]
+            self._register_seen(info, ip)
+            if msg.get('announce'):
+                _safe_call(self.on_device_found, info, ip)
+                threading.Thread(target=self._reply_register, args=(ip, info.port),
+                                 name='discovery-reply', daemon=True).start()
+
+    def _reply_register(self, ip, port):
+        # 对 announce 的来源回一个 register，让对端也能看到本机
+        url = 'http://%s:%d%sregister' % (ip, port, API_PREFIX)
+        try:
+            _post_json(url, self.device_info.to_dict(), timeout=5.0)
+        except Exception:
+            pass
+
+    def scan_subnet(self, on_device_found=None):
+        '''对本机各 IPv4 的 /24 子网逐 IP POST /register（并发 SCAN_WORKERS）。'''
+        callback = on_device_found or self.on_device_found
+        local_ips = _local_ipv4()
+        targets = set()
+        for ip in local_ips:
+            base = ip.rsplit('.', 1)[0]
+            for i in range(1, 255):
+                candidate = '%s.%d' % (base, i)
+                if candidate not in local_ips:
+                    targets.add(candidate)
+
+        def probe(ip):
+            url = 'http://%s:%d%sregister' % (ip, self.device_info.port, API_PREFIX)
+            try:
+                _, body = _post_json(url, self.device_info.to_dict(),
+                                     timeout=SCAN_TIMEOUT)
+                info = DeviceInfo.from_dict(body)
+                if info.fingerprint and info.fingerprint != self.device_info.fingerprint:
+                    self._register_seen(info, ip)
+                    _safe_call(callback, info, ip)
+            except Exception:
+                pass  # 单 IP 失败属常态（无设备 / 超时），静默跳过
+
+        with ThreadPoolExecutor(max_workers=SCAN_WORKERS) as pool:
+            list(pool.map(probe, targets))
+
+
+def _local_ipv4():
+    '''本机所有非回环 IPv4。'''
+    ips = set()
+    try:
+        for item in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = item[4][0]
+            if not ip.startswith('127.'):
+                ips.add(ip)
+    except socket.error:
+        pass
+    if not ips:
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                sock.connect(('8.8.8.8', 80))
+                ip = sock.getsockname()[0]
+            finally:
+                sock.close()
+            if not ip.startswith('127.'):
+                ips.add(ip)
+        except socket.error:
+            pass
+    return ips
+
+
+def _post_json(url, payload, timeout):
+    data = json.dumps(payload).encode('utf-8')
+    req = urllib.request.Request(url, data=data,
+                                 headers={'Content-Type': 'application/json'})
+    resp = urllib.request.urlopen(req, timeout=timeout)
+    try:
+        raw = resp.read()
+        return resp.status, json.loads(raw.decode('utf-8'))
+    finally:
+        resp.close()
+
+
+def send_files(host, port, files, on_progress=None, on_done=None, device_info=None):
+    '''发送方客户端：prepare-upload -> 逐文件 upload -> 失败 cancel。
+
+    files 为本地路径列表。on_progress(file_index, done_bytes, total_bytes)，
+    on_done(ok, message)：被拒时 message 为 'rejected'。同步阻塞，调用方自行放线程。
+    '''
+    if device_info is None:
+        device_info = DeviceInfo.local(socket.gethostname(), uuid.uuid4().hex)
+    base = 'http://%s:%d%s' % (host, port, API_PREFIX)
+
+    file_meta = {}
+    order = []
+    try:
+        for path in files:
+            file_id = uuid.uuid4().hex
+            mime = mimetypes.guess_type(path)[0] or 'application/octet-stream'
+            file_meta[file_id] = {
+                'id': file_id,
+                'fileName': os.path.basename(path),
+                'size': os.path.getsize(path),
+                'fileType': mime,
+                # 发送端不预计算大文件哈希，协议允许 sha256 为 null
+            }
+            order.append((file_id, path))
+    except OSError as exc:
+        _safe_call(on_done, False, '%s' % exc)
+        return
+
+    try:
+        _, body = _post_json(base + 'prepare-upload',
+                             {'info': device_info.to_dict(), 'files': file_meta},
+                             timeout=NET_TIMEOUT)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 403:
+            _safe_call(on_done, False, 'rejected')
+        else:
+            _safe_call(on_done, False, 'prepare-upload HTTP %d' % exc.code)
+        return
+    except Exception as exc:
+        _safe_call(on_done, False, 'prepare-upload: %s' % exc)
+        return
+
+    session_id = body.get('sessionId')
+    tokens = body.get('files') or {}
+    if not session_id:
+        _safe_call(on_done, False, 'prepare-upload: no sessionId')
+        return
+
+    for index, (file_id, path) in enumerate(order):
+        err = _upload_one(host, port, session_id, file_id,
+                          tokens.get(file_id) or '', path, index, on_progress)
+        if err is not None:
+            try:
+                req = urllib.request.Request(
+                    base + 'cancel?' + urllib.parse.urlencode({'sessionId': session_id}),
+                    data=b'')
+                urllib.request.urlopen(req, timeout=NET_TIMEOUT).close()
+            except Exception:
+                pass
+            _safe_call(on_done, False, err)
+            return
+    _safe_call(on_done, True, '')
+
+
+def _upload_one(host, port, session_id, file_id, token, path, index, on_progress):
+    '''分块 POST 单个文件，每块回调进度；返回 None 表示成功，否则为错误描述。'''
+    size = os.path.getsize(path)
+    conn = http.client.HTTPConnection(host, port, timeout=NET_TIMEOUT)
+    try:
+        query = urllib.parse.urlencode({'sessionId': session_id,
+                                        'fileId': file_id, 'token': token})
+        conn.putrequest('POST', '%supload?%s' % (API_PREFIX, query))
+        conn.putheader('Content-Length', str(size))
+        conn.putheader('Content-Type', 'application/octet-stream')
+        conn.endheaders()
+        done = 0
+        with open(path, 'rb') as f:
+            while True:
+                chunk = f.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                conn.send(chunk)
+                done += len(chunk)
+                _safe_call(on_progress, index, done, size)
+        resp = conn.getresponse()
+        body = resp.read()
+        if resp.status != 200:
+            return 'upload HTTP %d: %s' % (
+                resp.status, body[:200].decode('utf-8', 'replace'))
+        return None
+    except (socket.error, http.client.HTTPException, OSError) as exc:
+        return '%s' % exc
+    finally:
+        conn.close()
+
