@@ -1373,6 +1373,14 @@ def pin_to_desktop(win):
         return False
 
 
+def unpin_from_desktop(win):
+    """脱离桌面带，恢复为普通顶层窗口（拖拽期间临时用：普通窗口不会被桌面整理的表层反压）。"""
+    try:
+        _u32.SetParent(int(win.winId()), None)
+    except Exception:
+        pass
+
+
 def sink_to_desktop(win, anchor=None):
     """把窗口压到桌面层：桌面整理软件的全屏覆盖层之上、所有应用窗口之下。
     做法：从 z-order 顶部往下找「最上层的桌面表层」作锚点（找不到就用 Progman），
@@ -2264,6 +2272,8 @@ class FloatingPanel(QWidget):
     # --- 桌面层级 ---
     def _ensure_band(self):
         """确保面板归属桌面带（属主 = 桌面图标窗 SHELLDLL_DefView）。挂接丢失时补挂。"""
+        if self._drag is not None:
+            return   # 拖拽期间故意脱离桌面带（见 eventFilter），别补挂
         hwnd = int(self.winId())
         progman = _u32.FindWindowW('Progman', None)
         if not progman:
@@ -2285,9 +2295,9 @@ class FloatingPanel(QWidget):
         covered = self._covered_by_surface()
         _dbg('tick: pinned=%s surface=%s covered=%s active=%s undermouse=%s' % (
             self._desk_pinned, self._desk_surface, covered, self.isActiveWindow(), self.underMouse()))
-        if covered:
+        if covered and self._drag is None:
             sink_to_desktop(self, self._desk_surface)   # 被桌面表层压住：无条件抬上来
-        else:
+        elif not covered:
             self._ensure_desktop_level()
 
     def _on_win_event(self, _hook, event, hwnd, idObject, _idChild, _thread, _ts):
@@ -2539,6 +2549,8 @@ class FloatingPanel(QWidget):
             return False
         if t == QEvent.MouseButtonPress and ev.button() == Qt.LeftButton:
             self._drag = ev.globalPos() - self.frameGeometry().topLeft()
+            unpin_from_desktop(self)   # 拖拽期间临时退出桌面带：普通窗口移动不会触发表层反压
+            self._desk_pinned = False
             return True
         if t == QEvent.MouseMove and self._drag is not None and ev.buttons() & Qt.LeftButton:
             self.move(ev.globalPos() - self._drag)
@@ -2546,6 +2558,10 @@ class FloatingPanel(QWidget):
         if t == QEvent.MouseButtonRelease and self._drag is not None:
             self._drag = None
             self._save_pos()
+            self._desk_pinned = pin_to_desktop(self)   # 归位：重新归属桌面带并沉到表层之上
+            sink_to_desktop(self, self._desk_surface)
+            if self.titlebar.isVisible():
+                _place_below(self.titlebar, self)
             return True
         return super(FloatingPanel, self).eventFilter(obj, ev)
 
