@@ -10,9 +10,9 @@ import hashlib
 import json
 import os
 import shutil
+import socket
 import sys
 import tempfile
-import threading
 import time
 import traceback
 import urllib.error
@@ -215,8 +215,9 @@ def case_bad_token(ctx):
 
 
 def case_cancel(ctx):
-    # 用例 6：cancel 后已落盘的半成品文件被删除，并触发 on_cancelled
+    # 用例 6：cancel 只删正在传输的半成品，已完整落盘的文件保留
     root = tempfile.mkdtemp(prefix='zviber_case6_')
+    sock = None
     try:
         recv = os.path.join(root, 'recv')
         os.makedirs(recv)
@@ -224,25 +225,55 @@ def case_cancel(ctx):
         meta = {
             'f1': {'id': 'f1', 'fileName': 'part1.bin', 'size': 4,
                    'fileType': 'application/octet-stream'},
-            'f2': {'id': 'f2', 'fileName': 'part2.bin', 'size': 4,
+            'f2': {'id': 'f2', 'fileName': 'part2.bin', 'size': 1000000,
                    'fileType': 'application/octet-stream'},
         }
         status, body = post_json(ctx.url_a('prepare-upload'),
                                  {'info': ctx.info_b.to_dict(), 'files': meta})
         check(status == 200, 'prepare 应回 200，实际 %d' % status)
         sid = body['sessionId']
-        token = body['files']['f1']
+
+        # f1 完整上传
         status = post_raw(ctx.url_a('upload?' + urllib.parse.urlencode(
-            {'sessionId': sid, 'fileId': 'f1', 'token': token})), b'1234')
-        check(status == 200, 'upload 应回 200，实际 %d' % status)
+            {'sessionId': sid, 'fileId': 'f1', 'token': body['files']['f1']})),
+            b'1234')
+        check(status == 200, 'upload f1 应回 200，实际 %d' % status)
         saved = os.path.join(recv, 'part1.bin')
         check(os.path.isfile(saved), 'f1 应已落盘')
+
+        # f2 用裸 socket 挂起一个只发了 4 字节的上传，制造半成品
+        sock = socket.create_connection(('127.0.0.1', ctx.srv_a.port), timeout=5)
+        head = ('POST %supload?%s HTTP/1.1\r\nHost: 127.0.0.1\r\n'
+                'Content-Length: 1000000\r\n\r\n' % (
+                    API, urllib.parse.urlencode(
+                        {'sessionId': sid, 'fileId': 'f2',
+                         'token': body['files']['f2']})))
+        sock.sendall(head.encode('utf-8') + b'1234')
+        partial = os.path.join(recv, 'part2.bin')
+        deadline = time.time() + 3.0
+        while not os.path.isfile(partial) and time.time() < deadline:
+            time.sleep(0.05)
+        check(os.path.isfile(partial), 'f2 半成品应已出现')
+
         status = post_raw(ctx.url_a('cancel?' + urllib.parse.urlencode(
             {'sessionId': sid})), b'')
         check(status == 200, 'cancel 应回 200，实际 %d' % status)
-        check(not os.path.exists(saved), 'cancel 后已落盘文件应被删除')
         check(sid in ctx.cancelled, 'on_cancelled 未被回调')
+        # Windows 上半成品正被上传线程占用，cancel 当场删不动；
+        # 断开客户端 socket 触发上传线程中断，由其清理路径删除
+        sock.close()
+        sock = None
+        deadline = time.time() + 3.0
+        while os.path.exists(partial) and time.time() < deadline:
+            time.sleep(0.05)
+        check(not os.path.exists(partial), 'cancel 后半成品应被删除')
+        check(os.path.isfile(saved), 'cancel 后已完整落盘的 f1 应保留')
     finally:
+        if sock is not None:
+            try:
+                sock.close()
+            except OSError:
+                pass
         ctx.box_a['dir'] = None
         shutil.rmtree(root, ignore_errors=True)
 

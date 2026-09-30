@@ -281,11 +281,15 @@ class _ApiHandler(BaseHTTPRequestHandler):
         total = int(self.headers.get('Content-Length') or meta.get('size') or 0)
         done = 0
         ok = False
+        # 慢速/断连客户端不能让 handler 线程无限挂住；超时按传输中断处理
+        self.connection.settimeout(NET_TIMEOUT)
         try:
             # 客户端总会带 Content-Length，按长度精确读取
             remaining = total
             with open(target, 'wb') as f:
                 while remaining > 0:
+                    if session['state'] == 'cancelled':
+                        break  # 对端已取消，走下方中断清理
                     chunk = self.rfile.read(min(CHUNK_SIZE, remaining))
                     if not chunk:
                         break
@@ -297,6 +301,10 @@ class _ApiHandler(BaseHTTPRequestHandler):
             ok = (done >= total)
         except Exception:
             ok = False
+        try:
+            self.connection.settimeout(None)  # 读完恢复，避免影响 keep-alive
+        except OSError:
+            pass
         if not ok:
             # 传输中断：删半成品
             with session['lock']:
@@ -342,12 +350,12 @@ class _ApiHandler(BaseHTTPRequestHandler):
             session = self.server.sessions.pop(session_id, None)
         if session is not None:
             session['state'] = 'cancelled'
-            paths = list(session['saved'].values())
-            if session.get('partial'):
-                paths.append(session['partial'])
-            for p in paths:
+            # 只删正在传输的半成品，已完整落盘的文件保留；
+            # 若半成品正被上传线程占用（Windows 删不动），由其中断清理路径兜底删除
+            partial = session.get('partial')
+            if partial:
                 try:
-                    os.remove(p)
+                    os.remove(partial)
                 except OSError:
                     pass
             _safe_call(self.server.on_cancelled, session_id)
@@ -387,6 +395,10 @@ class TransferServer(ThreadingHTTPServer):
     def stop(self):
         self.shutdown()
         self.server_close()
+
+    def handle_error(self, request, client_address):
+        # 客户端中途断连（cancel / 超时）属常态，不打堆栈；业务异常已在分发层兜底
+        pass
 
 
 class Discovery(object):
