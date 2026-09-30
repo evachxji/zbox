@@ -125,7 +125,7 @@ class Discovery(private val context: Context, private val scope: CoroutineScope)
         DeviceStore.upsert(info, ip)
         // 收到他人 announce → 向其 POST /register 应答，让对方也登记本机
         if (info.announce == true) {
-            postRegister(ip, replyClient)
+            postRegister(ip, info.port, replyClient)
         }
     }
 
@@ -156,13 +156,13 @@ class Discovery(private val context: Context, private val scope: CoroutineScope)
 
     // ---------- register 应答 / 子网扫描 ----------
 
-    /** 向指定 IP 的 53327 端口 POST /register；成功则登记对方设备 */
-    private fun postRegister(ip: String, client: OkHttpClient) {
+    /** 向指定 IP 的指定端口 POST /register；成功则登记对方设备（port <= 0 时回退 53327） */
+    private fun postRegister(ip: String, port: Int, client: OkHttpClient) {
         try {
             val body = protoJson.encodeToString(Settings.localInfo())
                 .toRequestBody("application/json".toMediaType())
             val request = Request.Builder()
-                .url("http://$ip:$PROTOCOL_PORT$API_PREFIX/register")
+                .url("http://$ip:${if (port > 0) port else PROTOCOL_PORT}$API_PREFIX/register")
                 .post(body)
                 .build()
             client.newCall(request).execute().use { resp ->
@@ -187,7 +187,7 @@ class Discovery(private val context: Context, private val scope: CoroutineScope)
                 async(Dispatchers.IO) {
                     val ip = "$prefix.$i"
                     if (ip == localIp) return@async
-                    semaphore.withPermit { postRegister(ip, scanClient) }
+                    semaphore.withPermit { postRegister(ip, PROTOCOL_PORT, scanClient) }
                 }
             }.forEach { it.await() }
         }

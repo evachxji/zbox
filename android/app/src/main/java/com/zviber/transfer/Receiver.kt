@@ -133,9 +133,9 @@ class Receiver(private val context: Context) {
             )
         )
 
-        // NanoHTTPD 工作线程上阻塞等待用户确认，最长 3 分钟
+        // NanoHTTPD 工作线程上阻塞等待用户确认，最长 170 秒（比发送方 prepare 的 180 秒提前 10 秒，避免两头同值竞态）
         val dir = try {
-            runBlocking { withTimeoutOrNull(180_000) { decision.await() } }
+            runBlocking { withTimeoutOrNull(170_000) { decision.await() } }
         } finally {
             // 兜底：旋转/重建不留僵尸对话框与未完结 deferred
             IncomingState.clear(sessionId)

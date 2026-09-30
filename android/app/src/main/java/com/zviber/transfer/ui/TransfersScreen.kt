@@ -17,11 +17,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.zviber.transfer.Sender
 import com.zviber.transfer.TransferStatus
 import com.zviber.transfer.TransferStore
 
@@ -65,6 +67,14 @@ fun TransfersScreen() {
                                 else -> MaterialTheme.colorScheme.onSurfaceVariant
                             },
                         )
+                        // 发送中（等待确认 / 传输中）允许取消；终态不显示
+                        if (record.outgoing &&
+                            (record.status == TransferStatus.WAITING || record.status == TransferStatus.TRANSFERRING)
+                        ) {
+                            TextButton(onClick = { Sender.cancel(record.id) }) {
+                                Text("取消")
+                            }
+                        }
                     }
                     Text(
                         text = (if (record.outgoing) "发往 " else "来自 ") + record.peerAlias +
