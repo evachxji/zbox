@@ -1270,6 +1270,17 @@ _u32.AttachThreadInput.restype = ctypes.c_int
 _u32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
 _u32.SetFocus.restype = ctypes.c_void_p
 _u32.SetFocus.argtypes = [ctypes.c_void_p]
+_u32.SetWinEventHook.restype = ctypes.c_void_p
+_u32.SetWinEventHook.argtypes = [wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+                                 ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD]
+_u32.UnhookWinEvent.restype = ctypes.c_int
+_u32.UnhookWinEvent.argtypes = [ctypes.c_void_p]
+
+# 桌面表层重排事件（桌面整理软件每 ~2.5s 重建表层：HIDE → REORDER → SHOW）
+_EVENT_SHOW = 0x8002
+_EVENT_REORDER = 0x8004
+_WINEVENTPROC = ctypes.WINFUNCTYPE(None, ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p,
+                                   wintypes.LONG, wintypes.LONG, wintypes.DWORD, wintypes.DWORD)
 
 _GW_HWNDPREV = 3
 _GW_HWNDNEXT = 2
@@ -2239,6 +2250,11 @@ class FloatingPanel(QWidget):
 
         # 桌面层级：归属桌面带（Win+D 免疫）+ 看门狗维护 z-order 与挂接健康
         self._ensure_band()
+        # WinEvent 钩子：桌面整理软件的表层重建时立刻把面板抬回（等看门狗会闪 0.3~0.6s）
+        self._win_evt_cb = _WINEVENTPROC(self._on_win_event)   # 必须留引用，防 GC
+        self._win_evt_hook = _u32.SetWinEventHook(_EVENT_SHOW, _EVENT_REORDER,
+                                                  None, self._win_evt_cb, 0, 0, 0)
+        QApplication.instance().aboutToQuit.connect(self._unhook_win_event)
         self._sink_timer = QTimer(self)
         self._sink_timer.timeout.connect(self._desktop_mode_tick)
         self._sink_timer.start(500)   # 桌面整理软件会在 Win+D 等时机重排表层，要快些跟上
@@ -2273,6 +2289,40 @@ class FloatingPanel(QWidget):
             sink_to_desktop(self, self._desk_surface)   # 被桌面表层压住：无条件抬上来
         else:
             self._ensure_desktop_level()
+
+    def _on_win_event(self, _hook, event, hwnd, idObject, _idChild, _thread, _ts):
+        """桌面带内窗口的 SHOW / 容器 REORDER 事件回调。只做轻量过滤，
+        真正的抬回动作丢回事件循环（钩子里直接动 z-order 有风险）。"""
+        try:
+            if not hwnd or not self.isVisible() or self._drag is not None:
+                return
+            if hwnd == int(self.winId()) or hwnd == int(self.titlebar.winId()):
+                return
+            if idObject not in (0, -4):   # 只看窗口本身 / 客户区级别
+                return
+            cls = _class_name(hwnd)
+            if cls in _PROG_FAMILY:
+                if event != _EVENT_REORDER:
+                    return
+            else:
+                sw, sh = _u32.GetSystemMetrics(0), _u32.GetSystemMetrics(1)
+                if not _is_desktop_surface(hwnd, sw, sh):
+                    return
+            QTimer.singleShot(0, self._lift_if_covered)
+        except Exception:
+            pass
+
+    def _unhook_win_event(self):
+        if self._win_evt_hook:
+            _u32.UnhookWinEvent(self._win_evt_hook)
+            self._win_evt_hook = None
+
+    def _lift_if_covered(self):
+        """表层重排后的即时抬回：只抬不换锚点；没被压住就不动（我们自己的沉底也会触发
+        REORDER 事件，靠这道判断防自激回路）。"""
+        if self._covered_by_surface():
+            _dbg('lift: 表层重排事件触发抬回')
+            sink_to_desktop(self, self._desk_surface)
 
     def _covered_by_surface(self):
         """面板中心被桌面整理软件的表层压住（看不见也点不到）的判定。
