@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """Zviber 桌面悬浮面板：日历 + 待办。PyQt5，兼容 Win7/10/11、Python 3.8+。"""
 import ctypes
 from ctypes import wintypes
@@ -1294,14 +1294,21 @@ _SWP_Z_ONLY = 0x1 | 0x2 | 0x10   # SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE：�
 
 
 def _dbg(msg):
-    """ZVIBER_DEBUG 环境变量开启的桌面层级调试日志。"""
-    if os.environ.get('ZVIBER_DEBUG'):
-        try:
-            with open(os.path.join(os.environ.get('TEMP', '.'), 'zviber_debug.log'), 'a',
-                      encoding='utf-8') as f:
-                f.write('%.2f %s\n' % (time.time(), msg))
-        except Exception:
-            pass
+    """ZVIBER_DEBUG 环境变量开启的调试日志。run.cmd 常开，故带 2MB 轮转（留尾部 1MB）。"""
+    if not os.environ.get('ZVIBER_DEBUG'):
+        return
+    try:
+        path = os.path.join(os.environ.get('TEMP', '.'), 'zviber_debug.log')
+        if os.path.exists(path) and os.path.getsize(path) > 2 * 1024 * 1024:
+            with open(path, 'rb') as f:
+                f.seek(-1024 * 1024, os.SEEK_END)
+                tail = f.read()
+            with open(path, 'wb') as f:
+                f.write(b'... older logs truncated ...\n' + tail)
+        with open(path, 'a', encoding='utf-8') as f:
+            f.write('%.2f %s\n' % (time.time(), msg))
+    except Exception:
+        pass
 _HWND_TOP = 0
 
 
@@ -1650,7 +1657,7 @@ class SettingsDialog(QDialog):
     """齿轮按钮弹出的无边框设置窗口，样式跟随当前主题（themes.py #settingsPanel 区段）。
     on_fetch/on_import 为节假日数据回调（由入口提供，以便复用托盘通知）。
     改动即时生效并写入 config.json。"""
-    def __init__(self, panel, on_fetch, on_import):
+    def __init__(self, panel, on_fetch, on_import, boxmgr=None):
         super(SettingsDialog, self).__init__(panel)
         self.setObjectName('settingsDlg')
         self.setWindowTitle('设置')
@@ -1800,6 +1807,21 @@ class SettingsDialog(QDialog):
         auto.setChecked(bool(sysutil.autostart_get()))
         auto.toggled.connect(lambda on: sysutil.autostart_set() if on else sysutil.autostart_remove())
         form.addRow(row_label('开机自启'), auto)
+
+        # 桌面格子
+        sep_b = QFrame()
+        sep_b.setObjectName('setSep')
+        sep_b.setFixedHeight(1)
+        form.addRow(sep_b)
+        dbl = QCheckBox('双击桌面显示 / 隐藏格子')
+        dbl.setChecked(bool(cfg.data.get('box_dblclick', True)))
+
+        def commit_dblclick(on):
+            cfg.set('box_dblclick', bool(on))
+            if boxmgr is not None:
+                boxmgr.set_dblclick_enabled(bool(on))
+        dbl.toggled.connect(commit_dblclick)
+        form.addRow(row_label('格子'), dbl)
 
         # 节假日数据
         sep = QFrame()
@@ -2518,7 +2540,10 @@ class FloatingPanel(QWidget):
 
     def _check_hover(self):
         pos = QCursor.pos()
-        if not self.geometry().contains(pos) and not self.titlebar.geometry().contains(pos):
+        in_panel = self.geometry().contains(pos)
+        in_bar = self.titlebar.geometry().contains(pos)
+        _dbg('check_hover pos=(%d,%d) in_panel=%s in_bar=%s' % (pos.x(), pos.y(), in_panel, in_bar))
+        if not in_panel and not in_bar:
             self._slide_titlebar(False)
 
     def _slide_titlebar(self, on):
@@ -2545,6 +2570,7 @@ class FloatingPanel(QWidget):
         round_bar_top(self.titlebar)
 
     def _tb_anim_done(self):
+        _dbg('tb_anim_done endValue=%s tbVis=%s' % (self._tb_anim.endValue(), self.titlebar.isVisible()))
         if self._tb_anim.endValue() == 0:
             self.titlebar.hide()
 

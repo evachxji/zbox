@@ -7,6 +7,7 @@ Zviber 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），P
 
 - `main.pyw` — 入口：单实例 IPC（`QLocalServer`）、系统托盘、节假日后台更新、局域网传输服务启动、（frozen 时）安装/卸载流程
 - `app.py` — 面板 UI（日历 / 待办 / 双栏 / 顶部栏滑出与拖动）、`SettingsDialog` 与节假日导入引导窗
+- `boxes.py` — 桌面格子：空白格子（文件移入数据目录）与文件夹映射格子、双击桌面显隐
 - `calendar_data.py` — 内置国务院节假日数据、农历换算、三源联网回退与离线导入
 - `transfer.py` — 局域网文件传输协议核心（参照 LocalSend v2 的私有实例）：UDP 组播发现 + HTTP REST 传输，纯标准库零 Qt
 - `transfer_ui.py` — 面板「传输」tab：设备列表、文件多选 + 拖拽发送、传输记录、接收确认层、发送方取消

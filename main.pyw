@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """Zviber 悬浮面板入口：单实例 + 系统托盘 + 节假日联网更新/离线导入。
 用法：pythonw main.pyw        启动并显示
       pythonw main.pyw --toggle   已运行则切换显隐（供桌面右键菜单调用）
@@ -18,6 +18,7 @@ from PyQt5.QtNetwork import QLocalServer, QLocalSocket
 from PyQt5.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QFileDialog
 
 import app as ui
+import boxes as bx
 import calendar_data as cd
 import installer
 import sysutil
@@ -203,6 +204,10 @@ def main():
     if transfer_started:
         transfer_server.start()
         discovery.start()
+    # 桌面格子：截图自检模式不创建，避免格子入镜干扰面板截图
+    boxmgr = None
+    if not os.environ.get('ZVIBER_SHOT') and not os.environ.get('ZVIBER_GRABSCREEN'):
+        boxmgr = bx.BoxManager(data_dir, panel)
 
     # IPC 服务：接收 --toggle
     server = QLocalServer(qapp)
@@ -213,7 +218,12 @@ def main():
     # 托盘
     tray = QSystemTrayIcon(ui.make_icon(), parent=qapp)
     tray.setToolTip('Zviber 悬浮面板')
-    qapp.aboutToQuit.connect(lambda: (tray.hide(), server.close()))
+    def _quit_cleanup():
+        tray.hide()
+        server.close()
+        if boxmgr:
+            boxmgr.shutdown()
+    qapp.aboutToQuit.connect(_quit_cleanup)
 
     def on_tray(reason):
         if reason == QSystemTrayIcon.Trigger:
@@ -221,6 +231,12 @@ def main():
         elif reason == QSystemTrayIcon.Context:
             menu = QMenu()
             menu.addAction('显示 / 隐藏', panel.toggle_visible)
+            if boxmgr:
+                menu.addSeparator()
+                menu.addAction('新建格子', boxmgr.new_blank)
+                menu.addAction('新建文件夹格子', lambda: boxmgr.new_folder())
+                menu.addAction('显示 / 隐藏格子', boxmgr.toggle_visible)
+                menu.addSeparator()
             menu.addAction('设置', open_settings)
             menu.addAction('关于', lambda: ui.AboutDialog(panel).exec_())
             menu.addSeparator()
@@ -274,7 +290,8 @@ def main():
             settings_dlg[0].activateWindow()
             return
         dlg = ui.SettingsDialog(panel, fetch_holidays,
-                                lambda: _import_holidays(tray, hstore, panel, download_source))
+                                lambda: _import_holidays(tray, hstore, panel, download_source),
+                                boxmgr)
         settings_dlg[:] = [dlg]
         dlg.show()
 
