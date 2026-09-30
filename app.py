@@ -1374,7 +1374,11 @@ def pin_to_desktop(win):
         if not hwnd or not dv:
             return False
         if _u32.GetAncestor(hwnd, _GA_ROOT) != progman:
+            vis = bool(_u32.IsWindowVisible(hwnd))
             _u32.SetParent(hwnd, dv)
+            if vis:
+                _u32.ShowWindow(hwnd, 8)   # SW_SHOWNA：SetParent 挂带会丢 WS_VISIBLE，
+                                           # Qt 仍认为可见不重绘（boxes._repin 同款坑）
         return _u32.GetAncestor(hwnd, _GA_ROOT) == progman
     except Exception:
         return False
@@ -2305,6 +2309,10 @@ class FloatingPanel(QWidget):
             return
         if _u32.GetAncestor(hwnd, _GA_ROOT) != progman:
             self._desk_pinned = pin_to_desktop(self)
+        # 顶部栏窗同属桌面带：它是无属主的普通顶层窗口，不挂带的话悬停弹出时会
+        # 盖住压在面板之上的应用窗口（面板被部分遮挡时尤其明显）
+        if _u32.GetAncestor(int(self.titlebar.winId()), _GA_ROOT) != progman:
+            pin_to_desktop(self.titlebar)
 
     def _desktop_mode_tick(self):
         hwnd = int(self.winId())
@@ -2581,6 +2589,7 @@ class FloatingPanel(QWidget):
         if t == QEvent.MouseButtonPress and ev.button() == Qt.LeftButton:
             self._drag = ev.globalPos() - self.frameGeometry().topLeft()
             unpin_from_desktop(self)   # 拖拽期间临时退出桌面带：普通窗口移动不会触发表层反压
+            unpin_from_desktop(self.titlebar)   # 栏窗一起退出：拖拽中面板浮起，栏窗留带内会被应用盖住
             self._desk_pinned = False
             return True
         if t == QEvent.MouseMove and self._drag is not None and ev.buttons() & Qt.LeftButton:
@@ -2590,6 +2599,7 @@ class FloatingPanel(QWidget):
             self._drag = None
             self._save_pos()
             self._desk_pinned = pin_to_desktop(self)   # 归位：重新归属桌面带并沉到表层之上
+            pin_to_desktop(self.titlebar)
             sink_to_desktop(self, self._desk_surface)
             if self.titlebar.isVisible():
                 _place_below(self.titlebar, self)
