@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- 局域网传输所需权限 -->
@@ -7,7 +7,9 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
+    <!-- usesCleartextTraffic：协议走明文 HTTP（仅局域网），Android 9+ 默认拦截明文流量 -->
     <application
+        android:usesCleartextTraffic="true"
         android:label="Zviber 传输"
         android:supportsRtl="true"
         android:theme="@style/Theme.ZviberTransfer">
