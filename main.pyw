@@ -237,9 +237,12 @@ def main():
     panel.transfer.notify.connect(_transfer_notify)
 
     def _stop_transfer():
-        if transfer_started:
-            discovery.stop()
-            transfer_server.stop()
+        try:
+            if transfer_started:
+                discovery.stop()
+                transfer_server.stop()
+        except Exception:
+            pass
     qapp.aboutToQuit.connect(_stop_transfer)
 
     # 节假日数据：设置窗「联网更新」与导入窗里各源的「下载并导入」都走同一条后台通道

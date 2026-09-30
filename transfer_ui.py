@@ -30,11 +30,11 @@ def _fmt_size(n):
         n = float(n)
     except (TypeError, ValueError):
         return '?'
-    for unit in ('B', 'KB', 'MB', 'GB'):
+    for unit in ('B', 'KB', 'MB', 'GB', 'TB'):
         if n < 1024:
             return ('%.0f' if unit == 'B' else '%.1f') % n + ' ' + unit
         n /= 1024.0
-    return '%.1f GB' % n
+    return '%.1f TB' % n
 
 
 def _default_save_dir(cfg):
@@ -84,6 +84,8 @@ class TransferWidget(QWidget):
         self._records = {}           # 记录 key -> dict
         self._rec_keys = []          # 记录顺序（新的在前）
         self._pending = None         # 待确认的接收请求 (session_id, key, result, event)
+        self._expired = set()        # 已超时作废的接收确认 session_id
+        self._progress_ts = {}       # 接收进度节流：{session_id: 上次 emit 时间}
         self._scanning = False
         self._save_dir = _default_save_dir(cfg)
         self.setAcceptDrops(True)
@@ -255,7 +257,7 @@ class TransferWidget(QWidget):
         # ---- 网络回调接线：后台线程里只发信号，不碰 UI ----
         server.on_device_found = self._cb_device_found
         server.on_receive_request = self._cb_receive_request
-        server.on_progress = self.sig_progress.emit
+        server.on_progress = self._cb_progress   # 经 100ms 节流的中间函数
         server.on_file_done = self.sig_file_done.emit
         server.on_session_done = self.sig_session_done.emit
         server.on_cancelled = self.sig_cancelled.emit
@@ -337,8 +339,10 @@ class TransferWidget(QWidget):
             pass
 
     def _render_devices(self, merged):
-        if self._selected_fp not in merged:
-            self._selected_fp = next(iter(merged), None)   # 默认选中第一台
+        if self._selected_fp is None:
+            self._selected_fp = next(iter(merged), None)   # 仅首次默认选中第一台
+        elif self._selected_fp not in merged:
+            self._selected_fp = None   # 原选中离线：不静默跳台，等用户显式重选
         sig = sorted((fp, info.alias, ip, fp == self._selected_fp)
                      for fp, (info, ip) in merged.items())
         if sig == self._dev_sig:
@@ -498,7 +502,14 @@ class TransferWidget(QWidget):
                 sizes.append(0)
         total_all = sum(sizes)
 
+        last_emit = [0.0]
+
         def on_progress(index, done, _total):
+            # 100ms 节流；当前文件的完成帧必发（否则进度会卡在 99%）
+            now = time.time()
+            if done < sizes[index] and now - last_emit[0] < 0.1:
+                return
+            last_emit[0] = now
             self.sig_send_progress.emit(key, sum(sizes[:index]) + done, total_all)
 
         def on_done(ok, err):
@@ -567,10 +578,23 @@ class TransferWidget(QWidget):
             self.sig_recv_request.emit(view, result, event)
             if event.wait(RECV_CONFIRM_TIMEOUT):
                 return result['dir']
+            self._expired.add(view['session_id'])   # 标记已超时：迟到的「接受」按拒绝处理
             self.sig_recv_timeout.emit(view['session_id'])
         except Exception:
             pass
         return None
+
+    def _cb_progress(self, session_id, file_id, done, total):
+        '''接收进度回调（HTTP 线程）：100ms 节流，完成帧必发。'''
+        try:
+            now = time.time()
+            finished = bool(total) and done >= total
+            if not finished and now - self._progress_ts.get(session_id, 0.0) < 0.1:
+                return
+            self._progress_ts[session_id] = now
+            self.sig_progress.emit(session_id, file_id, done, total)
+        except Exception:
+            pass
 
     def _show_recv(self, view, result, event):
         '''主线程：弹面板内接收确认层。一次只确认一个，并发的直接拒。'''
@@ -597,6 +621,12 @@ class TransferWidget(QWidget):
             self.recv.raise_()
             self.notify.emit('收到文件', '%s 想发送 %d 个文件' % (view['alias'], len(view['names'])))
         except Exception:
+            # 防僵尸 _pending：一次异常后不再把所有接收静默拒绝到重启
+            self._pending = None
+            try:
+                self.recv.hide()
+            except Exception:
+                pass
             event.set()
 
     def _close_recv(self):
@@ -615,6 +645,13 @@ class TransferWidget(QWidget):
             if self._pending is None:
                 return
             session_id, key, result, event = self._pending
+            if session_id in self._expired:
+                # 协议端已超时返回，这次接受无效：按拒绝处理（不置 busy）
+                rec = self._records.get(key)
+                if rec is not None:
+                    rec['state'] = 'rejected'
+                    self._update_record(rec)
+                return   # finally 里照常 _close_recv()
             d = self._save_dir
             try:
                 os.makedirs(d, exist_ok=True)
@@ -667,6 +704,7 @@ class TransferWidget(QWidget):
                     rec['state'] = 'rejected'
                     self._update_record(rec)
                 self._close_recv()   # event.set() 无害：HTTP 线程已超时返回
+                self._expired.discard(session_id)
         except Exception:
             pass
 
@@ -700,6 +738,7 @@ class TransferWidget(QWidget):
 
     def _on_session_done(self, session_id):
         try:
+            self._progress_ts.pop(session_id, None)
             rec = self._find_recv_record(session_id)
             if rec is None:
                 return
@@ -712,6 +751,7 @@ class TransferWidget(QWidget):
 
     def _on_cancelled(self, session_id):
         try:
+            self._progress_ts.pop(session_id, None)
             rec = self._find_recv_record(session_id)
             if rec is None:
                 return
@@ -772,7 +812,7 @@ class TransferWidget(QWidget):
         state = rec['state']
         total = rec['total'] or 0
         if state == 'wait':
-            text = '等待对方确认'
+            text = '等待对方确认' if rec['direction'] == 'up' else '等待你确认'
         elif state == 'busy':
             text = '传输中 %d%%' % (int(rec['done'] * 100 / total) if total else 0)
         elif state == 'done':

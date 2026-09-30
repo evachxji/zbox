@@ -244,8 +244,8 @@ QLabel#transferState[state="busy"] { color: #e8a33d; }
 QLabel#transferState[state="done"] { color: #7fb069; }
 QLabel#transferState[state="fail"], QLabel#transferState[state="rejected"],
 QLabel#transferState[state="cancelled"] { color: #e05252; }
-QProgressBar { background: rgba(255,255,255,16); border: none; border-radius: 3px; }
-QProgressBar::chunk { background: #e8a33d; border-radius: 3px; }
+QFrame#transferRow QProgressBar { background: rgba(255,255,255,16); border: none; border-radius: 3px; }
+QFrame#transferRow QProgressBar::chunk { background: #e8a33d; border-radius: 3px; }
 QFrame#recvDialog { background: #20222a; border: 1px solid rgba(255,255,255,30); border-radius: 10px; }
 QLabel#recvFrom { color: #e8a33d; font: 600 12px "%CN%"; background: transparent; }
 QLabel#recvFiles { color: #cfccc4; font: 12px "%CN%"; background: transparent; }
@@ -481,8 +481,8 @@ QLabel#transferState[state="busy"] { color: #0067c0; }
 QLabel#transferState[state="done"] { color: #107c10; }
 QLabel#transferState[state="fail"], QLabel#transferState[state="rejected"],
 QLabel#transferState[state="cancelled"] { color: #c42b1c; }
-QProgressBar { background: rgba(0,0,0,16); border: none; border-radius: 3px; }
-QProgressBar::chunk { background: #0067c0; border-radius: 3px; }
+QFrame#transferRow QProgressBar { background: rgba(0,0,0,16); border: none; border-radius: 3px; }
+QFrame#transferRow QProgressBar::chunk { background: #0067c0; border-radius: 3px; }
 QFrame#recvDialog { background: #ffffff; border: 1px solid rgba(0,0,0,26); border-radius: 10px; }
 QLabel#recvFrom { color: #0067c0; font: 600 12px "%CN%"; background: transparent; }
 QLabel#recvFiles { color: #1b1b1f; font: 12px "%CN%"; background: transparent; }
