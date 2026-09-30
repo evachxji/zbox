@@ -18,9 +18,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -50,14 +50,14 @@ import com.zviber.transfer.TransferRecord
 import com.zviber.transfer.TransferStatus
 import com.zviber.transfer.TransferStore
 
-/** 记录页：方向、文件名、进度条、状态 */
+/** 记录区（嵌入主页底部）：方向、文件名、进度条、状态；占满剩余空间内部滚动 */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun TransfersScreen() {
+fun ColumnScope.RecordsSection() {
     val haptics = LocalHapticFeedback.current
     val context = LocalContext.current
     val records = TransferStore.records
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    Column(modifier = Modifier.weight(1f)) {
         Text("传输记录", style = MaterialTheme.typography.titleMedium)
         Spacer(modifier = Modifier.height(8.dp))
         if (records.isEmpty()) {
@@ -67,7 +67,10 @@ fun TransfersScreen() {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
             items(records, key = { it.id }) { record ->
                 // animateItem：新记录插入平滑铺开，其余记录平滑让位
                 Column(

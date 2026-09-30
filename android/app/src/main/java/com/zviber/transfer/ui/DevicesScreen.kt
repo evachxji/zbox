@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -51,9 +52,9 @@ import com.zviber.transfer.Sender
 import com.zviber.transfer.Settings
 import kotlinx.coroutines.delay
 
-/** 设备页：本机别名卡片 + 附近设备列表 + 手动刷新；点设备选文件发送 */
+/** 主页（单页）：本机别名卡片 + 附近设备（最多 2.5 行、超出内部滚动）+ 底部传输记录 */
 @Composable
-fun DevicesScreen(discovery: Discovery) {
+fun HomeScreen(discovery: Discovery) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var pickedDevice by remember { mutableStateOf<PeerDevice?>(null) }
@@ -109,7 +110,11 @@ fun DevicesScreen(discovery: Discovery) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // 设备列表限高约 2.5 行，超出内部滚动翻找；剩余空间留给传输记录
+        LazyColumn(
+            modifier = Modifier.heightIn(max = 176.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             items(devices, key = { it.info.fingerprint }) { device ->
                 Card(
                     modifier = Modifier
@@ -133,6 +138,8 @@ fun DevicesScreen(discovery: Discovery) {
                 }
             }
         }
+        Spacer(modifier = Modifier.height(16.dp))
+        RecordsSection()
     }
 }
 
