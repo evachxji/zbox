@@ -72,7 +72,11 @@ pythonw main.pyw         :: 或直接启动
 - PC 端：面板第三个 tab「传输」，自动发现同网设备；接收文件需手动确认，可选保存目录
   （默认「下载\Zviber」，记住选择）；等待确认与传输中，发送方都能点「取消」中断（半成品文件自动清理）。**首次运行时 Windows 防火墙会弹授权提示，需允许**，
   否则设备互相搜不到。
-- Android 端：`android/` 是独立 Gradle 工程（Android 8.0 / minSdk 26 起），构建 debug 包：
+- Android 端：`android/` 是独立 Gradle 工程（Android 8.0 / minSdk 26 起）。构建前置：本机需有 JDK 17
+  与 Android SDK——装 Android Studio，或只用 cmdline-tools 装 `platforms;android-36` 与
+  `build-tools;36.0.0` 即可（无需整个 Studio）。SDK 位置用环境变量 `ANDROID_HOME`、或
+  `android/local.properties` 里的 `sdk.dir=<SDK路径>` 告诉 Gradle（该文件已 gitignore，各机器各写各的；
+  Windows 用户名含中文时建议把 SDK 装到纯英文路径）。构建 debug 包：
 
 ```bat
 cd android && gradlew.bat assembleDebug
