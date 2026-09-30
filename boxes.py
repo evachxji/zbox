@@ -19,6 +19,7 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 import time
 from ctypes import wintypes
 
@@ -56,6 +57,33 @@ _h32.ScreenToClient.restype = wintypes.BOOL
 _h32.ScreenToClient.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 _h32.SendMessageW.restype = ctypes.c_longlong
 _h32.SendMessageW.argtypes = [ctypes.c_void_p, wintypes.UINT, ctypes.c_size_t, ctypes.c_void_p]
+_h32.CreatePopupMenu.restype = ctypes.c_void_p
+_h32.CreatePopupMenu.argtypes = []
+_h32.DestroyMenu.restype = wintypes.BOOL
+_h32.DestroyMenu.argtypes = [ctypes.c_void_p]
+_h32.TrackPopupMenu.restype = wintypes.BOOL
+_h32.TrackPopupMenu.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_int,
+                                ctypes.c_int, wintypes.HWND, ctypes.c_void_p]
+_s32 = ctypes.windll.shell32
+_s32.SHParseDisplayName.restype = ctypes.c_long
+_s32.SHParseDisplayName.argtypes = [wintypes.LPCWSTR, ctypes.c_void_p,
+                                    ctypes.POINTER(ctypes.c_void_p), wintypes.DWORD,
+                                    ctypes.POINTER(wintypes.DWORD)]
+_s32.SHBindToParent.restype = ctypes.c_long
+_s32.SHBindToParent.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
+                                ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_void_p)]
+_s32.CDefFolderMenu_Create2.restype = ctypes.c_long
+_s32.CDefFolderMenu_Create2.argtypes = [ctypes.c_void_p, wintypes.HWND, ctypes.c_uint,
+                                        ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p,
+                                        ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p,
+                                        ctypes.POINTER(ctypes.c_void_p)]
+_s32.ILFree.argtypes = [ctypes.c_void_p]
+_s32.ShellExecuteExW.restype = wintypes.BOOL
+_s32.ShellExecuteExW.argtypes = [ctypes.c_void_p]
+_o32 = ctypes.windll.ole32
+_o32.CoInitializeEx.restype = ctypes.c_long
+_o32.CoInitializeEx.argtypes = [ctypes.c_void_p, wintypes.DWORD]
+_o32.CoUninitialize.argtypes = []
 _k32 = ctypes.windll.kernel32
 _k32.OpenProcess.restype = ctypes.c_void_p
 _k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
@@ -246,6 +274,16 @@ class BoxList(QListWidget):
 
     def contextMenuEvent(self, e):
         it = self.itemAt(e.pos())
+        if it:
+            # 右键落在多选之外：先改成只选它（与资源管理器的选择语义一致）
+            sel = self.selectedItems()
+            if it not in sel:
+                self.clearSelection()
+                it.setSelected(True)
+                sel = [it]
+            paths = [i.data(Qt.UserRole) for i in sel]
+            if shell_context_menu(int(self.winId()), paths, e.globalPos().x(), e.globalPos().y()):
+                return
         menu = QMenu(self)
         if it:
             path = it.data(Qt.UserRole)
@@ -523,7 +561,8 @@ class BoxWindow(QWidget):
 
         self.list.clear()
         for name, p, is_dir, st in entries:
-            item = QListWidgetItem(self._icon_for(p, is_dir), name)
+            disp = name[:-4] if name.lower().endswith('.lnk') else name   # 快捷方式不显示 .lnk 后缀
+            item = QListWidgetItem(self._icon_for(p, is_dir), disp)
             item.setData(Qt.UserRole, p)
             item.setToolTip(p)
             self.list.addItem(item)
@@ -983,6 +1022,139 @@ def _desktop_icon_at(lv, pt):
             _k32.VirtualFreeEx(hp, buf, 0, 0x8000)   # MEM_RELEASE
     finally:
         _k32.CloseHandle(hp)
+
+
+class _GUID(ctypes.Structure):
+    _fields_ = [('Data1', wintypes.DWORD), ('Data2', wintypes.WORD),
+                ('Data3', wintypes.WORD), ('Data4', ctypes.c_ubyte * 8)]
+
+
+def _guid(text):
+    """'{000214E4-0000-0000-C000-000000000046}' → GUID 结构体。"""
+    h = text.strip('{}').split('-')
+    return _GUID(int(h[0], 16), int(h[1], 16), int(h[2], 16),
+                 (ctypes.c_ubyte * 8)(*bytes.fromhex(h[3] + h[4])))
+
+
+_IID_IShellFolder = _guid('{000214E6-0000-0000-C000-000000000046}')
+_IID_IContextMenu = _guid('{000214E4-0000-0000-C000-000000000046}')
+
+
+class _SHELLEXECUTEINFOW(ctypes.Structure):
+    _fields_ = [('cbSize', wintypes.DWORD), ('fMask', wintypes.ULONG),
+                ('hwnd', wintypes.HWND), ('lpVerb', wintypes.LPCWSTR),
+                ('lpFile', wintypes.LPCWSTR),
+                ('lpParameters', wintypes.LPCWSTR), ('lpDirectory', wintypes.LPCWSTR),
+                ('nShow', ctypes.c_int), ('hInstApp', ctypes.c_void_p),
+                ('lpIDList', ctypes.c_void_p), ('lpClass', wintypes.LPCWSTR),
+                ('hkeyClass', ctypes.c_void_p), ('dwHotKey', wintypes.DWORD),
+                ('hIcon', wintypes.HANDLE), ('hProcess', wintypes.HANDLE)]
+
+
+def _com_fn(obj, idx, restype, *argtypes):
+    """取 COM 对象的第 idx 个虚函数（vtable 头三格固定是 IUnknown），包成可调用对象。"""
+    vtbl = ctypes.cast(ctypes.cast(obj, ctypes.POINTER(ctypes.c_void_p)).contents.value,
+                       ctypes.POINTER(ctypes.c_void_p))
+    return ctypes.WINFUNCTYPE(restype, ctypes.c_void_p, *argtypes)(vtbl[idx])
+
+
+def shell_context_menu(hwnd, paths, x, y):
+    """在 (x, y) 弹出 paths 的系统外壳右键菜单（资源管理器同款 IContextMenu）。
+    纯 ctypes COM 调用，零新增依赖。成功弹出返回 True；任何一步失败返回 False，
+    调用方回退到内置菜单。菜单消息不转发 HandleMenuMsg：少数自绘扩展项
+    （如压缩软件的子菜单）可能不显示图标，但功能不受影响。"""
+    if not paths:
+        return False
+    own_com = (_o32.CoInitializeEx(None, 0) == 0)   # S_OK 才是我们初始化的，退出才配对释放
+    pidls = []      # 待 ILFree 的绝对 PIDL
+    objs = []       # 待 Release 的接口指针
+    hmenu = None
+    try:
+        # 每个文件：SHParseDisplayName 拿绝对 PIDL，SHBindToParent 拆父文件夹 + 子 PIDL
+        # （子 PIDL 指向绝对 PIDL 内部，生命周期跟它走）。格子列表必然同目录，
+        # 父文件夹只留第一份，重复的当场 Release。
+        psf_dir, kids = None, []
+        for p in paths:
+            fp = ctypes.c_void_p()
+            if _s32.SHParseDisplayName(p, None, ctypes.byref(fp), 0, None) != 0 or not fp:
+                continue
+            pidls.append(fp.value)
+            psf, kid = ctypes.c_void_p(), ctypes.c_void_p()
+            if _s32.SHBindToParent(fp.value, ctypes.byref(_IID_IShellFolder),
+                                   ctypes.byref(psf), ctypes.byref(kid)) != 0 or not psf:
+                continue
+            if psf_dir is None:
+                psf_dir = psf.value
+                objs.append(psf_dir)
+            else:
+                _com_fn(psf.value, 2, wintypes.UINT)(psf.value)   # 重复父目录：Release
+            if kid:
+                kids.append(kid.value)
+        if psf_dir is None or not kids:
+            return False
+        arr = (ctypes.c_void_p * len(kids))(*kids)
+        # CDefFolderMenu_Create2 直接造 IContextMenu（GetUIObjectOf 在某些系统组件
+        # 上的 vtable 布局实测不可依赖，这个导出函数是壳菜单的标准做法）
+        pcm = ctypes.c_void_p()
+        if _s32.CDefFolderMenu_Create2(None, hwnd, len(kids), arr, psf_dir,
+                                       None, 0, None, ctypes.byref(pcm)) != 0 or not pcm:
+            return False
+        objs.append(pcm.value)
+        hmenu = _h32.CreatePopupMenu()
+        if not hmenu:
+            return False
+        qcm = _com_fn(pcm.value, 3, ctypes.c_long,   # IContextMenu::QueryContextMenu
+                      ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint,
+                      ctypes.c_uint, ctypes.c_uint)
+        if qcm(pcm.value, hmenu, 0, 1, 0x7FFF, 0) < 0:   # CMF_NORMAL（扩展动词按住 Shift 才有，对齐资源管理器）
+            return False
+        cmd = _h32.TrackPopupMenu(hmenu, 0x0100, x, y, 0, hwnd, None)   # TPM_RETURNCMD
+        if cmd:
+            # 动词字符串 → ShellExecuteEx 执行。不直接用 IContextMenu::InvokeCommand：
+            # CDefFolderMenu_Create2 的对象在无站点（SetSite）环境下对动词一律 E_FAIL（实测）。
+            gcs = _com_fn(pcm.value, 5, ctypes.c_long,   # IContextMenu::GetCommandString
+                          ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p,
+                          ctypes.c_void_p, ctypes.c_uint)
+            buf = ctypes.create_unicode_buffer(64)
+            verb = None
+            if gcs(pcm.value, cmd - 1, 4, None, buf, 64) == 0 and buf.value:   # GCS_VERBW
+                verb = buf.value
+            _shell_invoke_async(verb, paths)
+        return True
+    except Exception:
+        return False
+    finally:
+        if hmenu:
+            _h32.DestroyMenu(hmenu)
+        for o in objs:
+            _com_fn(o, 2, wintypes.UINT)(o)   # IUnknown::Release
+        for p in pidls:
+            _s32.ILFree(p)
+        if own_com:
+            _o32.CoUninitialize()
+
+
+def _shell_invoke_async(verb, paths):
+    """独立 STA 线程里用 ShellExecuteEx 执行外壳动词（删除/属性/打开方式等自带确认与对话框）。
+    两个实测坑：① Qt 把 GUI 线程初始化成 MTA，壳动词在 MTA 下静默 E_FAIL
+    （ShellExecuteEx 返回成功但什么都没发生），必须换 STA 线程；
+    ② 不带 SEE_MASK_ASYNCOK 的同步调用会吊死调用线程（壳内部要等本线程泵消息）。"""
+    def work():
+        _o32.CoInitializeEx(None, 0)   # COINIT_APARTMENTTHREADED
+        try:
+            for p in paths:
+                sei = _SHELLEXECUTEINFOW()
+                sei.cbSize = ctypes.sizeof(sei)
+                sei.fMask = 0x00100000   # SEE_MASK_ASYNCOK
+                sei.lpVerb = verb
+                sei.lpFile = p
+                sei.nShow = 1            # SW_NORMAL
+                _s32.ShellExecuteExW(ctypes.byref(sei))
+        except Exception:
+            pass
+        finally:
+            _o32.CoUninitialize()
+    threading.Thread(target=work, daemon=True).start()
 
 
 def _log_hook_error():

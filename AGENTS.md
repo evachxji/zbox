@@ -329,6 +329,14 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
   默认按 32 位截断，64 位下指针参数高位丢失，钩子线程静默失效。
 - `boxes.json` 读取用 `utf-8-sig`：手工编辑带出的 BOM 会让 `utf-8` 读失败、save 用空数据
   覆盖原文件（`config.json` 在 app.py 里有同样的坑，暂未动）。
+- **格子文件右键 = 系统外壳菜单**（`shell_context_menu`，与资源管理器同款）：纯 ctypes COM，
+  零新增依赖。三个实测坑：① 取菜单用 `CDefFolderMenu_Create2`，别走 `IShellFolder::GetUIObjectOf`
+  ——某些系统组件的 vtable 布局不可依赖（实测访问冲突）；② 菜单对象无站点（SetSite）时
+  `InvokeCommand` 对所有动词一律 E_FAIL，动词执行改走 `GetCommandString` 取动词名 +
+  `ShellExecuteEx`；③ ShellExecuteEx 必须在独立 STA 线程里调且带 `SEE_MASK_ASYNCOK`
+  ——Qt 把 GUI 线程初始化成 MTA（壳动词在 MTA 下返回成功但什么都不做），同步调用又会
+  吊死调用线程（壳内部要等本线程泵消息）。
+- 列表里 `.lnk` 显示名去掉后缀（对齐资源管理器），UserRole 仍存完整路径，拖出/打开不受影响
 - **钩子线程里绝不调任何 Qt 方法（2026-09 真实死锁）**：`DesktopClickHook` 的 `proc` 回调跑在
   独立线程，旧版 `own_hwnds()` 在其中调 `QWidget::winId()`——winId 会现场创建原生窗口，
   `flushWindowSystemEvents → QWaitCondition` 阻塞等主线程刷窗口事件，而钩子线程持有 GIL、
