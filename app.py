@@ -2132,6 +2132,7 @@ class FloatingPanel(QWidget):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool)
         self._desk_pinned = False   # True = 已归属桌面带（SHELLDLL_DefView 的属主 popup）
         self._desk_surface = None   # 探测到的第三方桌面表层（沉底锚点缓存）
+        self._floating = False      # True = 被点击激活浮起到应用窗口之上，失焦后需要沉回
         self._drag = None           # 窗口拖拽偏移（globalPos - topLeft）；None = 未在拖拽
         self.setObjectName('panelRoot')
 
@@ -2309,16 +2310,20 @@ class FloatingPanel(QWidget):
 
 
     def event(self, e):
-        if e.type() == QEvent.WindowDeactivate:
+        if e.type() == QEvent.WindowActivate:
+            self._floating = True    # 点击激活会浮到应用窗口之上，记下待沉
+        elif e.type() == QEvent.WindowDeactivate:
             QTimer.singleShot(300, self._ensure_desktop_level)   # 失焦后压回桌面层
         return super(FloatingPanel, self).event(e)
 
     def _ensure_desktop_level(self):
         """面板被点击激活后会浮到普通窗口之上；空闲（未激活/未悬停/未拖拽）时压回桌面层，
-        让其它窗口可以正常遮挡它。正在使用时不动，避免打字/拖拽途中被其它窗口盖住。"""
-        if (not self.isVisible() or self.isActiveWindow() or self.underMouse()
+        让其它窗口可以正常遮挡它。正在使用时不动，避免打字/拖拽途中被其它窗口盖住。
+        没浮起过就不动——z-order 变动会触发桌面整理软件的表层反压，空发会振荡闪烁。"""
+        if (not self._floating or not self.isVisible() or self.isActiveWindow() or self.underMouse()
                 or self._drag is not None or self.titlebar.underMouse()):
             return
+        self._floating = False
         sink_to_desktop(self, self._desk_surface)
         if self.titlebar.isVisible():
             _place_below(self.titlebar, self)   # 面板沉层后栏窗要重新压回它正下方
