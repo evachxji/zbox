@@ -5,8 +5,9 @@
   拖入 = 把文件移动进去；解散 = 把文件全部还原回桌面（不删文件）。
 - 文件夹映射格子：实时映射任意磁盘文件夹，QFileSystemWatcher 监听内容变化自动刷新；
   路径失效时显示提示 + 「解散格子」按钮（对齐腾讯桌面整理的表现）。
-- 窗口：无边框 Tool 窗，半透明磨砂，普通窗口层级（点别的窗口会被正常盖住，
-  但永不自动沉底消失）；Tool 窗口天然免疫 Win+D，无需挂桌面带。
+- 窗口：无边框 Tool 窗，半透明磨砂；挂桌面带免疫 Win+D（面板同款 pin_to_desktop）。
+  与面板的差异：永不主动沉底（格子沉到应用窗口之下 = 用户眼里的「消失」）；
+  只在被桌面整理软件表层压住时由 WinEvent 钩子/看门狗抬回表层之上。
 - 双击桌面空白处显隐全部格子：WH_MOUSE_LL 低级钩子自判双击，命中桌面家族窗口才算数。
   （双击桌面图标上也会触发，与腾讯桌面整理行为一致。）
 - 视觉固定深色磨砂：格子贴在壁纸上，跟随面板明暗主题都不合适，故不挂主题系统。
@@ -234,6 +235,8 @@ class BoxWindow(QWidget):
         super(BoxWindow, self).__init__(None, Qt.FramelessWindowHint | Qt.Tool)
         self.mgr = mgr
         self.rec = rec
+        self._desk_pinned = False
+        self._desk_surface = None   # 探测到的第三方桌面表层（抬回锚点缓存）
         self._op = None          # ('move', 起点全局坐标, 起始几何) 或 ('resize', 边缘掩码, ...)
         self._press_pos = None   # 拖拽起点（全局坐标），用于区分点击与拖动
         self._last_drag_ts = 0.0   # 最近一次发生位移的拖拽结束时间（抑制拖拽连带的双击收起）
@@ -322,9 +325,18 @@ class BoxWindow(QWidget):
         self._debounce.timeout.connect(self.refresh)
         self.watcher.directoryChanged.connect(lambda _p: self._debounce.start())
 
-        # 层级策略：普通顶层 Tool 窗口，不挂桌面带、不动 z-order。
-        # Tool 窗口天然免疫 Win+D（本机 Win11 实测），挂带反而会被压到所有应用窗口之下
-        # （格子拖到被窗口覆盖的位置就「消失」），桌面整理的表层反压也只针对桌面带成员。
+        # 桌面层级：归属桌面带（免疫 Win+D，面板同款 pin_to_desktop）+ WinEvent 钩子
+        # + 500ms 看门狗。与面板的关键差异：永不主动沉底——格子被压到应用窗口之下
+        # 就是用户眼里的「消失」。只在被桌面整理表层压住时抬回（表层每 ~2.5s 重建，
+        # 钩子毫秒级抬回，等看门狗会闪半秒）。
+        self._win_evt_cb = ui._WINEVENTPROC(self._on_win_event)   # 必须留引用，防 GC
+        self._win_evt_hook = ui._u32.SetWinEventHook(ui._EVENT_SHOW, ui._EVENT_REORDER,
+                                                     None, self._win_evt_cb, 0, 0, 0)
+        QApplication.instance().aboutToQuit.connect(self._unhook_win_event)
+        self._sink_timer = QTimer(self)
+        self._sink_timer.timeout.connect(self._desktop_tick)
+        self._sink_timer.start(500)
+
         self.resize(rec.get('w') or ui.sc(DEF_W), rec.get('h') or ui.sc(DEF_H))
         self._apply_rec_to_ui()
         self.refresh()
@@ -491,6 +503,90 @@ class BoxWindow(QWidget):
         self.rec['sort'] = key
         self.mgr.save_rec(self)
         self.refresh()
+
+    # ---------- 桌面层级 ----------
+    def showEvent(self, e):
+        super(BoxWindow, self).showEvent(e)
+        self._ensure_band()
+
+    def _ensure_band(self):
+        hwnd = int(self.winId())
+        progman = ui._u32.FindWindowW('Progman', None)
+        if progman and ui._u32.GetAncestor(hwnd, ui._GA_ROOT) != progman:
+            self._repin()
+
+    def _repin(self):
+        """归属桌面带。对已可见的窗口 SetParent 后 win32 侧 WS_VISIBLE 会丢
+        （Qt 仍认为可见，不重绘 = 窗口消失），补一句 ShowWindow(SW_SHOWNA) 恢复。
+        面板在 init 时挂接（窗口还没 show）所以没踩到；格子拖拽后是可见窗口重挂，必踩。"""
+        self._desk_pinned = ui.pin_to_desktop(self)
+        hwnd = int(self.winId())
+        if self.isVisible() and not ui._u32.IsWindowVisible(hwnd):
+            _h32.ShowWindow(hwnd, 8)   # SW_SHOWNA：恢复可见但不抢焦点
+
+    def _desktop_tick(self):
+        """看门狗必须极廉：每 tick 只做一次中心命中检测。
+        probe_desktop 的 5 点 WindowFromPoint 是跨进程同步调用，命中无响应的窗口会
+        阻塞主线程——4 个格子每秒 48 次探测曾把界面打到转圈假死，顺序绝不能反过来。"""
+        hwnd = int(self.winId())
+        if not ui._u32.IsWindow(hwnd):
+            self._sink_timer.stop()
+            return
+        self._ensure_band()
+        if self._op is not None or not self._covered_by_surface():
+            return
+        # 真被表层压住才做完整探测找锚点抬回（表层每 ~2.5s 重建一次，属低频路径）
+        if not self._desk_surface or not ui._u32.IsWindow(self._desk_surface):
+            self._desk_surface, _t = ui.probe_desktop(skip=(hwnd,))
+        ui.sink_to_desktop(self, self._desk_surface)
+
+    def _on_win_event(self, _hook, event, hwnd, idObject, _idChild, _thread, _ts):
+        """桌面带内窗口的 SHOW / 容器 REORDER 事件回调。只做轻量过滤，
+        真正的抬回动作丢回事件循环（钩子里直接动 z-order 有风险）。"""
+        try:
+            if not hwnd or not self.isVisible() or self._op is not None:
+                return
+            if hwnd == int(self.winId()):
+                return
+            if idObject not in (0, -4):   # 只看窗口本身 / 客户区级别
+                return
+            cls = ui._class_name(hwnd)
+            if cls in ui._PROG_FAMILY:
+                if event != ui._EVENT_REORDER:
+                    return
+            else:
+                sw, sh = ui._u32.GetSystemMetrics(0), ui._u32.GetSystemMetrics(1)
+                if not ui._is_desktop_surface(hwnd, sw, sh):
+                    return
+            QTimer.singleShot(0, self._lift_if_covered)
+        except Exception:
+            pass
+
+    def _unhook_win_event(self):
+        if self._win_evt_hook:
+            ui._u32.UnhookWinEvent(self._win_evt_hook)
+            self._win_evt_hook = None
+
+    def _lift_if_covered(self):
+        """表层重排后的即时抬回：没被压住就不动（自己的沉底也会触发 REORDER，防自激回路）。"""
+        if self._covered_by_surface():
+            ui.sink_to_desktop(self, self._desk_surface)
+
+    def _covered_by_surface(self):
+        """格子中心被桌面整理软件的表层压住（看不见也点不到）的判定。"""
+        if not self.isVisible():
+            return False
+        h = ui._u32.WindowFromPoint(wintypes.POINT(self.x() + self.width() // 2,
+                                                   self.y() + self.height() // 2))
+        mine = int(self.winId())
+        sw, sh = ui._u32.GetSystemMetrics(0), ui._u32.GetSystemMetrics(1)
+        while h:
+            if h == mine or ui._class_name(h) in ui._PROG_FAMILY:
+                return False
+            if ui._is_desktop_surface(h, sw, sh):
+                return True
+            h = ui._u32.GetParent(h)
+        return False
 
     # ---------- 绘制 ----------
     def paintEvent(self, e):
