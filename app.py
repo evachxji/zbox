@@ -1818,9 +1818,12 @@ class SettingsDialog(QDialog):
         holiday_row.addWidget(b)
         form.addRow(row_label('节假日'), holiday_row)
 
-        # 保存按钮（改动即时生效，点击即确认并关闭）
+        # 保存按钮（改动即时生效，点击即确认并关闭）；左下角版本号与关于窗/安装程序一致
         save_row = QHBoxLayout()
         save_row.setContentsMargins(0, sc(12), sc(4), 0)
+        ver = QLabel('v%s' % APP_VERSION)
+        ver.setObjectName('setLabel')   # 借用表单标签的弱化色
+        save_row.addWidget(ver)
         save_row.addStretch(1)
         save = QPushButton('保存')
         save.setObjectName('setSave')
