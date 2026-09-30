@@ -436,20 +436,19 @@ class InstallWizard(QDialog):
         return page
 
     def _build_finish_page(self):
+        # 主流安装器收尾页：居中标题 + 居中「立即启动」勾选 + 居中完成按钮
         page = QWidget()
         lay = QVBoxLayout(page)
         lay.setContentsMargins(_sc(2), _sc(14), _sc(4), 0)
         lay.setSpacing(_sc(10))
         self._finish_title = QLabel('安装完成')
         self._finish_title.setObjectName('setTitle')
-        self._finish_detail = QLabel()
-        self._finish_detail.setObjectName('setLabel')
-        self._finish_detail.setWordWrap(True)
-        self._run_now = QCheckBox('立即运行 %s' % APP_TITLE)
+        self._run_now = QCheckBox('立即启动 %s' % APP_TITLE)
         self._run_now.setChecked(True)
-        lay.addWidget(self._finish_title)
-        lay.addWidget(self._finish_detail)
-        lay.addWidget(self._run_now)
+        lay.addStretch(1)
+        lay.addWidget(self._finish_title, 0, Qt.AlignCenter)
+        lay.addSpacing(_sc(18))
+        lay.addWidget(self._run_now, 0, Qt.AlignCenter)
         lay.addStretch(1)
         btns = QHBoxLayout()
         btns.addStretch(1)
@@ -459,6 +458,7 @@ class InstallWizard(QDialog):
         done.setDefault(True)
         done.clicked.connect(self._on_finish)
         btns.addWidget(done)
+        btns.addStretch(1)
         lay.addLayout(btns)
         return page
 
@@ -537,6 +537,7 @@ class InstallWizard(QDialog):
     def start_install(self, path, all_users, shortcut, autostart):
         """执行安装并切换到进度/完成页（提权实例直接调用）。"""
         self._stack.setCurrentIndex(1)
+        self._all_users = all_users
 
         def prog(pct, text):
             self._status.setText(text)
@@ -548,11 +549,13 @@ class InstallWizard(QDialog):
             QMessageBox.critical(self, '安装失败', str(e))
             self._stack.setCurrentIndex(0)
             return
-        self._finish_detail.setText('已安装到：%s' % self._dst)
-        self._run_now.setVisible(not all_users)  # 提权进程启动的面板会带管理员身份，不提供立即运行
         self._stack.setCurrentIndex(2)
 
     def _on_finish(self):
-        if self._dst and self._run_now.isVisible() and self._run_now.isChecked():
-            _relaunch(self._dst)
+        if self._dst and self._run_now.isChecked():
+            if self._all_users:
+                # 提权实例不能直接启动（面板会带管理员身份）：借 explorer 以普通用户身份拉起
+                subprocess.Popen(['explorer.exe', self._dst])
+            else:
+                _relaunch(self._dst)
         self.accept()
