@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-Zviber 桌面日历面板：PyQt5 编写的 Windows 悬浮小面板（日历 + 待办），兼容 Win7 / Win10 / Win11、Python 3.8+。
+Zviber 桌面日历面板：PyQt5 编写的 Windows 悬浮小面板（日历 + 待办 + 局域网文件传输），兼容 Win7 / Win10 / Win11、Python 3.8+。
 平铺布局、一个模块一个职责，无第三方依赖（仅 PyQt5）。同目录 `AGENTS.md` 是给其它 agent 的精简版
 （模块清单 / 命令 / 风格），本文件补充架构与坑位——**改功能时 README、AGENTS.md、CLAUDE.md 三份都要同步**。
 
@@ -17,6 +17,9 @@ python install.py            :: 源码方式开启开机自启（右键菜单只
 python install.py --remove   :: 移除自启，并清理旧的右键菜单
 
 python build.py              :: 构建 exe 安装包 → dist\ZviberPanel.exe（本身即安装包）
+python transfer_selftest.py  :: 传输协议自检（12 用例全过打印 SELFTEST OK）
+
+cd android && gradlew.bat assembleDebug   :: Android 端 debug APK（独立 Gradle 工程）
 ```
 
 `run.cmd` / `build.cmd` 是给最终用户双击用的入口（免命令行）。**这两个 .cmd 以 GBK 保存并自带
@@ -35,7 +38,7 @@ python build.py              :: 构建 exe 安装包 → dist\ZviberPanel.exe（
 set ZVIBER_SHOT=designs\verify && python main.pyw
 ```
 
-导出两主题 × 日历/待办/双栏共 6 张 PNG（`<theme>_<view>.png`）后自动退出；截图目录已 git-ignore。
+导出两主题 × 日历/待办/双栏/传输共 8 张 PNG（`<theme>_<view>.png`）后自动退出；截图目录已 git-ignore。
 另有 `ZVIBER_GRABSCREEN=<路径>`：抓取真实屏幕上面板所在区域（含系统合成效果）后退出。
 
 **跑自检前必须先退出正在运行的实例**：单实例分支会把这次启动当成一次 `--toggle` 转发给已运行实例
@@ -187,6 +190,35 @@ excepthook 时 exit 127、连输出都没有。`main()` 里那句 `sys.excepthoo
 - `installer.py` 的向导与自安装**只在 frozen 时生效**；源码运行走 `install.py`。
 - 卸载用延迟 `rmdir`（exe 运行中删不掉自己），只清程序与系统集成，
   `%APPDATA%\ZviberPanel` 的用户数据保留。
+
+### 局域网传输（`transfer.py` + `transfer_ui.py` + `transfer_selftest.py`）
+
+参照 LocalSend Protocol v2 实现的**私有实例**：UDP 组播发现（224.0.0.168:53327）+ HTTP REST 传输
+（TCP 53327，前缀 `/api/localsend/v2/`，路由 register / info / prepare-upload / upload / cancel）。
+端口与组播地址都是自定义的（官方是 53317），**与官方 LocalSend 完全隔离、互不相通**——别想着去兼容；
+HTTP 模式无加密，只面向可信局域网。组播失效时有 /24 子网扫描回退。
+
+- `transfer.py` 纯标准库零 Qt，可独立测试：`DeviceInfo` / `Discovery` / `TransferServer` /
+  `send_files` / `load_or_create_fingerprint`。防护全在服务端：会话状态机 + token 校验、
+  sha256 校验、64KB 流式写盘、同名自动加 " (2)"、路径穿越净化、1MB JSON 上限、
+  会话 TTL 10 分钟（按最后活跃刷新）。
+- `transfer_ui.py` 是面板第三个 tab「传输」：设备列表、文件多选 + 拖拽发送、传输记录、
+  接收确认层（可选保存目录，默认 `%USERPROFILE%\Downloads\Zviber` 并记住，170 秒确认超时）。
+  **网络回调全走 pyqtSignal 回主线程**，不跨线程动 UI；53327 被占用时降级为空态，不影响日历/待办。
+- `transfer_selftest.py` 是自动化协议自检：`python transfer_selftest.py`，12 用例全过打印
+  `SELFTEST OK`；用动态端口、不依赖组播与 Qt，**改 `transfer.py` 后必跑**。
+- Android 端在 `android/`：独立 Gradle 工程（Kotlin + Compose + OkHttp + NanoHTTPD，minSdk 26），
+  与 PC 代码完全分离；指纹/别名/保存目录存 SharedPreferences，SAF 落盘，仅前台传输
+  （`onStop` 即停服务）。
+- `config.json` 新增键：`transfer_fingerprint` / `transfer_alias` / `transfer_dir`。
+
+坑位：
+
+- `cfg.save()` 是整体回写，会抹掉 `load_or_create_fingerprint` 直写 config.json 的指纹——
+  `main.pyw` 启动时已把指纹同步进 `cfg.data`，改启动流程时别丢掉这一步。
+- 未 `start()` 的 `TransferServer` 调 `stop()` 会死等，退出路径靠 `transfer_started` 标志守卫。
+- 改别名要重启才会重新广播（发现报文只在启动时发）。
+- Windows 防火墙首次监听 53327 会弹授权框，用户拒绝后传输静默不可用——排查先问这一步。
 
 ## 代码风格
 

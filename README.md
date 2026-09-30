@@ -4,7 +4,7 @@
 
 # Zviber 桌面日历面板
 
-「格子」风格的 Windows 桌面日历面板：**日历 + 待办** 一体的悬浮小面板，Win7 / Win10 / Win11 通用。
+「格子」风格的 Windows 桌面日历面板：**日历 + 待办 + 局域网传输** 一体的悬浮小面板，Win7 / Win10 / Win11 通用。
 
 ## 功能
 
@@ -14,6 +14,7 @@
 - **待办 tab**：双击空白处（或点底部提示条）新建待办；左侧 checkbox 勾选即完成，置灰 + 删除线并沉到列表底部，取消勾选回到顶部；右键条目可编辑/删除；文本过长自动折行占多行
 - **截止日期 tag**：条目右侧显示截止情况 —— 逾期「逾期 N 天」（标红）/ 当天「今天」/ 一周内「还剩 N 天」/ 更远只显示 `M.d`
 - **双栏模式**：设置窗口开启，左日历右待办同屏显示
+- **传输 tab**：局域网内 PC ↔ Android 互传文件（参照 LocalSend 协议的私有实现，与官方 LocalSend 不互通）：自动发现同网设备，文件多选 + 拖拽发送；接收需手动确认，可选保存目录（默认「下载\Zviber」）
 - **设置窗口**：标题栏 ⚙ 弹出无边框设置窗口（主题/双栏/午休与下班时间/开机自启/节假日数据），非模态，改动即时生效
 - **三档主题**：设置窗口切换 —— 深色 / 浅色 / 跟随系统（读 Windows「应用模式」，系统里改了会自动跟随），自动记忆
 - **节假日数据**：内置 2025/2026 国务院官方调休安排；设置窗口「节假日」一栏可联网更新 —— 三个数据源（timor.tech → jiejiariapi → holiday-cn）依次尝试，前一个不通自动换下一个；导入窗口里三个源的 URL 都能改（内网镜像、换年份），点「下载并导入」由程序直接抓取导入，不用手动另存（抓不通时自动开浏览器兜底）；程序每天第一次启动、以及连续运行满 48 小时，会各静默更新一次
@@ -64,11 +65,30 @@ pythonw main.pyw         :: 或直接启动
 
 卸载：`python install.py --remove`
 
+## 局域网传输（PC ↔ Android）
+
+两端连**同一 WiFi** 即可互传文件，不走公网、无需账号：
+
+- PC 端：面板第三个 tab「传输」，自动发现同网设备；接收文件需手动确认，可选保存目录
+  （默认「下载\Zviber」，记住选择）。**首次运行时 Windows 防火墙会弹授权提示，需允许**，
+  否则设备互相搜不到。
+- Android 端：`android/` 是独立 Gradle 工程（Android 8.0 / minSdk 26 起），构建 debug 包：
+
+```bat
+cd android && gradlew.bat assembleDebug
+```
+
+产物在 `android\app\build\outputs\apk\debug\`，拷贝到手机安装即可。仅前台传输，
+App 退到后台即停止服务。
+
+实现参照 LocalSend Protocol v2，但端口与组播地址为自定义，**与官方 LocalSend 不互通**；
+HTTP 无加密，请只在可信局域网使用。
+
 ## 兼容性说明
 
 - 基于 PyQt5（Qt 5.15）：Win7 / Win10 / Win11 均支持
 - Win7 部署：安装 Python 3.8.x（最后一个支持 Win7 的版本）+ `pip install "PyQt5==5.15.*"`
-- 数据存放 `%APPDATA%\ZviberPanel\`：`config.json`（主题/位置/模式）、`todos.json`（待办）、`holidays.json`（导入的节假日）
+- 数据存放 `%APPDATA%\ZviberPanel\`：`config.json`（主题/位置/模式/传输配置）、`todos.json`（待办）、`holidays.json`（导入的节假日）
 - 其余年份无官方调休数据时，仍显示双休与农历节日，仅不标「休/班」角标
 
 ## 自检
@@ -76,7 +96,7 @@ pythonw main.pyw         :: 或直接启动
 ```bat
 set ZVIBER_SHOT=designs\verify && python main.pyw
 ```
-导出两主题 × 日历/待办/双栏截图到指定目录后自动退出。
+导出两主题 × 日历/待办/双栏/传输共 8 张截图到指定目录后自动退出。
 
 ## License
 
