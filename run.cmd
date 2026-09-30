@@ -32,8 +32,8 @@ goto :launch
 echo   [提示] 未检测到 PyQt5（本项目唯一的依赖）。
 choice /c YN /n /m "   现在自动安装吗？[Y/N] "
 if errorlevel 2 goto :no_pyqt5
-echo   正在安装 PyQt5，请稍候 ...
-%PY% -m pip install PyQt5
+echo   正在安装 PyQt5，请稍候（自动尝试多个数据源）...
+call :install_pyqt5
 if errorlevel 1 goto :pip_failed
 echo   安装完成。
 echo.
@@ -62,6 +62,19 @@ echo.
 pause
 exit /b 1
 
+rem ---- 依次尝试多个 pip 数据源，任一成功即返回 ----
+:install_pyqt5
+echo   [1/5] 尝试阿里云镜像 ...
+%PY% -m pip install PyQt5 -i https://mirrors.aliyun.com/pypi/simple/ && exit /b 0
+echo   [2/5] 尝试腾讯云镜像 ...
+%PY% -m pip install PyQt5 -i https://mirrors.cloud.tencent.com/pypi/simple && exit /b 0
+echo   [3/5] 尝试华为云镜像 ...
+%PY% -m pip install PyQt5 -i https://mirrors.huaweicloud.com/repository/pypi/simple && exit /b 0
+echo   [4/5] 尝试清华镜像 ...
+%PY% -m pip install PyQt5 -i https://pypi.tuna.tsinghua.edu.cn/simple && exit /b 0
+echo   [5/5] 尝试 PyPI 官方源 ...
+%PY% -m pip install PyQt5 -i https://pypi.org/simple && exit /b 0
+exit /b 1
 :launch
 start "" %PYW% "%~dp0main.pyw"
 echo   [完成] 已启动。若面板本就在运行，本操作即显示 / 隐藏。
