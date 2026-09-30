@@ -224,6 +224,7 @@ class Receiver(private val context: Context) {
                     if (remaining > 0) remaining -= n
                     received += n
                     record.progress = received
+                    record.sampleSpeed()
                 }
             } ?: return fail(record, "cannot open output stream")
         } catch (_: CancelledException) {

@@ -19,7 +19,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.documentfile.provider.DocumentFile
@@ -31,6 +33,7 @@ import com.zviber.transfer.Settings
 fun ReceiveDialogHost() {
     val pending = IncomingState.pending ?: return
     val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
 
     // 首次进入默认填入已记住的保存目录
     LaunchedEffect(pending.sessionId) {
@@ -91,13 +94,19 @@ fun ReceiveDialogHost() {
         confirmButton = {
             TextButton(
                 // 未选目录也能直接接受：默认存到系统 Download（API 29+）
-                onClick = { pending.onAccept(pending.dirUri) },
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    pending.onAccept(pending.dirUri)
+                },
             ) {
                 Text("接受")
             }
         },
         dismissButton = {
-            TextButton(onClick = { pending.onReject() }) {
+            TextButton(onClick = {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                pending.onReject()
+            }) {
                 Text("拒绝")
             }
         },

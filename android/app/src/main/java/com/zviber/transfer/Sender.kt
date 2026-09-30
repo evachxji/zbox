@@ -250,6 +250,7 @@ object Sender {
                         if (n < 0) break
                         sink.write(buffer, 0, n)
                         file.record.progress += n
+            file.record.sampleSpeed()
                     }
                 } ?: throw java.io.IOException("cannot open input stream")
             }

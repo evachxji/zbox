@@ -113,6 +113,28 @@ class TransferRecord(
     var progress by mutableStateOf(0L)
     var status by mutableStateOf(TransferStatus.WAITING)
     var error by mutableStateOf<String?>(null)
+    var speedBps by mutableStateOf(0L)   // EMA 平滑后的传输速度（字节/秒）
+
+    private var lastTickAt = 0L
+    private var lastTickProgress = 0L
+
+    /** 进度帧采样：增量算瞬时速度并做指数平滑（供 UI 显示速度与剩余时间） */
+    fun sampleSpeed() {
+        val now = System.currentTimeMillis()
+        if (lastTickAt == 0L) {
+            lastTickAt = now
+            lastTickProgress = progress
+            return
+        }
+        val dt = now - lastTickAt
+        val dp = progress - lastTickProgress
+        if (dp > 0 && dt > 200) {
+            val instant = dp * 1000L / dt
+            speedBps = if (speedBps == 0L) instant else speedBps / 2 + instant / 2
+            lastTickAt = now
+            lastTickProgress = progress
+        }
+    }
 }
 
 /** 传输记录表 */

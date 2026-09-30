@@ -12,7 +12,8 @@ import threading
 import time
 import uuid
 
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QPointF
+from PyQt5.QtCore import (Qt, QTimer, pyqtSignal, QPointF, QRect,
+                          QPropertyAnimation, QEasingCurve)
 from PyQt5.QtGui import QColor, QPainter, QPen, QPixmap
 from PyQt5.QtWidgets import (QWidget, QFrame, QLabel, QToolButton, QPushButton,
                              QVBoxLayout, QHBoxLayout, QLineEdit, QProgressBar,
@@ -370,10 +371,25 @@ class TransferWidget(QWidget):
             if self.server is not None and e.mimeData().hasUrls() and \
                     any(u.isLocalFile() for u in e.mimeData().urls()):
                 e.acceptProposedAction()
+                self._set_drop_highlight(True)
+        except Exception:
+            pass
+
+    def dragLeaveEvent(self, e):
+        self._set_drop_highlight(False)
+        super(TransferWidget, self).dragLeaveEvent(e)
+
+    def _set_drop_highlight(self, on):
+        '''拖拽悬停时高亮「选择文件」按钮（QSS 动态属性切换）。'''
+        try:
+            self.pick_btn.setProperty('drop', 'true' if on else 'false')
+            self.pick_btn.style().unpolish(self.pick_btn)
+            self.pick_btn.style().polish(self.pick_btn)
         except Exception:
             pass
 
     def dropEvent(self, e):
+        self._set_drop_highlight(False)
         try:
             paths = [u.toLocalFile() for u in e.mimeData().urls() if u.isLocalFile()]
             self._set_files(self._files + [p for p in paths if p and os.path.isfile(p)])
@@ -718,9 +734,17 @@ class TransferWidget(QWidget):
             self.recv_files.setText(text)
             self.recv_dir.setText('保存到：%s' % self._save_dir)
             self.recv_dir.setToolTip(self._save_dir)
-            self.recv.setGeometry(self.rect())
+            rect = self.rect()
+            self.recv.setGeometry(QRect(0, rect.height() // 3, rect.width(), rect.height()))
             self.recv.show()
             self.recv.raise_()
+            # 上滑入场：从下三分之一处滑到铺满，180ms 缓出
+            anim = QPropertyAnimation(self.recv, b'geometry', self)
+            anim.setDuration(180)
+            anim.setEasingCurve(QEasingCurve.OutCubic)
+            anim.setStartValue(QRect(0, rect.height() // 3, rect.width(), rect.height()))
+            anim.setEndValue(QRect(rect))
+            anim.start(QPropertyAnimation.DeleteWhenStopped)
             self.notify.emit('收到文件', '%s 想发送 %d 个文件' % (view['alias'], len(view['names'])))
         except Exception:
             # 防僵尸 _pending：一次异常后不再把所有接收静默拒绝到重启
@@ -908,6 +932,20 @@ class TransferWidget(QWidget):
         lay.addWidget(bar)
         self.rec_empty.hide()
         self.rec_lay.insertWidget(0, row)
+        # 新记录滑入：高度从 0 展开（不用透明度特效，避免破坏文字 ClearType）
+        try:
+            h = row.sizeHint().height()
+            if h > 0:
+                row.setMaximumHeight(0)
+                anim = QPropertyAnimation(row, b'maximumHeight', self)
+                anim.setDuration(180)
+                anim.setEasingCurve(QEasingCurve.OutCubic)
+                anim.setStartValue(0)
+                anim.setEndValue(h)
+                anim.finished.connect(lambda: row.setMaximumHeight(16777215))
+                anim.start(QPropertyAnimation.DeleteWhenStopped)
+        except Exception:
+            row.setMaximumHeight(16777215)
         rec = {'key': key, 'direction': direction, 'name': display, 'total': total,
                'done': 0, 'files': {}, 'saved': [], 'state': 'wait', 'err': '',
                'session_id': None, 'row': row, 'bar': bar, 'state_lab': state,
@@ -923,6 +961,21 @@ class TransferWidget(QWidget):
                 self.rec_lay.removeWidget(old_rec['row'])
                 old_rec['row'].deleteLater()
         return key
+
+    def _animate_bar(self, rec, target):
+        '''进度条平滑过渡（150ms 缓出），消除一跳一跳的阶梯感。'''
+        bar = rec['bar']
+        try:
+            if bar.value() == target:
+                return
+            anim = QPropertyAnimation(bar, b'value', self)
+            anim.setDuration(150)
+            anim.setStartValue(bar.value())
+            anim.setEndValue(target)
+            anim.setEasingCurve(QEasingCurve.OutCubic)
+            anim.start(QPropertyAnimation.DeleteWhenStopped)
+        except Exception:
+            bar.setValue(target)
 
     def _update_record(self, rec):
         '''按 rec 的状态刷新状态文字与进度条（主线程）。'''
@@ -964,10 +1017,8 @@ class TransferWidget(QWidget):
             rec['state_lab'].setProperty('state', state)
             rec['state_lab'].style().unpolish(rec['state_lab'])
             rec['state_lab'].style().polish(rec['state_lab'])
-        if state == 'done':
-            rec['bar'].setValue(1000)
-        else:
-            rec['bar'].setValue(int(rec['done'] * 1000 / total) if total else 0)
+        target = 1000 if state == 'done' else (int(rec['done'] * 1000 / total) if total else 0)
+        self._animate_bar(rec, target)
         btn = rec.get('cancel_btn')
         if btn is not None:
             btn.setVisible(state in ('wait', 'busy'))

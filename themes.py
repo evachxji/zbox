@@ -230,6 +230,7 @@ QToolButton#pickBtn {
     color: #8d8a82; font: 11.5px "%CN%"; padding: 5px 10px;
 }
 QToolButton#pickBtn:hover { border-color: rgba(232,163,61,130); color: #e8a33d; }
+QToolButton#pickBtn[drop="true"] { border-color: #e8a33d; border-style: solid; color: #e8a33d; background: rgba(232,163,61,22); }
 QPushButton#sendBtn {
     background: #e8a33d; border: none; border-radius: 8px;
     color: #1a1610; font: 600 12px "%CN%"; padding: 6px 16px;
@@ -470,6 +471,7 @@ QToolButton#pickBtn {
     color: #5b5b60; font: 11.5px "%CN%"; padding: 5px 10px;
 }
 QToolButton#pickBtn:hover { border-color: #0067c0; color: #0067c0; background: rgba(0,103,192,13); }
+QToolButton#pickBtn[drop="true"] { border-color: #0067c0; border-style: solid; color: #0067c0; background: rgba(0,103,192,26); }
 QPushButton#sendBtn {
     background: #0067c0; border: none; border-radius: 8px;
     color: #ffffff; font: 600 12px "%CN%"; padding: 6px 16px;
