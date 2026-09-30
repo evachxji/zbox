@@ -797,12 +797,19 @@ class DesktopClickHook(QThread):
             if nCode == 0 and wParam == 0x0201:   # WM_LBUTTONDOWN
                 s = ctypes.cast(lParam, ctypes.POINTER(MSLLHOOKSTRUCT)).contents
                 now = s.time
-                if (now - state['t'] <= dbl_t and abs(s.pt.x - state['x']) <= dbl_x
-                        and abs(s.pt.y - state['y']) <= dbl_y and _is_desktop(s.pt)):
+                on_desktop = _is_desktop(s.pt)
+                if (on_desktop and state['t'] and now - state['t'] <= dbl_t
+                        and abs(s.pt.x - state['x']) <= dbl_x
+                        and abs(s.pt.y - state['y']) <= dbl_y):
                     state['t'] = 0
                     self.double_clicked.emit()
-                else:
+                elif on_desktop:
                     state['t'], state['x'], state['y'] = now, s.pt.x, s.pt.y
+                else:
+                    # 第一击也必须落在桌面上：点在格子/窗口上要把双击序列清零，
+                    # 否则「拖开格子 → 快速点它腾出来的空位」会被误判成双击桌面，
+                    # 全部格子被隐藏——用户眼里就是拖完格子消失了
+                    state['t'] = 0
             return _h32.CallNextHookEx(None, nCode, wParam, lParam)
 
         self._proc = proc_t(proc)   # 留引用防 GC
