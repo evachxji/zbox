@@ -40,6 +40,7 @@ SCAN_TIMEOUT = 0.5                       # 子网扫描单 IP 超时
 SCAN_WORKERS = 64                        # 子网扫描并发数
 NET_TIMEOUT = 10.0                       # 普通网络请求超时上限
 MAX_JSON_BODY = 1048576                    # JSON 请求体上限 1MB
+PREPARE_TIMEOUT = 180.0                    # prepare-upload 专用：等待对端用户手动确认
 SESSION_TTL = 600.0                        # 会话超过 10 分钟未完成视为陈旧
 
 
@@ -677,12 +678,16 @@ def send_files(host, port, files, on_progress=None, on_done=None, device_info=No
     try:
         _, body = _post_json(base + 'prepare-upload',
                              {'info': device_info.to_dict(), 'files': file_meta},
-                             timeout=NET_TIMEOUT)
+                             timeout=PREPARE_TIMEOUT)
     except urllib.error.HTTPError as exc:
         if exc.code == 403:
             _safe_call(on_done, False, 'rejected')
         else:
             _safe_call(on_done, False, 'prepare-upload HTTP %d' % exc.code)
+        return
+    except (socket.timeout, TimeoutError):
+        # 对方还在确认弹窗上犹豫，与网络失败区分开
+        _safe_call(on_done, False, '对方未及时确认')
         return
     except Exception as exc:
         _safe_call(on_done, False, 'prepare-upload: %s' % exc)
