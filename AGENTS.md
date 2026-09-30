@@ -7,6 +7,7 @@ Zviber 是 Windows 桌面悬浮面板（日历 + 待办），PyQt5，Python 3.8+
 
 - `main.pyw` — 入口：单实例 IPC（`QLocalServer`）、系统托盘、节假日后台更新、（frozen 时）安装/卸载流程
 - `app.py` — 面板 UI（日历 / 待办 / 双栏 / 顶部栏滑出与拖动）、`SettingsDialog` 与节假日导入引导窗
+- `boxes.py` — 桌面格子：空白格子（文件移入数据目录）与文件夹映射格子、双击桌面显隐
 - `calendar_data.py` — 内置国务院节假日数据、农历换算、三源联网回退与离线导入
 - `themes.py` — 两套主题 QSS（深色 `nocturne` / 浅色 `mica`）加 `auto` 伪主题；`%CN%`/`%NUM%` 为字体占位符
 - `version.py` — 版本号唯一来源：关于窗、设置窗左下角、安装向导、卸载注册表项共用 `APP_VERSION`，发版只改这一个文件
