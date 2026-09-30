@@ -72,7 +72,7 @@ _k32.CloseHandle.argtypes = [ctypes.c_void_p]
 SORT_CHOICES = [('name', '按名称'), ('type', '按类型'), ('mtime', '按修改时间')]
 
 TITLE_H = 30        # 标题栏高（设计像素，运行时过 sc()）
-EDGE = 6            # 边缘缩放命中宽度
+EDGE = 10           # 边缘缩放命中宽度
 MIN_W, MIN_H = 200, 120
 DEF_W, DEF_H = 300, 420
 
@@ -104,6 +104,12 @@ QScrollBar::handle:vertical { background: rgba(255,255,255,70); border-radius: @
 QScrollBar::handle:vertical:hover { background: rgba(255,255,255,110); }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
+QScrollBar:horizontal { height: @SBW@px; background: transparent; margin: 0px 2px 2px 2px; }
+QScrollBar::handle:horizontal { background: rgba(255,255,255,70); border-radius: @SBR@px;
+                                min-width: 24px; }
+QScrollBar::handle:horizontal:hover { background: rgba(255,255,255,110); }
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; }
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: transparent; }
 QMessageBox { background: #26282f; }
 QMessageBox QLabel { color: rgba(255,255,255,225); font-size: @HFS@px; }
 QMenu { background: #26282f; color: #e8e6e1; border: 1px solid rgba(255,255,255,30);
@@ -439,9 +445,11 @@ class BoxWindow(QWidget):
         self.pages.addWidget(page_invalid)
         root.addLayout(self.pages, 1)
 
-        # 子控件默认继承顶层窗口的光标：边缘悬停设了双箭头后划入列表不会复位。
-        # 给会盖住窗口背景的子控件装过滤器，MouseMove 时按窗口坐标同步光标。
-        for w in (self.title, self.icon, self.name, self.edit, self.list, self.list.viewport(), self.hint):
+        # 子控件默认继承顶层窗口的光标：边缘悬停设了双箭头后划入子控件不会复位。
+        # 全部子控件开鼠标跟踪并装过滤器，MouseMove 时按窗口坐标同步光标；
+        # 不开跟踪的话标题栏等区域收不到 MouseMove，光标会一直残留双箭头。
+        for w in self.findChildren(QWidget):
+            w.setMouseTracking(True)
             w.installEventFilter(self)
 
         # 文件夹内容变化自动刷新（300ms 去抖）
@@ -809,6 +817,23 @@ class BoxWindow(QWidget):
             self._edit_cancel = True
             self.edit.clearFocus()
             return True
+        # 列表视口会吃掉左键按下（选中项），父窗口收不到——底部边缘和两个下角的
+        # 缩放从这里起；起缩放后移动/松开同样发给视口，直接在过滤器里驱动到底。
+        if obj is self.list.viewport():
+            if e.type() == e.MouseButtonPress and e.button() == Qt.LeftButton \
+                    and not self.rec.get('locked') and not self.rec.get('collapsed'):
+                edges = self._hit_edges(obj.mapTo(self, e.pos()))
+                if edges:
+                    self._op = ('resize', edges, e.globalPos(), self.geometry())
+                    self._press_pos = e.globalPos()
+                    return True
+            if self._op and self._op[0] == 'resize':
+                if e.type() == e.MouseMove:
+                    self._apply_resize(e.globalPos())
+                    return True
+                if e.type() == e.MouseButtonRelease:
+                    self._finish_op(e.globalPos())
+                    return True
         # 子控件上的 MouseMove 转成窗口坐标同步光标（子控件不设光标，跟随窗口）
         if e.type() == e.MouseMove and not self._op:
             self._sync_cursor(obj.mapTo(self, e.pos()))
@@ -842,39 +867,48 @@ class BoxWindow(QWidget):
             super(BoxWindow, self).mouseMoveEvent(e)
             return
         kind, edges, start_pos, start_geo = self._op
-        delta = e.globalPos() - start_pos
         if kind == 'move':
-            self.move(start_geo.topLeft() + delta)
+            self.move(start_geo.topLeft() + (e.globalPos() - start_pos))
+            self.activateWindow()
         else:
-            r = QRect(start_geo)
-            if edges & 1:
-                r.setLeft(start_geo.left() + delta.x())
-            if edges & 2:
-                r.setRight(start_geo.right() + delta.x())
-            if edges & 4:
-                r.setTop(start_geo.top() + delta.y())
-            if edges & 8:
-                r.setBottom(start_geo.bottom() + delta.y())
-            if r.width() >= self.minimumWidth() and r.height() >= self.minimumHeight():
-                self.setGeometry(r)
+            self._apply_resize(e.globalPos())
+
+    def _apply_resize(self, global_pos):
+        """按当前 _op 的边缘掩码应用缩放（mouseMoveEvent 与视口事件过滤器共用）。"""
+        _kind, edges, start_pos, start_geo = self._op
+        delta = global_pos - start_pos
+        r = QRect(start_geo)
+        if edges & 1:
+            r.setLeft(start_geo.left() + delta.x())
+        if edges & 2:
+            r.setRight(start_geo.right() + delta.x())
+        if edges & 4:
+            r.setTop(start_geo.top() + delta.y())
+        if edges & 8:
+            r.setBottom(start_geo.bottom() + delta.y())
+        if r.width() >= self.minimumWidth() and r.height() >= self.minimumHeight():
+            self.setGeometry(r)
         self.activateWindow()
 
     def mouseReleaseEvent(self, e):
         if self._op:
-            op, _edges, start_pos, _geo = self._op
-            self._op = None
-            if self._press_pos is not None and \
-                    (e.globalPos() - self._press_pos).manhattanLength() > 4:
-                self._last_drag_ts = time.time()
-            self._press_pos = None
-            self._clamp_to_screen()   # 拖出屏幕会再也够不着标题栏，钳回来
-            self.rec['x'], self.rec['y'] = self.x(), self.y()
-            if not self.rec.get('collapsed'):
-                self.rec['w'], self.rec['h'] = self.width(), self.height()
-            self.mgr.save_rec(self)
-            # 不动 z-order：格子保持当前层级（拖拽激活时浮在应用之上），
-            # 失焦也不沉底——用户明确要求：除双击桌面/解散外，格子永不消失
+            self._finish_op(e.globalPos())
         super(BoxWindow, self).mouseReleaseEvent(e)
+
+    def _finish_op(self, global_pos):
+        """拖动/缩放收尾（mouseReleaseEvent 与视口事件过滤器共用）。"""
+        self._op = None
+        if self._press_pos is not None and \
+                (global_pos - self._press_pos).manhattanLength() > 4:
+            self._last_drag_ts = time.time()
+        self._press_pos = None
+        self._clamp_to_screen()   # 拖出屏幕会再也够不着标题栏，钳回来
+        self.rec['x'], self.rec['y'] = self.x(), self.y()
+        if not self.rec.get('collapsed'):
+            self.rec['w'], self.rec['h'] = self.width(), self.height()
+        self.mgr.save_rec(self)
+        # 不动 z-order：格子保持当前层级（拖拽激活时浮在应用之上），
+        # 失焦也不沉底——用户明确要求：除双击桌面/解散外，格子永不消失
 
     def _clamp_to_screen(self):
         """保证至少标题栏露在屏幕内（面板同款思路，见 FloatingPanel._clamp_to_screen）。"""
@@ -984,16 +1018,28 @@ class DesktopClickHook(QThread):
         sw = u32.GetSystemMetrics(0)
         sh = u32.GetSystemMetrics(1)
 
+        my_pid = k32.GetCurrentProcessId()
+
         def _is_desktop(pt):
             h = ui._u32.WindowFromPoint(pt)
+            pid = wintypes.DWORD()
+            ui._u32.GetWindowThreadProcessId(h, ctypes.byref(pid))
+            if pid.value == my_pid:
+                # 本进程窗口一律不算桌面：文件夹选择框等系统对话框跑在本进程里，
+                # 内嵌 SysListView32，不挡会在框里双击空白时误判成双击桌面
+                return False
             own = self.own_hwnds()
             while h:
                 if h in own:
                     return False
                 cls = ui._class_name(h)
-                if cls == 'SysListView32':
+                if cls == 'SysListView32' or cls == 'SHELLDLL_DefView':
+                    # 资源管理器窗口（CabinetWClass）里也有这两个壳视图：
+                    # 只有根窗口是 Progman/WorkerW 的才是桌面，否则一律不算
+                    if ui._class_name(ui._u32.GetAncestor(h, ui._GA_ROOT)) not in ('Progman', 'WorkerW'):
+                        return False
                     # 点在图标/文件夹上不算空白：双击文件夹不能触发显隐
-                    return not _desktop_icon_at(h, pt)
+                    return cls == 'SHELLDLL_DefView' or not _desktop_icon_at(h, pt)
                 if cls in ui._PROG_FAMILY:
                     return True
                 # 桌面整理软件的全屏覆盖层（腾讯 TXMiniSkin 等）：与 app.probe_desktop 同一判定
