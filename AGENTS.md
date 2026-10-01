@@ -84,7 +84,7 @@ LLM 经常默默选择一种解释然后执行。这个原则强制明确推理�
 Zviber 是 Windows 桌面悬浮面板（日历 + 待办），PyQt5，Python 3.8+，Win7 / Win10 / Win11 通用。
 平铺布局，一个模块一个职责：
 
-- `main.pyw` — 入口：单实例 IPC（`QLocalServer`）、系统托盘、节假日后台更新、（frozen 时）`--uninstall` 卸载向导入口
+- `main.pyw` — 入口：单实例 IPC（`QLocalServer`）、节假日后台更新、（frozen 时）`--uninstall` 卸载向导入口
 - `app.py` — 面板 UI（日历 / 待办 / 双栏 / 顶部栏滑出与拖动）、`SettingsDialog` 与节假日导入引导窗
 - `boxes.py` — 桌面格子：空白格子（文件移入数据目录）与文件夹映射格子、双击桌面显隐
 - `calendar_data.py` — 内置国务院节假日数据、农历换算、三源联网回退与离线导入
@@ -96,6 +96,7 @@ Zviber 是 Windows 桌面悬浮面板（日历 + 待办），PyQt5，Python 3.8+
 - `setup.pyw` — 安装包入口：build.py 把它打成 onefile exe，内嵌 onedir 本体为 payload，双击弹安装向导
 - `build.py` / `build.cmd` — 生成图标与 DPI 清单，两段式 PyInstaller：main.pyw 打 onedir 本体（`dist\build\app\`），setup.pyw 内嵌本体打成单个安装包 `dist\ZviberPanel-Setup-v<版本>-<架构>.exe`（架构标识跟随打包用的 Python：x64 / x86 / arm64）
 - `run.cmd` — 双击启动面板；已在运行则切换显隐
+- `stop.cmd` — 双击停止面板：先 `--quit` 经 IPC 礼貌退出（正常清理菜单注入），残留进程强制结束
 - `designs/` — 两套主题的设计稿（HTML，浏览器可直接打开）
 
 运行时数据在 `%APPDATA%\ZviberPanel\`（`config.json` / `todos.json` / `holidays.json` / `icons/`）——不要提交。
@@ -117,7 +118,7 @@ set ZVIBER_SHOT=designs\verify && python main.pyw   :: 截图自检
 截图目录与设计稿渲染图已 gitignore，不要提交。
 
 - 另有 `ZVIBER_GRABSCREEN=<路径>`：抓取真实屏幕上面板所在区域（含系统合成效果）后退出。
-- `run.cmd` / `build.cmd` 是给最终用户双击的入口，**以 GBK 保存并自带 `chcp 936`，同时保持
+- `run.cmd` / `build.cmd` / `stop.cmd` 是给最终用户双击的入口，**以 GBK 保存并自带 `chcp 936`，同时保持
   CRLF 行尾**，改完绝不能另存为 UTF-8，否则双击后中文提示乱码。
 - `build.py` 除生成图标外还写 DPI 感知清单（`--manifest`）交给 PyInstaller：**PyInstaller 默认
   打的 exe 没有 DPI 感知声明**，进程被系统按 unaware 虚拟化，`ui_scale()` 读到 96 DPI，界面就
@@ -138,14 +139,13 @@ set ZVIBER_SHOT=designs\verify && python main.pyw   :: 截图自检
 `main()` 的顺序是有意的，改动前先读懂：设置 excepthook → `installer.maybe_install()`
 （仅 frozen exe 生效，只处理 `--uninstall` 卸载向导，返回 True 直接退出）→ 单实例 IPC 探测
 （`QLocalSocket` 连 `sysutil.IPC_KEY`，已运行则发 `toggle` 后退出）→ 建面板 → 起 `QLocalServer`
-接收 `toggle` / `quit` → 托盘。
+接收 `toggle` / `quit` → `context_menu_set_running(True)` 注入桌面右键级联菜单。
 
-- 单实例靠 `QLocalServer` 名称 `zviber-panel-v1`；`quit` 消息供卸载程序请求退出。
-- 托盘/桌面右键菜单都用 `--toggle` 让已运行实例显隐，不新起进程。
+- 单实例靠 `QLocalServer` 名称 `zviber-panel-v1`；消息由 `_on_ipc` 按 `actions` 字典分发，`quit` 消息供卸载程序请求退出。
+- 桌面右键是**级联菜单**：父项「zviber桌面格子」用 `MUIVerb` + `ExtendedSubCommandsKey` 自引用（子项放父项 `shell\` 子键下，子键名字母序即菜单顺序，故带 A_/B_… 前缀）。两个实测坑：① 别用 `SubCommands` 方案——它只按 **HKLM** 的 `Explorer\CommandStore` 解析，HKCU 的不认，免管理员安装没法用；② 父项绝不能有 `command` 子键，否则退化成直链不展开。7 个二级项：显示/隐藏、新建格子、新建文件夹格子、显示/隐藏格子、设置、关于、退出，各走 `--toggle`/`--new-box`/`--new-folder-box`/`--toggle-boxes`/`--settings`/`--about`/`--quit` 命令行参数，经 IPC（`IPC_ACTIONS`）转发给运行中的实例，不新起进程。**菜单形态跟随运行状态**：`context_menu_set_running()` 在面板启停时改写——运行中 = 级联七项，未运行 = 直链单项「单击启动」（安装时写入的就是直链形态）；HKLM 安装无权改写，运行时往 HKCU 写覆盖层、退出删掉回落；源码运行（无安装记录）启动时注入级联菜单、退出时整体删除（崩溃残留由下次启动时 `sync_context_menu` 清掉）。
 - `installer.setup_main()`（setup exe 入口）里 `ZVIBER_AUTO_INSTALL` 是静默安装测试钩子。
-- 设置窗口是**非模态**的（托盘「设置」或标题栏 ⚙），已开着就 `raise_()`，不会叠第二个；
-  托盘菜单只有「显示 / 隐藏、设置、卸载 Zviber（仅已安装时）、退出」——主题 / 双栏 / 时间 / 节假日
-  全部挪进了设置窗口，别再往托盘里加。
+- **没有系统托盘图标**（已移除）：显隐/新建格子/设置/关于/退出等入口全在桌面右键级联菜单，
+  别再往回加托盘。设置窗口是**非模态**的（桌面右键「设置」或标题栏 ⚙），已开着就 `raise_()`，不会叠第二个。
 
 ### 崩溃诊断与日志
 
@@ -175,6 +175,9 @@ ClearType，文字发灰），圆角靠 Win11 DWM，Win7/10 降级为圆角遮�
 也不用 `QGraphicsDropShadowEffect`（Qt5 下破坏顶层窗合成），所以 `SHADOW = 0`、无阴影留白。
 （`FloatingPanel.__init__` 里那句「阴影改为 paintEvent 手绘」是旧注释，类中已无 `paintEvent`。）
 
+- **`QStackedLayout` 必须先挂父控件再 `addWidget`**：第一个页面会立刻成为当前页被 `show()`，
+  无父状态下闪出一个默认大小的顶层白框（2026-10 启动/建格子白闪的根因，`app.py` 的 `content`
+  与 `boxes.py` 的 `pages` 两处同坑，都是先 `addLayout` 进父控件再添加页面）。
 - 单栏用 `_SlideStack`（横向滑动切页动画，接口兼容 QStackedWidget 子集），
   双栏用 `QHBoxLayout`，两者由 `self.content`（QStackedLayout）切换。
 - 尺寸常量 `SINGLE_W / DUAL_W / PANEL_H`；`cfg` 键：`theme` / `dual` / `tab` / `pos` /
@@ -267,7 +270,7 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
 **绝不跨线程动 store**；抓取期间界面不卡（三源 × 两年 × 10 秒超时最坏能到一分钟）。是否该更新看
 `_auto_update_due()`：上次**尝试**时间（`cfg['holiday_ts']`，记尝试而不是成功，失败才不会反复重试）
 不是今天就更新（每天第一次开程序），或距上次满 48 小时（程序长期不关）；手动「联网更新」与导入窗的
-「下载并导入」走同一条通道，只有手动路径才弹托盘气泡。
+「下载并导入」走同一条通道，手动路径的结果写进调试日志（`_dbg`）。
 
 日历格子右上角的「休」/「班」角标：只标法定节假日（`kind == 'off'`）与调休上班日（`kind == 'work'`），
 **普通双休日不标**（双休只靠日期数字的弱化配色区分）。角标是 `DayCell.badge` 这个 QLabel，文字与配色
@@ -282,7 +285,7 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
   `Uninstall\ZviberPanel`（应用列表卸载项）。
 - **桌面右键菜单只属于 exe 安装**：只有 `installer.install()` 会写菜单，`install.py` 只写开机自启。
   每次启动 `installer.sync_context_menu()` 按 `Uninstall\ZviberPanel` 的 `InstallLocation` 判定——
-  没有任何安装记录就清掉菜单残留（旧版 install.py 的源码安装、向导取消、半卸载）。
+  没有任何安装记录就清掉菜单残留（旧版 install.py 的源码安装、向导取消、半卸载）。**调用时机必须在 IPC 转发之后**——源码模式没有安装记录，转发进程（`--new-box` 等）若先跑这步会把运行中面板刚注入的级联菜单当残留删掉（真实 bug）。`context_menu_remove` 要自底向上清三层子键（winreg 不能删带子键的键），含旧版直链菜单的 `command` 残留。
 - `sysutil.launcher_cmd()` 区分 frozen（直接启自身）与源码（优先 `pythonw.exe` 实现无窗口静默）。
 - `installer.py` 的向导**只在 frozen 时生效**；源码运行走 `install.py`。
 - 安装 = 把安装包内嵌的 payload（onefile 运行时解压到 `_MEIPASS\payload` 的 onedir 本体：exe + `_internal\`）**整体复制**到目标位置，按字节回报进度；目标目录已有旧安装（含 `ZviberPanel.exe`）时先整体清空再复制——`_check_dir` 只放行空目录/新目录/含 `ZviberPanel.exe` 的旧安装目录，别放宽这个签名判断，否则覆盖重装与卸载会误删用户文件。
@@ -292,7 +295,7 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
 
 桌面文件归类格子：`BoxManager` 总管（恢复/新建/解散/显隐），`BoxWindow` 单格，
 `BoxStore` 存 `%APPDATA%\ZviberPanel\boxes.json`（`visible` + 格子记录列表）。
-托盘菜单有「新建格子 / 新建文件夹格子 / 显示隐藏格子」；截图自检模式不创建格子。
+格子管理入口在桌面右键级联菜单（新建格子 / 新建文件夹格子 / 显示隐藏格子）；截图自检模式不创建格子。
 
 - **层级策略（踩坑三轮后的终态）：挂桌面带（`pin_to_desktop`，免疫 Win+D）
   + 永不主动沉底 + 被桌面整理表层压住时由 WinEvent 钩子/看门狗抬回。**
@@ -313,7 +316,8 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
   （eventFilter 里按下即开，双击/松开都吃掉防连带拖动与收起）；空白格子是背地里的
   存储目录，图标不可点。
 - **视觉固定深色磨砂**，不挂主题系统。`WA_TranslucentBackground` 的 ClearType 问题这里接受
-  （参考软件本身就是半透明）。
+  （参考软件本身就是半透明）。**半透明窗口 show 的首帧会闪一帧白屏**（paint 未跑先合成），
+  `_spawn` 里先 `setWindowOpacity(0)` 隐身、120ms 后再现身（同时盖住挂带 SetParent 的隐藏-重现）。
 - **双击桌面空白显隐**（`BoxManager.toggle_all`）：桌面图标 + 全部格子 + 面板一起显隐，
   图标显隐 = ShowWindow 桌面的 `SysListView32`（`find_desktop_listview` 定位，Progman
   找不到再扫 WorkerW）。`DesktopClickHook` 独立线程装 `WH_MOUSE_LL`（LL 钩子收不到
@@ -355,7 +359,7 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
 
 ## Testing Guidelines
 
-没有单元测试框架。验证 = `ZVIBER_SHOT` 截图自检 + 手动检查托盘菜单、右键菜单开关、开机自启。
+没有单元测试框架。验证 = `ZVIBER_SHOT` 截图自检 + 手动检查桌面右键菜单形态切换（运行中级联 / 未运行直链）、开机自启。
 改布局代码时要在 125% / 150% 缩放下确认。
 
 ## Commit & Pull Request Guidelines

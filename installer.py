@@ -11,7 +11,7 @@ import subprocess
 import sys
 import time
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import (QApplication, QDialog, QWidget, QVBoxLayout, QHBoxLayout, QStyle,
                              QLabel, QFrame, QToolButton, QCheckBox, QRadioButton,
                              QPushButton, QLineEdit, QProgressBar, QFileDialog,
@@ -37,7 +37,7 @@ QProgressBar {
 QProgressBar::chunk { background: #e8a33d; border-radius: 5px; }
 QLabel#pctText { color: #e8a33d; font: 700 30px "%NUM%"; }
 QLabel#finishMark { color: #e8a33d; font: 600 40px "%CN%"; }
-QLabel#warnLabel { color: #b8924a; font: 11px "%CN%"; }
+
 QPushButton#dangerBtn {
     background: #d64545; border: none; border-radius: 10px;
     color: #fff; font: 600 13px "%CN%"; padding: 7px 18px;
@@ -288,12 +288,14 @@ def maybe_install():
 def setup_main():
     """安装包入口（setup.pyw 打成的 onefile exe）：安装向导 / 提权安装实例。返回进程退出码。"""
     if '--install-elevated' in sys.argv:
-        # 提权后的安装实例：直接执行安装并展示进度/完成页
+        # 提权后的安装实例：必须先 show 再装——否则安装跑完才弹窗，进度页整段被跳过
         path = sys.argv[sys.argv.index('--install-elevated') + 1]
         wiz = InstallWizard()
-        wiz.start_install(path, all_users=True,
-                          shortcut='--no-shortcut' not in sys.argv,
-                          autostart='--no-autostart' not in sys.argv)
+        wiz.show()
+        QTimer.singleShot(0, lambda: wiz.start_install(
+            path, all_users=True,
+            shortcut='--no-shortcut' not in sys.argv,
+            autostart='--no-autostart' not in sys.argv))
         wiz.exec_()
         return 0
     if os.environ.get('ZVIBER_AUTO_INSTALL'):
@@ -440,15 +442,10 @@ class _WizardBase(QDialog):
         self._finish_title = QLabel(title)
         self._finish_title.setObjectName('setTitle')
         self._finish_title.setAlignment(Qt.AlignCenter)
-        self._finish_sub = QLabel()
-        self._finish_sub.setObjectName('setLabel')
-        self._finish_sub.setAlignment(Qt.AlignCenter)
-        self._finish_sub.setWordWrap(True)
         lay.addStretch(1)
         lay.addWidget(mark)
         lay.addSpacing(_sc(2))
         lay.addWidget(self._finish_title)
-        lay.addWidget(self._finish_sub)
         lay.addSpacing(_sc(8))
         if checkbox is not None:
             lay.addWidget(checkbox, 0, Qt.AlignCenter)
@@ -675,13 +672,8 @@ class UninstallWizard(_WizardBase):
         desc.setWordWrap(True)
         lay.addWidget(desc)
         lay.addSpacing(_sc(8))
-        self._del_data = QCheckBox('同时删除个人数据')
+        self._del_data = QCheckBox('同时删除个人数据（待办事项、格子与全部配置）')
         lay.addWidget(self._del_data)
-        hint = QLabel('勾选后将删除 %%APPDATA%%\\ZviberPanel 下的待办事项、桌面格子与全部配置，'
-                      '此操作不可恢复；不勾选则保留，重装后自动恢复。')
-        hint.setObjectName('warnLabel')
-        hint.setWordWrap(True)
-        lay.addWidget(hint)
         lay.addStretch(1)
         btns = QHBoxLayout()
         btns.setSpacing(_sc(8))
@@ -712,6 +704,4 @@ class UninstallWizard(_WizardBase):
             QMessageBox.critical(self, '卸载失败', str(e))
             self._stack.setCurrentIndex(0)
             return
-        self._finish_sub.setText('个人数据已一并删除。' if self._del_data.isChecked()
-                                 else '待办与配置已保留，重装后可继续使用。')
         self._stack.setCurrentIndex(2)

@@ -54,9 +54,9 @@ def pick_fonts():
 
 
 def make_icon(sizes=(16, 24, 32, 48, 64)):
-    """托盘/菜单图标：深靛底 + 白色横杠 + 琥珀斜杠的极简 Z"""
+    """菜单/窗口图标：深靛底 + 白色横杠 + 琥珀斜杠的极简 Z"""
     icon = QIcon()
-    for s in sizes:       # 逐尺寸矢量绘制，托盘小尺寸不糊
+    for s in sizes:       # 逐尺寸矢量绘制，小尺寸不糊
         pm = QPixmap(s, s)
         pm.fill(Qt.transparent)
         p = QPainter(pm)
@@ -1612,7 +1612,7 @@ class HolidayImportDialog(QDialog):
         self.move(g.topLeft())
 
     def _download(self, on_download, name, edit, btn):
-        """点「下载并导入」：按钮 loading + 禁用，后台抓取结束后恢复（结果看托盘气泡）。"""
+        """点「下载并导入」：按钮 loading + 禁用，后台抓取结束后恢复（结果写调试日志）。"""
         url = edit.text().strip()
         if not url:
             self.status.setText('URL 不能为空')
@@ -1620,7 +1620,7 @@ class HolidayImportDialog(QDialog):
         btn.setEnabled(False)
         btn.setText('下载中…')
         if on_download(name, url, lambda: self._download_done(btn)):
-            self.status.setText('正在下载 %s… 结果看右下角托盘气泡' % name)
+            self.status.setText('正在下载 %s…' % name)
         else:
             self.status.setText('上一次下载还没结束，本次随它一起完成')
 
@@ -1658,7 +1658,7 @@ class HolidayImportDialog(QDialog):
 
 class SettingsDialog(QDialog):
     """齿轮按钮弹出的无边框设置窗口，样式跟随当前主题（themes.py #settingsPanel 区段）。
-    on_fetch/on_import 为节假日数据回调（由入口提供，以便复用托盘通知）。
+    on_fetch/on_import 为节假日数据回调（由入口提供）。
     改动即时生效并写入 config.json。"""
     def __init__(self, panel, on_fetch, on_import, boxmgr=None):
         super(SettingsDialog, self).__init__(panel)
@@ -1869,7 +1869,7 @@ class SettingsDialog(QDialog):
         self.move(g.topLeft())
 
     def _fetch_clicked(self):
-        """联网更新：点击即 loading + 禁用，后台抓取结束后恢复（无论成败，结果看托盘气泡）。"""
+        """联网更新：点击即 loading + 禁用，后台抓取结束后恢复（无论成败，结果写调试日志）。"""
         self.btn_fetch.setEnabled(False)
         self.btn_fetch.setText('更新中…')
         self._on_fetch(self._fetch_done)
@@ -1945,7 +1945,7 @@ class SettingsDialog(QDialog):
 
 
 class AboutDialog(QDialog):
-    """托盘菜单「关于」弹窗：图标 + 简介 + 版本号 + GitHub 链接，样式跟随当前主题。
+    """「关于」弹窗：图标 + 简介 + 版本号 + GitHub 链接，样式跟随当前主题。
     版本号与开源地址取自 version.py（发新版只改那个文件）。"""
 
     def __init__(self, panel):
@@ -2237,7 +2237,7 @@ class FloatingPanel(QWidget):
         self.btn_close.setObjectName('closeBtn')
         self.btn_close.setText('✕')
         self.btn_close.setFixedSize(sc(30), sc(26))
-        self.btn_close.setToolTip('关闭（托盘可重新打开）')
+        self.btn_close.setToolTip('关闭（桌面右键菜单可重新打开）')
         self.btn_close.clicked.connect(self.close_panel)
         tb.addWidget(self.btn_settings)
         tb.addWidget(self.btn_close)
@@ -2266,9 +2266,9 @@ class FloatingPanel(QWidget):
         self.dual_box.setSpacing(0)
 
         self.content = QStackedLayout()
-        self.content.addWidget(self.single_page)
-        self.content.addWidget(self.dual_page)
-        pl.addLayout(self.content, 1)
+        pl.addLayout(self.content, 1)          # 先装进父控件再加页面：否则第一个页面成为当前页，
+        self.content.addWidget(self.single_page)   # 会被 QStackedLayout 立刻 show()，无父状态下
+        self.content.addWidget(self.dual_page)     # 闪出一个默认大小的白框（启动白闪的根因）
 
         self._today = date.today()
         self._midnight = QTimer(self)

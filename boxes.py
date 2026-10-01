@@ -29,7 +29,7 @@ from PyQt5.QtGui import QIcon, QCursor, QPainter, QColor, QPen, QFont
 from PyQt5.QtWidgets import (QWidget, QDialog, QListWidget, QListWidgetItem, QVBoxLayout,
                              QHBoxLayout, QGridLayout, QLabel, QToolButton,
                              QPushButton, QStackedLayout, QMenu, QActionGroup,
-                             QInputDialog, QMessageBox, QFileDialog, QLineEdit,
+                             QMessageBox, QFileDialog, QLineEdit,
                              QAbstractItemView, QApplication, QStyle)
 
 import app as ui   # sc / _PROG_FAMILY / _class_name / _is_desktop_surface
@@ -452,7 +452,8 @@ class BoxWindow(QWidget):
 
         # 内容：文件列表页 / 路径失效页
         self.pages = QStackedLayout()
-        page_list = QWidget()
+        root.addLayout(self.pages, 1)  # 先装进父控件再加页面：否则第一页成为当前页，
+        page_list = QWidget()          # 会被 QStackedLayout 立刻 show()，无父状态下闪出白框
         gl = QGridLayout(page_list)
         gl.setContentsMargins(ui.sc(4), 0, ui.sc(4), ui.sc(4))
         self.list = BoxList(self)
@@ -482,7 +483,6 @@ class BoxWindow(QWidget):
         il.addWidget(btn, 0, Qt.AlignCenter)
         il.addStretch(1)
         self.pages.addWidget(page_invalid)
-        root.addLayout(self.pages, 1)
 
         # 子控件默认继承顶层窗口的光标：边缘悬停设了双箭头后划入子控件不会复位。
         # 全部子控件开鼠标跟踪并装过滤器，MouseMove 时按窗口坐标同步光标；
@@ -635,15 +635,6 @@ class BoxWindow(QWidget):
         if save:
             self.mgr.save_rec(self)
 
-    def rename(self):
-        name, ok = QInputDialog.getText(self, '重命名格子', '格子名称：',
-                                        text=self.rec['name'])
-        name = name.strip()
-        if ok and name and name != self.rec['name']:
-            self.rec['name'] = name
-            self.name.setText(name)
-            self.mgr.save_rec(self)
-
     def _start_rename(self):
         """双击名称 → 原地变输入框重命名（回车/失焦确认，Esc 取消）。"""
         if self.edit.isVisible():
@@ -694,9 +685,6 @@ class BoxWindow(QWidget):
 
     def _show_menu(self):
         menu = QMenu(self)
-        menu.addAction('重命名格子', self.rename)
-        menu.addAction('解散格子', self.dissolve)
-        menu.addSeparator()
         grp = QActionGroup(menu)
         for key, label in SORT_CHOICES:
             act = menu.addAction(label)
@@ -704,6 +692,8 @@ class BoxWindow(QWidget):
             act.setChecked(self.rec.get('sort', 'name') == key)
             grp.addAction(act)
             act.triggered.connect(lambda _c=False, k=key: self._set_sort(k))
+        menu.addSeparator()
+        menu.addAction('解散格子', self.dissolve)
         menu.exec_(QCursor.pos())
 
     def _set_sort(self, key):
@@ -1357,7 +1347,11 @@ class BoxManager(object):
         win = BoxWindow(self, rec)
         win.move(rec['x'], rec['y'])
         self.windows.append(win)
+        # 半透明窗口 show 的首帧会先合成一帧白屏（paint 还没跑）：先隐身，
+        # 等首绘与挂带（SetParent 触发隐藏-重现）都落定后再现身
+        win.setWindowOpacity(0.0)
         win.show()
+        QTimer.singleShot(120, lambda w=win: w.setWindowOpacity(1.0))
         if not self.store.data.get('visible', True):
             win.hide()
         self._refresh_own_hwnds()

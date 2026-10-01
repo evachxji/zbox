@@ -8,10 +8,23 @@ import winreg
 from version import APP_VERSION
 
 APP_NAME = 'ZviberPanel'
-MENU_TITLE = 'zviber桌面日历'
+MENU_TITLE = 'zviber桌面格子'
+
+# 桌面右键二级菜单项（与托盘右键完全一致）：(注册表子键名, 显示文字, exe 命令行参数)
+# 子键名的字母序就是菜单顺序：前缀字母用来对齐托盘顺序
+MENU_ITEMS = [
+    ('A_Toggle', '显示 / 隐藏', '--toggle'),
+    ('B_NewBox', '新建格子', '--new-box'),
+    ('C_NewFolderBox', '新建文件夹格子', '--new-folder-box'),
+    ('D_ToggleBoxes', '显示 / 隐藏格子', '--toggle-boxes'),
+    ('E_Settings', '设置', '--settings'),
+    ('F_About', '关于', '--about'),
+    ('G_Quit', '退出', '--quit'),
+]
 IPC_KEY = 'zviber-panel-v1'
 RUN_KEY = r'Software\Microsoft\Windows\CurrentVersion\Run'
 SHELL_KEY = r'Software\Classes\Directory\Background\shell\ZviberPanel'
+COMMANDSTORE_KEY = r'Software\Microsoft\Windows\CurrentVersion\Explorer\CommandStore\shell'  # 只为清理旧版残留
 UNINSTALL_KEY = r'Software\Microsoft\Windows\CurrentVersion\Uninstall\ZviberPanel'
 PERSONALIZE_KEY = r'Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
 
@@ -33,8 +46,9 @@ def download_dir():
     return os.path.join(appdata_dir(), 'downloads')
 
 
-def launcher_cmd(toggle=False, exe=None):
-    """冻结为 exe 时直接启动自身（exe 参数可指定安装后路径）；源码运行优先用 pythonw.exe 实现无窗口静默。"""
+def launcher_cmd(arg=None, exe=None):
+    """冻结为 exe 时直接启动自身（exe 参数可指定安装后路径）；源码运行优先用 pythonw.exe 实现无窗口静默。
+    arg 为命令行参数（如 --toggle），经 IPC 转发给运行中的实例。"""
     if getattr(sys, 'frozen', False):
         cmd = '"%s"' % (exe or sys.executable)
     else:
@@ -43,7 +57,7 @@ def launcher_cmd(toggle=False, exe=None):
             exe = sys.executable
         script = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'main.pyw'))
         cmd = '"%s" "%s"' % (exe, script)
-    return cmd + (' --toggle' if toggle else '')
+    return cmd + (' ' + arg if arg else '')
 
 
 def _get(root, path, name):
@@ -80,24 +94,97 @@ def autostart_remove():
             pass
 
 
-def context_menu_install(icon_path=None, exe=None, all_users=False):
-    with winreg.CreateKey(_root(all_users), SHELL_KEY) as k:
-        winreg.SetValueEx(k, None, 0, winreg.REG_SZ, MENU_TITLE)
-        if icon_path and os.path.exists(icon_path):
-            winreg.SetValueEx(k, 'Icon', 0, winreg.REG_SZ, icon_path)
-    with winreg.CreateKey(_root(all_users), SHELL_KEY + r'\command') as k:
-        winreg.SetValueEx(k, None, 0, winreg.REG_SZ, launcher_cmd(toggle=True, exe=exe))
+def _shell_tree_subs():
+    """SHELL_KEY 整棵子树的自底向上删除顺序（winreg 不能删带子键的键）。
+    含三代旧结构：直链 command、子项误放父项 shell\\ 的级联版、CommandStore 短命版。"""
+    names = [n for n, _t, _a in MENU_ITEMS]
+    subs = [SHELL_KEY + r'\shell\%s\command' % n for n in names]
+    subs += [SHELL_KEY + r'\shell\%s' % n for n in names]
+    subs += [SHELL_KEY + r'\shell', SHELL_KEY + r'\command', SHELL_KEY]
+    legacy = ['Toggle', 'NewBox', 'NewFolderBox', 'ToggleBoxes', 'Settings', 'About', 'Quit']
+    subs += [COMMANDSTORE_KEY + r'\ZviberPanel.%s\command' % n for n in legacy]
+    subs += [COMMANDSTORE_KEY + r'\ZviberPanel.%s' % n for n in legacy]
+    subs += [SHELL_KEY + r'\shell\%s\command' % n for n in legacy]
+    subs += [SHELL_KEY + r'\shell\%s' % n for n in legacy]
+    return subs
+
+
+def _delete_shell_tree(root):
+    for sub in _shell_tree_subs():
+        try:
+            winreg.DeleteKey(root, sub)
+        except OSError:
+            pass
 
 
 def context_menu_remove():
     """清除右键菜单（HKCU/HKLM 均尝试；HKLM 无管理员权限时静默跳过）。"""
     for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
-        for sub in (SHELL_KEY + r'\command', SHELL_KEY):
-            try:
-                winreg.DeleteKey(root, sub)
-            except OSError:
-                pass
+        _delete_shell_tree(root)
 
+
+def _menu_icon(exe, icon_path):
+    if icon_path and os.path.exists(icon_path):
+        return icon_path
+    if exe:
+        return exe
+    return sys.executable if getattr(sys, 'frozen', False) else None
+
+
+def _write_flat(root, exe, icon_path):
+    """未运行形态：直链菜单项「zviber桌面格子」，单击启动程序。"""
+    with winreg.CreateKey(root, SHELL_KEY) as k:
+        winreg.SetValueEx(k, 'MUIVerb', 0, winreg.REG_SZ, MENU_TITLE)
+        icon = _menu_icon(exe, icon_path)
+        if icon:
+            winreg.SetValueEx(k, 'Icon', 0, winreg.REG_SZ, icon)
+    with winreg.CreateKey(root, SHELL_KEY + r'\command') as k:
+        winreg.SetValueEx(k, None, 0, winreg.REG_SZ, launcher_cmd(exe=exe))
+
+
+def _write_cascade(root, exe, icon_path):
+    """运行中形态：级联菜单，二级项与托盘右键一致（ExtendedSubCommandsKey 自引用）。
+    两个实测坑（Win11 真机验证）：① 别用 SubCommands——它只按 HKLM 的 Explorer\\CommandStore
+    解析，HKCU 的不认，免管理员安装没法用；② 父项有 command 子键会退化成直链不展开。"""
+    with winreg.CreateKey(root, SHELL_KEY) as k:
+        winreg.SetValueEx(k, 'MUIVerb', 0, winreg.REG_SZ, MENU_TITLE)
+        winreg.SetValueEx(k, 'ExtendedSubCommandsKey', 0, winreg.REG_SZ,
+                          r'Directory\Background\shell\ZviberPanel')
+        icon = _menu_icon(exe, icon_path)
+        if icon:
+            winreg.SetValueEx(k, 'Icon', 0, winreg.REG_SZ, icon)
+    for name, text, arg in MENU_ITEMS:
+        sub = SHELL_KEY + r'\shell\%s' % name
+        with winreg.CreateKey(root, sub) as k:
+            winreg.SetValueEx(k, None, 0, winreg.REG_SZ, text)
+        with winreg.CreateKey(root, sub + r'\command') as k:
+            winreg.SetValueEx(k, None, 0, winreg.REG_SZ, launcher_cmd(arg=arg, exe=exe))
+
+
+def context_menu_install(icon_path=None, exe=None, all_users=False):
+    """安装时写入「未运行」形态：直链菜单项，单击启动程序。
+    运行中形态（级联七项）由 context_menu_set_running 在面板启停时切换。"""
+    root = _root(all_users)
+    _delete_shell_tree(root)
+    _write_flat(root, exe, icon_path)
+
+
+def context_menu_set_running(running, icon_path=None):
+    """面板启停时切换桌面右键菜单形态：运行中 = 级联七项（IPC 转发），未运行 = 直链单击启动。
+    icon_path 供源码运行传入运行时生成的 ico（frozen 不用传，直接用 exe 自带图标）。
+    - HKCU 安装：原地改写，退出切回直链；
+    - HKLM（此计算机）安装：无权改 HKLM，运行时往 HKCU 写覆盖层（HKCR 合并视图 HKCU 优先）、
+      退出删掉覆盖层回落 HKLM 直链；
+    - 源码运行（无安装记录）：启动时注入级联菜单、退出时整体删除，不留残留
+      （崩溃残留由下次启动时 installer.sync_context_menu() 清掉）。
+    进程崩溃会让菜单停在级联态——此时点二级项会新起实例并本地执行动作，可接受的降级。"""
+    hkcu_installed = uninstall_reg_get('InstallLocation', False)
+    _delete_shell_tree(winreg.HKEY_CURRENT_USER)
+    if running:
+        _write_cascade(winreg.HKEY_CURRENT_USER, None, icon_path)
+    elif hkcu_installed and not uninstall_reg_get('InstallLocation', True):
+        _write_flat(winreg.HKEY_CURRENT_USER, None, None)
+    # 其余情况（HKLM 安装 / 源码运行）：删干净即可，分别回落 HKLM 直链 / 无菜单
 
 def uninstall_reg_install(exe_path, all_users=False, size_kb=None):
     """写入「设置→应用→安装的应用」卸载项。size_kb 不给时按 exe 自身大小估算。"""

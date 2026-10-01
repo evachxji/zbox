@@ -1,7 +1,9 @@
 ﻿# -*- coding: utf-8 -*-
-"""Zviber 悬浮面板入口：单实例 + 系统托盘 + 节假日联网更新/离线导入。
+"""Zviber 悬浮面板入口：单实例 + 桌面右键菜单 + 节假日联网更新/离线导入。
 用法：pythonw main.pyw        启动并显示
       pythonw main.pyw --toggle   已运行则切换显隐（供桌面右键菜单调用）
+      pythonw main.pyw --new-box / --new-folder-box / --toggle-boxes / --settings / --about / --quit
+                                  桌面右键二级菜单项：已运行则 IPC 转发，未运行则启动后本地执行（--quit 除外）
 自检：设置环境变量 ZVIBER_SHOT=<目录> 启动，自动导出两主题截图后退出。
 """
 import faulthandler
@@ -13,9 +15,9 @@ from datetime import date, datetime, timedelta
 
 
 from PyQt5.QtCore import Qt, QTimer, QThread, QUrl, pyqtSignal, QCoreApplication
-from PyQt5.QtGui import QIcon, QCursor, QDesktopServices
+from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtNetwork import QLocalServer, QLocalSocket
-from PyQt5.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QFileDialog
+from PyQt5.QtWidgets import QApplication, QFileDialog
 
 import app as ui
 import boxes as bx
@@ -100,9 +102,9 @@ def _auto_update_due(cfg):
     return datetime.fromtimestamp(ts).date() != date.today() or time.time() - ts >= 48 * 3600
 
 
-def start_holiday_update(tray, hstore, cfg, panel, groups, manual=True, fallback_url=None,
+def start_holiday_update(hstore, cfg, panel, groups, manual=True, fallback_url=None,
                          on_finish=None, save_dir=None):
-    """后台联网更新。manual=False 完全静默（自动更新用）；manual=True 用托盘气泡报结果，
+    """后台联网更新。manual=False 完全静默（自动更新用）；manual=True 把结果写进调试日志，
     fallback_url 非空且全部失败时顺手用浏览器打开它兜底。
     on_finish 非空时在结束时（无论成败）回调一次，给按钮恢复用；已在跑则附到当前那次上。
     save_dir 非空时把抓到的原始 JSON 存到该目录（导入窗「下载并导入」用）。"""
@@ -128,25 +130,37 @@ def start_holiday_update(tray, hstore, cfg, panel, groups, manual=True, fallback
         if not manual:
             return
         if n:
-            tray.showMessage('节假日数据', '更新成功：%s 共 %d 条' % ('、'.join(res['hit']), n),
-                             QSystemTrayIcon.Information, 3000)
+            ui._dbg('节假日更新成功：%s 共 %d 条' % ('、'.join(res['hit']), n))
         else:
-            msg = '联网更新失败：\n%s' % res['err'][:220]
+            msg = '联网更新失败：%s' % res['err'][:220]
             if fallback_url:
                 QDesktopServices.openUrl(QUrl(fallback_url))
-                msg += '\n已用浏览器打开，可另存为文件后用「选择文件导入」'
-            tray.showMessage('节假日数据', msg, QSystemTrayIcon.Warning, 6000)
+                msg += '（已用浏览器打开，可另存为文件后用「选择文件导入」）'
+            ui._dbg(msg)
 
     w.done.connect(on_done)
     w.start()
     return True
 
 
-def notify_existing():
+# 命令行参数 → IPC 消息（桌面右键二级菜单的七个项）
+IPC_ACTIONS = {
+    '--toggle': b'toggle',
+    '--new-box': b'new-box',
+    '--new-folder-box': b'new-folder-box',
+    '--toggle-boxes': b'toggle-boxes',
+    '--settings': b'settings',
+    '--about': b'about',
+    '--quit': b'quit',
+}
+
+
+def notify_existing(msg=b'toggle'):
+    """已有实例在运行则把动作（msg）转发过去，返回 True。"""
     s = QLocalSocket()
     s.connectToServer(IPC_KEY)
     if s.waitForConnected(600):
-        s.write(b'toggle')
+        s.write(msg)
         s.flush()
         s.waitForBytesWritten(600)
         return True
@@ -184,12 +198,18 @@ def main():
     qapp = QApplication(sys.argv)
     qapp.setApplicationName('ZviberPanel')
 
-    installer.sync_context_menu()  # 右键菜单只属于已安装的程序，未安装时清掉残留
     if installer.maybe_install():
         return 0  # --uninstall 卸载向导结束后退出（安装包是独立的 setup exe）
 
-    if notify_existing():
-        return 0  # 已有实例在运行，转发 toggle 后退出
+    cli_arg = next((a for a in sys.argv[1:] if a in IPC_ACTIONS), None)
+    if notify_existing(IPC_ACTIONS.get(cli_arg, b'toggle')):
+        return 0  # 已有实例在运行，转发动作后退出
+    if cli_arg == '--quit':
+        return 0  # 没有运行中的实例可退出
+
+    # 清旧安装的菜单残留。必须在 IPC 转发之后：源码模式没有安装记录，
+    # 转发进程跑这里会把运行中面板刚注入的级联菜单当残留删掉（真实 bug）
+    installer.sync_context_menu()
 
     data_dir = sysutil.appdata_dir()
     cfg = ui.Config(os.path.join(data_dir, 'config.json'))
@@ -200,55 +220,37 @@ def main():
     boxmgr = None
     if not os.environ.get('ZVIBER_SHOT') and not os.environ.get('ZVIBER_GRABSCREEN'):
         boxmgr = bx.BoxManager(data_dir, panel)
+        icon = None  # 源码运行的右键菜单图标；frozen 用 exe 自带图标，不用生成
+        if not getattr(sys, 'frozen', False):
+            icon = os.path.join(data_dir, 'icon.ico')
+            if not os.path.exists(icon):
+                ui.make_icon().pixmap(64, 64).save(icon, 'ICO')
+        sysutil.context_menu_set_running(True, icon_path=icon)  # 桌面右键切级联形态
 
-    # IPC 服务：接收 --toggle
+    # IPC 服务：桌面右键二级菜单 / 重复启动时把动作转发进来（actions 定义后才挂连接）
     server = QLocalServer(qapp)
     QLocalServer.removeServer(IPC_KEY)
     server.listen(IPC_KEY)
-    server.newConnection.connect(lambda: _on_ipc(server, panel))
 
-    # 托盘
-    tray = QSystemTrayIcon(ui.make_icon(), parent=qapp)
-    tray.setToolTip('Zviber 悬浮面板')
+    # 无系统托盘图标：显隐/设置/退出等入口全在桌面右键菜单（运行中注入级联菜单）
     def _quit_cleanup():
-        tray.hide()
         server.close()
         if boxmgr:
             boxmgr.shutdown()
+            sysutil.context_menu_set_running(False)  # 桌面右键切回直链「单击启动」
     qapp.aboutToQuit.connect(_quit_cleanup)
-
-    def on_tray(reason):
-        if reason == QSystemTrayIcon.Trigger:
-            panel.toggle_visible()
-        elif reason == QSystemTrayIcon.Context:
-            menu = QMenu()
-            menu.addAction('显示 / 隐藏', panel.toggle_visible)
-            if boxmgr:
-                menu.addSeparator()
-                menu.addAction('新建格子', boxmgr.new_blank)
-                menu.addAction('新建文件夹格子', lambda: boxmgr.new_folder())
-                menu.addAction('显示 / 隐藏格子', boxmgr.toggle_visible)
-                menu.addSeparator()
-            menu.addAction('设置', open_settings)
-            menu.addAction('关于', lambda: ui.AboutDialog(panel).exec_())
-            menu.addSeparator()
-            menu.addAction('退出', qapp.quit)
-            menu.exec_(QCursor.pos())
-
-    tray.activated.connect(on_tray)
-    tray.show()
 
     # 节假日数据：设置窗「联网更新」与导入窗里各源的「下载并导入」都走同一条后台通道
     def fetch_holidays(on_finish=None):
-        return start_holiday_update(tray, hstore, cfg, panel, _holiday_groups(), on_finish=on_finish)
+        return start_holiday_update(hstore, cfg, panel, _holiday_groups(), on_finish=on_finish)
 
     def download_source(name, url, on_finish=None):
-        return start_holiday_update(tray, hstore, cfg, panel, [[(name, url)]], fallback_url=url,
+        return start_holiday_update(hstore, cfg, panel, [[(name, url)]], fallback_url=url,
                                     on_finish=on_finish, save_dir=sysutil.download_dir())
 
     def auto_update():
         if _auto_update_due(cfg):
-            start_holiday_update(tray, hstore, cfg, panel, _holiday_groups(), manual=False)
+            start_holiday_update(hstore, cfg, panel, _holiday_groups(), manual=False)
 
     auto_timer = QTimer(qapp)
     auto_timer.timeout.connect(auto_update)
@@ -262,12 +264,26 @@ def main():
             settings_dlg[0].activateWindow()
             return
         dlg = ui.SettingsDialog(panel, fetch_holidays,
-                                lambda: _import_holidays(tray, hstore, panel, download_source),
+                                lambda: _import_holidays(hstore, panel, download_source),
                                 boxmgr)
         settings_dlg[:] = [dlg]
         dlg.show()
 
     panel.settingsRequested.connect(open_settings)
+
+    # 桌面右键二级菜单的动作分发表
+    actions = {b'toggle': panel.toggle_visible, b'quit': qapp.quit,
+               b'settings': open_settings,
+               b'about': lambda: ui.AboutDialog(panel).exec_()}
+    if boxmgr:
+        actions[b'new-box'] = boxmgr.new_blank
+        actions[b'new-folder-box'] = lambda: boxmgr.new_folder()
+        actions[b'toggle-boxes'] = boxmgr.toggle_visible
+    server.newConnection.connect(lambda: _on_ipc(server, actions))
+    if cli_arg and cli_arg != '--toggle':
+        fn = actions.get(IPC_ACTIONS[cli_arg])
+        if fn:  # 无运行实例时本地执行（截图自检没有格子，--new-box 等静默跳过）
+            QTimer.singleShot(0, fn)
 
     if os.environ.get('ZVIBER_GRABSCREEN'):
         panel.place_initial()
@@ -298,23 +314,22 @@ def _grab_screen(panel, qapp):
     pm.save(os.environ.get('ZVIBER_GRABSCREEN'))
     qapp.quit()
 
-def _on_ipc(server, panel):
+def _on_ipc(server, actions):
     sock = server.nextPendingConnection()
     data = b''
     if sock:
         sock.waitForReadyRead(300)
         data = bytes(sock.readAll())
         sock.deleteLater()
-    if data == b'quit':
-        QApplication.instance().quit()  # 卸载程序请求退出
-    else:
-        panel.toggle_visible()
+    fn = actions.get(data)
+    if fn:
+        fn()
 
 
 _import_dlg = []  # 引导窗口是非模态的，要留住引用
 
 
-def _import_holidays(tray, hstore, panel, on_download):
+def _import_holidays(hstore, panel, on_download):
     """先弹引导窗口（三个数据源各一行 URL，可点「下载并导入」），
     也可以自己另存文件后走「选择文件导入」。"""
     def pick():
@@ -325,9 +340,9 @@ def _import_holidays(tray, hstore, panel, on_download):
         try:
             n = hstore.import_file(path)
             panel.refresh_holidays()
-            tray.showMessage('节假日数据', '导入成功，共 %d 条' % n, QSystemTrayIcon.Information, 3000)
+            ui._dbg('节假日导入成功，共 %d 条' % n)
         except Exception as e:
-            tray.showMessage('节假日数据', '导入失败：%s' % e, QSystemTrayIcon.Warning, 4000)
+            ui._dbg('节假日导入失败：%s' % e)
 
     _import_dlg[:] = [ui.HolidayImportDialog(panel, on_download, pick)]
     _import_dlg[0].show()
