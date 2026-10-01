@@ -132,7 +132,7 @@ SORT_CHOICES = [('name', '按名称'), ('type', '按类型'), ('mtime', '按修�
 
 TITLE_H = 30        # 标题栏高（设计像素，运行时过 sc()）
 EDGE = 10           # 边缘缩放命中宽度
-MIN_W, MIN_H = 200, 120
+MIN_W, MIN_H = 200 / 3, 120
 DEF_W, DEF_H = 300, 420
 
 
