@@ -467,6 +467,20 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
   会平白收起格子。`app.py` 的 `TodoList.mouseDoubleClickEvent` 还没设防（右键双击待办会打开其
   编辑器），要动就一起加。排查这类"点了就打开"的问题，先看有多少条 `itemDoubleClicked`/
   `doubleClicked`/`mouseDoubleClickEvent` 的连接，别一上来就往菜单/钩子方向查。
+- **点掉外壳菜单的那一下会穿透成一次真左键**（2026-10 定案）：菜单是宿主进程弹的，实测
+  （`%TEMP%\repro_leftopen2.py` 的 C1/C2：右键第 5 行弹出菜单后，左键点**没被菜单盖住的**
+  第 1 行）格子列表照样收到完整的 `press(L)/release(L)/itemClicked` ——穿透的那一下就是一次
+  货真价实的左键按下。于是「右键 A 弹菜单 → 左键 B」= 第一下点掉菜单（穿到 B 上）+ 第二下
+  B = 一次**合法的左键双击** ⇒ `itemDoubleClicked` ⇒ **B 被打开**（用户实测「右键 A 后左键 B
+  就打开 B，基本上必现」；那次面板日志里从头到尾没有 `ctxmenu` 事件，正因为它压根不经过菜单）。
+  守卫：`_menu_open_or_just_closed()`（`_HostDaemon.callbacks` 非空 = 菜单还开着；`closed_at`
+  是应答回来的时刻，另留 0.25s grace 盖住「应答信号 vs 鼠标消息」的先后竞争）→
+  `BoxList.mousePressEvent` 在这个窗口里落下的按下记 `_menu_press_ts`，
+  `mouseDoubleClickEvent` 对 0.6s 内的双击**不打开**（日志 `★ 菜单关闭后 …s 内的双击，不打开`）。
+  代价：点掉菜单后 0.6s 内想双击打开，得再点一次（菜单已关，重试必成）；换来的是一条硬保证
+  ——「关菜单的那一下永远不算双击」。回归工具 `%TEMP%\verify_guard.py`：V2 阳性对照（无菜单的
+  普通双击）必须 `★OPEN`，V1（复现路径）必须被守卫拦住。
+  排查「谁把它打开了」先看 `open_path` 那行日志 `open: <文件名> ← <文件:行号>`（唯一出口）。
 - **轮询线程里绝不调任何 Qt 方法（2026-09 真实死锁）**：`DesktopClickHook` 的轮询跑在独立线程，
   旧版 `own_hwnds()` 在其中调 `QWidget::winId()`——winId 会现场创建原生窗口，
   `flushWindowSystemEvents → QWaitCondition` 阻塞等主线程刷窗口事件，而工作线程持有 GIL、

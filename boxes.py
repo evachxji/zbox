@@ -245,6 +245,15 @@ class BoxList(QListWidget):
         self.setDefaultDropAction(Qt.MoveAction)
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.itemDoubleClicked.connect(lambda it: self.box.open_path(it.data(Qt.UserRole)))
+        self._menu_press_ts = 0.0   # 最近一次「点掉外壳菜单」的那按下（见 mouseDoubleClickEvent）
+
+    def mousePressEvent(self, e):
+        # 菜单正开着（或刚被点关掉）时落下的这一按，就是「点掉那个菜单」的那一下——
+        # 菜单由宿主进程弹出，点它会**穿透**到下面的格子窗口上（实测：菜单弹在第一行，
+        # 左键点没被菜单盖住的另一行，格子列表照样收到 press/itemClicked）。
+        if _menu_open_or_just_closed():
+            self._menu_press_ts = time.time()
+        super(BoxList, self).mousePressEvent(e)
 
     def mouseDoubleClickEvent(self, e):
         """双击只认左键——Qt 对**右键**也会发双击事件（实测：同一位置两次右键、间隔 60ms
@@ -252,8 +261,18 @@ class BoxList(QListWidget):
         itemDoubleClicked 直接接到 open_path（打开），于是「连续两次右键同一项」就会把它
         打开：用户实测的「第二次右键必然打开第二个文件」就是这个（位移超过 ~40px 时不触发，
         所以并非每次都犯）。这里把非左键的双击吃掉，别传给 QListWidget——传下去照样会发
-        itemDoubleClicked。左键路径原样走 super()，双击打开的行为不变。"""
+        itemDoubleClicked。左键路径原样走 super()，双击打开的行为不变。
+
+        第二道守卫同理：点掉外壳菜单的那一下也会穿透成一次**左键**按下，用户接着再点一下
+        就是一次「左键+左键」的合法双击 ⇒ 白开一个文件（2026-10 用户实测：右键 A 弹菜单、
+        再左键 B 就打开 B）。菜单关闭后 0.6s 内的双击一律不算数——真想双击打开，菜单
+        已经关了，再点一次即可。"""
         if e.button() != Qt.LeftButton:
+            e.accept()
+            return
+        if self._menu_press_ts and time.time() - self._menu_press_ts < 0.6:
+            ui._dbg('★ 菜单关闭后 %.2fs 内的双击，不打开'
+                    % (time.time() - self._menu_press_ts))
             e.accept()
             return
         super(BoxList, self).mouseDoubleClickEvent(e)
@@ -667,6 +686,11 @@ class BoxWindow(QWidget):
         self.refresh()
 
     def open_path(self, path):
+        # 记下是【谁】打开的：格子里的「点了就打开」问题只有这一个出口，日志里带上
+        # 调用点（如 boxes.py:247 = itemDoubleClicked）比事后猜快得多。
+        f = sys._getframe(1)
+        ui._dbg('open: %s ← %s:%d' % (os.path.basename(path),
+                                      os.path.basename(f.f_code.co_filename), f.f_lineno))
         try:
             os.startfile(path)
         except OSError:
@@ -1331,6 +1355,7 @@ class _HostDaemon(QObject):
         self.result.connect(self._on_result)
         self._req_key = None         # 在途请求的 (hwnd, paths)——重复请求去重
         self._req_ts = 0.0           # 在途请求发出时间（卡死看门狗用）
+        self.closed_at = 0.0         # 最近一次菜单关闭的时刻（格子双击守卫用，见 BoxList）
 
     def ensure(self):
         if self.proc is not None and self.proc.poll() is None:
@@ -1417,6 +1442,7 @@ class _HostDaemon(QObject):
         return True
 
     def _on_result(self, rc):
+        self.closed_at = time.time()
         # 记「宿主回了什么、这一次花了多久」：出事复盘时若只有发出去的请求、没有
         # 回来的应答，就无从判断宿主当时是否还健康（2026-10 冻结事故就吃了这个亏）。
         # 时间必须按【每个请求自己】的发出时刻算——连点时会有多个请求在途，拿最新的
@@ -1447,6 +1473,20 @@ def _get_daemon():
         _daemon = _HostDaemon()
         QApplication.instance().aboutToQuit.connect(_daemon.stop)
     return _daemon
+
+
+def _menu_open_or_just_closed(grace=0.25):
+    """外壳菜单正开着，或刚刚（grace 秒内）被点关掉。
+
+    菜单是宿主进程弹的，**点它会穿透到下面的格子窗口上**（实测：菜单弹在第一行、左键点
+    没被菜单盖住的另一行，格子列表照样收到一次完整的 press/release/itemClicked）。所以
+    「菜单刚关掉」这个窗口里落在格子列表上的左键，其实就是「点掉那个菜单」的那一下。
+    callbacks 非空 = 请求在途 = 菜单还开着（应答回来才算关）；刚关掉的一瞬按下也可能
+    先于应答信号到达，所以再留一个 grace 窗口。"""
+    d = _daemon
+    if d is None:
+        return False
+    return bool(d.callbacks) or (time.time() - d.closed_at) < grace
 
 
 def shell_context_menu(hwnd, paths, x, y, on_rename=None):
