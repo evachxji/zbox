@@ -344,8 +344,14 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
   吊死调用线程（壳内部要等本线程泵消息）；④ `QueryContextMenu` 标志要给
   `CMF_EXPLORE|CMF_CANRENAME`，否则菜单没有「重命名」；⑤ **别传 `ahKeys`**——传了会整个
   替换壳默认的动词/扩展合并，菜单只剩壳内置项（扩展全丢）；⑥ 壳默认菜单不合并用户范围
-  （HKCU\Software\Classes）注册的 progid 动词，「打开 / 编辑」要读
-  `HKCR\<progid>\shell` 手工补到菜单顶部（已存在的不重复补，第 0 项 SetMenuDefaultItem 加粗）。
+  （HKCU\Software\Classes）注册的 progid 动词，也不合并 `HKCR\*\shell` 静态动词
+  （如 ToDesk 快传）——两类都要手工补到菜单顶部（已存在的不重复补，第 0 项
+  SetMenuDefaultItem 加粗，图标用 ExtractIconExW 取 exe 图标 + SetMenuItemInfo 的
+  `MIIM_BITMAP=0x80` 挂位图，注意 0x20 是 MIIM_DATA 不是位图掩码）；⑦ `IExplorerCommand`
+  型注册项（如 Notepad++ 的 `ANotepad++64`）与 Defender 的 EPP 在非 Explorer 宿主下
+  加载/添加失败，菜单里出不来（Windows 没有借用资源管理器菜单的 API，只能按注册表+COM
+  自己拼，这两项拼不进是宿主限制）；⑧ 菜单跟随系统明暗要调 uxtheme 135 号序数
+  `SetPreferredAppMode`（深色 2 / 浅色 3），不然深色系统上也是浅色菜单。
 - 列表里 `.lnk` 显示名去掉后缀（对齐资源管理器），UserRole 仍存完整路径，拖出/打开不受影响
 - **轮询线程里绝不调任何 Qt 方法（2026-09 真实死锁）**：`DesktopClickHook` 的轮询跑在独立线程，
   旧版 `own_hwnds()` 在其中调 `QWidget::winId()`——winId 会现场创建原生窗口，

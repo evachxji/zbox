@@ -1054,7 +1054,7 @@ def _com_fn(obj, idx, restype, *argtypes):
 
 def _progid_verbs(path):
     """读文件 progid 的 shell 动词（HKCR 合并视图，含 command 子键才算有效），
-    返回 [(verb 名, 显示名)]，open 排最前。显示名取动词键默认值（如 '打开(&O)'），
+    返回 [(verb 名, 显示名, 命令行)]，open 排最前。显示名取动词键默认值（如 '打开(&O)'），
     没有则按常见名映射。壳默认菜单不含用户范围注册的 progid 动词（实测），
     由调用方补进菜单顶部。"""
     import winreg
@@ -1077,9 +1077,10 @@ def _progid_verbs(path):
                 except OSError:
                     break
                 i += 1
+                cmd = None
                 try:
-                    with winreg.OpenKey(sh, v + r'\command'):
-                        pass  # 有 command 才是可执行动词
+                    with winreg.OpenKey(sh, v + r'\command') as ck:
+                        cmd = winreg.QueryValue(ck, None)
                 except OSError:
                     continue
                 try:
@@ -1089,11 +1090,133 @@ def _progid_verbs(path):
                 if not label:
                     label = {'open': '打开(&O)', 'edit': '编辑(&E)',
                              'print': '打印(&P)'}.get(v, v)
-                verbs.append((v, label))
+                verbs.append((v, label, cmd))
     except OSError:
         pass
     verbs.sort(key=lambda t: 0 if t[0] == 'open' else 1)
     return verbs
+
+
+def _star_shell_verbs():
+    """HKCR\\*\\shell 下的静态动词（如「使用 ToDesk 快传文件」）：壳默认菜单不合并
+    *\\shell（实测），手工补。只收带 command 子键的纯命令动词；IExplorerCommand 型
+    （如 Notepad++ 的 ANotepad++64，宿主接口在非 Explorer 环境加载不了）跳过。
+    返回 [(显示名, 图标路径或 None, exe, 参数模板)]。"""
+    import winreg
+    out = []
+    try:
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r'*\shell') as sh:
+            i = 0
+            while True:
+                try:
+                    v = winreg.EnumKey(sh, i)
+                except OSError:
+                    break
+                i += 1
+                base = r'*\shell\%s' % v
+                try:
+                    with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, base + r'\command') as ck:
+                        cmd = winreg.QueryValue(ck, None)
+                except OSError:
+                    continue
+                try:
+                    label = winreg.QueryValue(winreg.HKEY_CLASSES_ROOT, base)
+                except OSError:
+                    label = v
+                icon = None
+                try:
+                    with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, base) as bk:
+                        try:
+                            icon = winreg.QueryValueEx(bk, 'Icon')[0]
+                        except OSError:
+                            icon = None
+                except OSError:
+                    pass
+                exe, params = _split_command(cmd)
+                if exe:
+                    out.append((label, icon, exe, params))
+    except OSError:
+        pass
+    return out
+
+
+def _split_command(line):
+    """拆命令行模板：带引号的 exe 路径 + 参数模板。空模板返回 (None, '')。"""
+    line = (line or '').strip()
+    if not line:
+        return None, ''
+    if line.startswith('"'):
+        end = line.find('"', 1)
+        if end > 0:
+            return line[1:end], line[end + 1:].strip()
+    parts = line.split(None, 1)
+    return parts[0], (parts[1] if len(parts) > 1 else '')
+
+
+def _verb_hicon(icon_val, exe):
+    """动词图标：优先注册表 Icon 值（'path[,idx]'），否则 exe 的 0 号图标。返回 HICON 或 None。"""
+    path, idx = None, 0
+    if icon_val:
+        parts = icon_val.rsplit(',', 1)
+        path = parts[0].strip('"')
+        if len(parts) > 1:
+            try:
+                idx = int(parts[1])
+            except ValueError:
+                idx = 0
+    else:
+        path = exe
+    if not path or not os.path.isfile(path):
+        return None
+    h = ctypes.c_void_p()
+    _s32.ExtractIconExW.restype = wintypes.UINT
+    _s32.ExtractIconExW.argtypes = [wintypes.LPCWSTR, ctypes.c_int,
+                                    ctypes.c_void_p, ctypes.c_void_p, wintypes.UINT]
+    if _s32.ExtractIconExW(path, idx, None, ctypes.byref(h), 1) > 0 and h:
+        return h.value
+    return None
+
+
+class _ICONINFO(ctypes.Structure):
+    _fields_ = [('fIcon', wintypes.BOOL), ('xHotspot', wintypes.DWORD),
+                ('yHotspot', wintypes.DWORD), ('hbmMask', ctypes.c_void_p),
+                ('hbmColor', ctypes.c_void_p)]
+
+
+class _MENUITEMINFOW(ctypes.Structure):
+    _fields_ = [('cbSize', wintypes.UINT), ('fMask', wintypes.UINT), ('fType', wintypes.UINT),
+                ('fState', wintypes.UINT), ('wID', wintypes.UINT), ('hSubMenu', ctypes.c_void_p),
+                ('hbmpChecked', ctypes.c_void_p), ('hbmpUnchecked', ctypes.c_void_p),
+                ('dwItemData', ctypes.c_void_p), ('dwTypeData', wintypes.LPWSTR),
+                ('cch', wintypes.UINT), ('hbmpItem', ctypes.c_void_p)]
+
+
+def _set_item_icon(hmenu, pos, hicon):
+    """给菜单项挂图标：MIIM_BITMAP 要 HBITMAP，借 GetIconInfo 从 HICON 取 hbmColor。"""
+    if not hicon:
+        return
+    info = _ICONINFO()
+    _h32.GetIconInfo.restype = wintypes.BOOL
+    _h32.GetIconInfo.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    if not _h32.GetIconInfo(hicon, ctypes.byref(info)) or not info.hbmColor:
+        return
+    mii = _MENUITEMINFOW()
+    mii.cbSize = ctypes.sizeof(mii)
+    mii.fMask = 0x00000080   # MIIM_BITMAP（0x20 是 MIIM_DATA，写错掩码图标静默不生效）
+    mii.hbmpItem = info.hbmColor
+    _h32.SetMenuItemInfoW(hmenu, pos, 1, ctypes.byref(mii))
+
+
+def _ux_dark_menu():
+    """壳菜单跟随系统明暗：uxtheme 135 号序数 SetPreferredAppMode（0=默认 1=允许暗色
+    2=强制暗色 3=强制亮色）。不设的话 TrackPopupMenu 在深色系统上也是浅色菜单。"""
+    try:
+        fn = ctypes.windll.uxtheme[135]
+        fn.restype = ctypes.c_int
+        fn.argtypes = [ctypes.c_int]
+        fn(3 if sysutil.system_uses_light_theme() else 2)
+    except Exception:
+        pass
 
 
 def _menu_labels(hmenu):
@@ -1161,22 +1284,38 @@ def shell_context_menu(hwnd, paths, x, y):
         # 壳默认的动词/扩展合并，菜单反而只剩壳内置项（实测）。
         if qcm(pcm.value, hmenu, 0, 1, 0x7FFF, 0x14) < 0:
             return False
-        # 顶部补「打开 / 编辑」等 progid 动词：壳默认菜单不合并用户范围注册的 progid
-        # 动词（如 Notepad++_file），已存在的不重复补；第 0 项加粗对齐资源管理器。
+        _ux_dark_menu()
+        # 顶部补动词：① progid 动词（打开 / 编辑，壳默认菜单不合并用户范围注册的 progid）；
+        # ② *\shell 静态动词（如「使用 ToDesk 快传文件」，壳默认菜单不合并 *\shell）。
+        # 已存在的不重复补；第 0 项加粗对齐资源管理器。
         inserted = {}
         seen = _menu_labels(hmenu)
         pos = 0
-        for verb, label in _progid_verbs(paths[0]):
+        for verb, label, cmd in _progid_verbs(paths[0]):
             if label.split('(')[0] in seen:
                 continue
             _h32.InsertMenuW(hmenu, pos, 0x00000400, 0x7F00 + pos, label)
-            inserted[0x7F00 + pos] = verb
+            inserted[0x7F00 + pos] = ('verb', verb)
+            _set_item_icon(hmenu, pos, _verb_hicon(None, _split_command(cmd)[0]))
+            pos += 1
+        for label, icon, exe, params in _star_shell_verbs():
+            if label.split('(')[0] in seen:
+                continue
+            _h32.InsertMenuW(hmenu, pos, 0x00000400, 0x7F00 + pos, label)
+            inserted[0x7F00 + pos] = ('cmd', (exe, params))
+            _set_item_icon(hmenu, pos, _verb_hicon(icon, exe))
             pos += 1
         if pos:
             _h32.SetMenuDefaultItem(hmenu, 0, 1)
         cmd = _h32.TrackPopupMenu(hmenu, 0x0100, x, y, 0, hwnd, None)   # TPM_RETURNCMD
         if cmd in inserted:
-            _shell_invoke_async(inserted[cmd], paths)   # 我们补的 progid 动词，直接按名执行
+            kind, payload = inserted[cmd]
+            if kind == 'verb':
+                _shell_invoke_async(payload, paths)
+            else:
+                exe, params = payload
+                for f in paths:
+                    _shell_exec_async(exe, params.replace('%1', '"%s"' % f))
             return True
         if cmd:
             # 动词字符串 → ShellExecuteEx 执行。不直接用 IContextMenu::InvokeCommand：
@@ -1201,6 +1340,25 @@ def shell_context_menu(hwnd, paths, x, y):
             _s32.ILFree(p)
         if own_com:
             _o32.CoUninitialize()
+
+
+def _shell_exec_async(exe, params):
+    """独立 STA 线程 ShellExecuteEx 直接执行命令行（坑同 _shell_invoke_async）。"""
+    def work():
+        _o32.CoInitializeEx(None, 0)
+        try:
+            sei = _SHELLEXECUTEINFOW()
+            sei.cbSize = ctypes.sizeof(sei)
+            sei.fMask = 0x00100000   # SEE_MASK_ASYNCOK
+            sei.lpFile = exe
+            sei.lpParameters = params
+            sei.nShow = 1
+            _s32.ShellExecuteExW(ctypes.byref(sei))
+        except Exception:
+            pass
+        finally:
+            _o32.CoUninitialize()
+    threading.Thread(target=work, daemon=True).start()
 
 
 def _shell_invoke_async(verb, paths):
