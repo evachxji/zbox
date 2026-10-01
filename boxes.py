@@ -1140,6 +1140,41 @@ def _star_shell_verbs():
     return out
 
 
+def _special_shell_items():
+    """两个宿主打不进来的高频项，按已知行为等价复刻（标签/图标/命令行均与资源管理器一致）：
+    - 「以 Notepad++ 编辑」：来自 *\shell\ANotepad++64 的 IExplorerCommand 注册（非
+      Explorer 宿主加载不了），命令与 `HKCR\Applications\notepad++.exe` 的 open 相同；
+    - 「使用 Microsoft Defender扫描…」：EPP 扩展在非 Explorer 站点下拒绝添加菜单项，
+      其行为就是 MpCmdRun.exe -Scan。
+    返回 [(key, 显示名, 图标路径, exe, 参数模板)]；没装对应软件则为空。"""
+    import winreg
+    out = []
+    # Notepad++ 编辑
+    try:
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r'*\shell\ANotepad++64'):
+            pass
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT,
+                            r'Applications\notepad++.exe\shell\open\command') as ck:
+            cmd = winreg.QueryValue(ck, None)
+        exe, _params = _split_command(cmd)
+        if exe:
+            out.append(('npp', '以 Notepad++ 编辑', exe, exe, '"%1"'))
+    except OSError:
+        pass
+    # Defender 扫描
+    try:
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT,
+                            r'*\shellex\ContextMenuHandlers\EPP'):
+            pass
+        mpcmd = r'C:\Program Files\Windows Defender\MpCmdRun.exe'
+        if os.path.isfile(mpcmd):
+            out.append(('defender', '使用 Microsoft Defender扫描...', mpcmd, mpcmd,
+                        '-Scan -ScanType 3 -File %1'))
+    except OSError:
+        pass
+    return out
+
+
 def _split_command(line):
     """拆命令行模板：带引号的 exe 路径 + 参数模板。空模板返回 (None, '')。"""
     line = (line or '').strip()
@@ -1298,6 +1333,14 @@ def shell_context_menu(hwnd, paths, x, y):
             inserted[0x7F00 + pos] = ('verb', verb)
             _set_item_icon(hmenu, pos, _verb_hicon(None, _split_command(cmd)[0]))
             pos += 1
+        specials = {k: (label, icon, exe, params) for k, label, icon, exe, params
+                    in _special_shell_items()}
+        if 'npp' in specials and 'Notepad++' not in seen:
+            label, icon, exe, params = specials['npp']
+            _h32.InsertMenuW(hmenu, pos, 0x00000400, 0x7F00 + pos, label)
+            inserted[0x7F00 + pos] = ('cmd', (exe, params))
+            _set_item_icon(hmenu, pos, _verb_hicon(icon, exe))
+            pos += 1
         for label, icon, exe, params in _star_shell_verbs():
             if label.split('(')[0] in seen:
                 continue
@@ -1307,6 +1350,19 @@ def shell_context_menu(hwnd, paths, x, y):
             pos += 1
         if pos:
             _h32.SetMenuDefaultItem(hmenu, 0, 1)
+        if 'defender' in specials:
+            # 资源管理器里 Defender 在「打开方式」之前；找不到就放在补入块末尾
+            label, icon, exe, params = specials['defender']
+            dpos = pos
+            for i in range(pos, _h32.GetMenuItemCount(hmenu)):
+                buf = ctypes.create_unicode_buffer(128)
+                _h32.GetMenuStringW(hmenu, i, buf, 128, 0x00000400)
+                if buf.value.startswith('打开方式'):
+                    dpos = i
+                    break
+            _h32.InsertMenuW(hmenu, dpos, 0x00000400, 0x7F00 + dpos, label)
+            inserted[0x7F00 + dpos] = ('cmd', (exe, params))
+            _set_item_icon(hmenu, dpos, _verb_hicon(icon, exe))
         cmd = _h32.TrackPopupMenu(hmenu, 0x0100, x, y, 0, hwnd, None)   # TPM_RETURNCMD
         if cmd in inserted:
             kind, payload = inserted[cmd]
