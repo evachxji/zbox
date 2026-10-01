@@ -25,7 +25,7 @@ import threading
 import time
 from ctypes import wintypes
 
-from PyQt5.QtCore import (Qt, QTimer, QThread, QUrl, QPoint, QRect, QSize,
+from PyQt5.QtCore import (Qt, QObject, QTimer, QThread, QUrl, QPoint, QRect, QSize,
                           QFileSystemWatcher, pyqtSignal)
 from PyQt5.QtGui import QIcon, QCursor, QPainter, QColor, QPen, QFont
 from PyQt5.QtWidgets import (QWidget, QDialog, QListWidget, QListWidgetItem, QVBoxLayout,
@@ -306,7 +306,10 @@ class BoxList(QListWidget):
         self.editItem(it)
 
     def contextMenuEvent(self, e):
-        it = self.itemAt(e.pos())
+        # e.pos()/globalPos() 在非 100%% DPI 下不可信：Qt5 不换算 WM_CONTEXTMENU
+        # lParam 的物理坐标（渲染 ×1.25 但事件不除），itemAt 必错位。
+        # 光标实时位置 QCursor.pos() 换算是正确的，以此为准。
+        it = self.itemAt(self.mapFromGlobal(QCursor.pos()))
         if it:
             # 右键落在多选之外：先改成只选它（与资源管理器的选择语义一致）
             sel = self.selectedItems()
@@ -323,8 +326,9 @@ class BoxList(QListWidget):
                 except RuntimeError:
                     pass
 
+            gp = QCursor.pos()
             r = shell_context_menu(int(self.winId()), paths,
-                                   e.globalPos().x(), e.globalPos().y(),
+                                   gp.x(), gp.y(),
                                    on_rename=_do_rename)
             if r == 'rename':
                 self._rename_item(it)
@@ -342,7 +346,7 @@ class BoxList(QListWidget):
             menu.addAction('刷新', self.box.refresh)
             menu.addAction('在资源管理器中打开', lambda: self.box.open_path(self.box.rec['path']))
         if menu.actions():
-            menu.exec_(e.globalPos())
+            menu.exec_(QCursor.pos())
 
 
 class BoxConfirmDialog(QDialog):
@@ -1287,41 +1291,98 @@ def _zshell_host():
     return cand if os.path.isfile(cand) else None
 
 
+class _HostDaemon(QObject):
+    """常驻 zshell_host.exe 服务模式（--serve）：进程常驻 + 启动时预热壳扩展 DLL，
+    每次右键只写一行管道请求，省掉每次新建进程 + 重载全部壳扩展的 ~500ms。
+    请求/响应按 FIFO 配对：结果回调队列与请求一一对应。"""
+
+    result = pyqtSignal(int)
+
+    def __init__(self):
+        super(_HostDaemon, self).__init__()
+        self.proc = None
+        self.callbacks = []          # 每次请求对应的 on_rename（FIFO）
+        self.result.connect(self._on_result)
+
+    def ensure(self):
+        if self.proc is not None and self.proc.poll() is None:
+            return True
+        host = _zshell_host()
+        if not host:
+            return False
+        try:
+            self.proc = subprocess.Popen(
+                [host, '--serve'], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL, creationflags=0x08000000)   # CREATE_NO_WINDOW
+        except OSError:
+            self.proc = None
+            return False
+        threading.Thread(target=self._read_loop, daemon=True).start()
+        return True
+
+    def _read_loop(self):
+        # 独立线程只读管道发信号，绝不碰 Qt 对象（同 DesktopClickHook 的铁律）
+        for raw in self.proc.stdout:
+            line = raw.decode('utf-8', 'replace').strip()
+            if line.startswith('R '):
+                try:
+                    self.result.emit(int(line[2:]))
+                except ValueError:
+                    pass
+        # 进程死了：清空待配对回调，下次请求时 ensure 会重启
+        self.callbacks = []
+
+    def request(self, hwnd, paths, on_rename):
+        if not self.ensure():
+            return False
+        try:
+            head = 'M %d %d\n' % (int(hwnd), len(paths))
+            body = ''.join(p + '\n' for p in paths).encode('utf-8')
+            self.proc.stdin.write(head.encode('ascii') + body)
+            self.proc.stdin.flush()
+        except (OSError, ValueError):
+            self.proc = None
+            return False
+        self.callbacks.append(on_rename)
+        return True
+
+    def _on_result(self, rc):
+        cb = self.callbacks.pop(0) if self.callbacks else None
+        if rc == 2 and cb:
+            cb()
+
+    def stop(self):
+        if self.proc is not None and self.proc.poll() is None:
+            try:
+                self.proc.stdin.close()   # 宿主 stdin 关闭即退出
+            except OSError:
+                pass
+        self.proc = None
+
+
+_daemon = None
+
+
+def _get_daemon():
+    global _daemon
+    if _daemon is None:
+        _daemon = _HostDaemon()
+        QApplication.instance().aboutToQuit.connect(_daemon.stop)
+    return _daemon
+
+
 def shell_context_menu(hwnd, paths, x, y, on_rename=None):
     """在 (x, y) 弹出 paths 的系统外壳右键菜单（资源管理器同款）。
-    优先起 zshell_host.exe 独立进程（SHCreateDefaultContextMenu + SetSite，
-    含 Defender 扫描 / IExplorerCommand 项 / 全量图标，菜单随系统明暗）；
+    优先常驻宿主 zshell_host.exe --serve（SHCreateDefaultContextMenu + SetSite，
+    含 Defender 扫描 / IExplorerCommand 项 / 全量图标，菜单随系统明暗；
+    x/y 仅回退路径用——宿主自己取 GetCursorPos，避免 Qt 逻辑像素在 DPI 缩放下偏移）。
     宿主缺失回退 ctypes 实现（CDefFolderMenu_Create2，少几个需要宿主环境的扩展项）。
     on_rename：宿主路径下用户选「重命名」时回调（异步，菜单关闭后触发）。
     返回 True=已接管；'rename'=ctypes 路径选了重命名；False=回退内置菜单。"""
     if not paths:
         return False
-    host = _zshell_host()
-    if host:
-        try:
-            proc = subprocess.Popen(
-                [host, str(int(hwnd)), str(x), str(y)] + list(paths),
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                creationflags=0x08000000)   # CREATE_NO_WINDOW
-        except OSError:
-            pass
-        else:
-            # 轮询宿主退出：2=用户选了重命名。QTimer 轮询期间 Qt 事件正常泵送。
-            timer = QTimer(QApplication.instance())
-            timer.setInterval(50)
-
-            def _poll(proc=proc, timer=timer):
-                rc = proc.poll()
-                if rc is None:
-                    return
-                timer.stop()
-                timer.deleteLater()
-                if rc == 2 and on_rename:
-                    on_rename()
-
-            timer.timeout.connect(_poll)
-            timer.start()
-            return True
+    if _get_daemon().request(hwnd, paths, on_rename):
+        return True
     own_com = (_o32.CoInitializeEx(None, 0) == 0)   # S_OK 才是我们初始化的，退出才配对释放
     pidls = []      # 待 ILFree 的绝对 PIDL
     objs = []       # 待 Release 的接口指针
@@ -1585,6 +1646,7 @@ class BoxManager(object):
             self.hook.start()
         self.restore()
         self._refresh_own_hwnds()
+        _get_daemon().ensure()   # 面板启动就拉起菜单宿主并预热壳扩展，首个右键不等
 
     def _refresh_own_hwnds(self):
         """重建本进程窗口句柄快照。只能在 GUI 线程调：winId() 可能现场创建原生窗口，

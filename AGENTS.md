@@ -340,7 +340,9 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
 - `boxes.json` 读取用 `utf-8-sig`：手工编辑带出的 BOM 会让 `utf-8` 读失败、save 用空数据
   覆盖原文件（`config.json` 在 app.py 里有同样的坑，暂未动）。
 - **格子文件右键 = 系统外壳菜单**（`shell_context_menu`，与资源管理器逐项一致）：
-  优先起 `native\zshell_host.exe` 独立进程弹菜单（Python 侧 QTimer 轮询退出码），
+  走常驻宿主 `native\zshell_host.exe --serve`（面板启动即拉起并预热壳扩展 DLL，
+  每次右键只是管道写一行请求——单次起进程 + 重载壳扩展有 ~500ms 延迟）；
+  请求/响应按 FIFO 配对（退出码 2 = 重命名，回调 `BoxList._rename_item`）。
   宿主缺失回退 ctypes 实现（`CDefFolderMenu_Create2`，少 Defender 扫描等宿主型扩展项）。
   **为什么必须是独立 exe**：Defender 的 EPP 扩展（{09A47860-...}）检查宿主进程，在真正的
   python.exe 进程里 `QueryContextMenu` 返回成功但一项不加——已逐项排除 exe 名/路径/
@@ -363,8 +365,18 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
   Python 侧 `BoxList._rename_item` 行内编辑 + `os.rename`；④ 菜单随系统明暗 =
   uxtheme 135 序数 `SetPreferredAppMode`（深色 2 / 浅色 3）；⑤ InvokeCommand 带
   `CMIC_MASK_UNICODE|CMIC_MASK_ASYNCOK`，hwnd 传格子窗口（删除确认框的属主）；
-  ⑥ ctypes 直调 335/336 必 access violation（读 0x1），这是必须 C++ 的原因之一；
-  ⑦ 回退路径（ctypes `CDefFolderMenu_Create2`）的老坑仍在：菜单对象无站点时
+  ⑥ 菜单位置自己 `GetCursorPos`（物理坐标）——Qt 传过来的 globalPos 是逻辑像素，
+  多显示器/缩放下不可靠；宿主入口必须 `SetProcessDpiAwarenessContext(PM_V2)`，
+  否则菜单被系统按 96 DPI 渲染再位图放大（字体发糊）；TrackPopupMenu 要给
+  `TPM_RECURSE`——菜单开着时在别处再点右键，系统才会先关旧菜单再把
+  WM_CONTEXTMENU 转发给落点窗口（资源管理器的「右键连击」），不给则第一次右键
+  只关菜单不弹新菜单；`BoxList.contextMenuEvent` 取落点用
+  `mapFromGlobal(QCursor.pos())` 而不是 `e.pos()`（Qt5 对 WM_CONTEXTMENU 的
+  坐标在高 DPI 下不换算，e.pos() 会错位）；pythonw 面板 Qt 侧 dpr=1.0（2560×1600
+  物理坐标系），而**未声明 DPI 感知的 python/PowerShell 探测脚本拿到的窗口矩形
+  与光标都是 1/1.25 虚拟化坐标**——写界面探针时先 SetProcessDpiAwarenessContext；
+  ⑦ ctypes 直调 335/336 必 access violation（读 0x1），这是必须 C++ 的原因之一；
+  ⑧ 回退路径（ctypes `CDefFolderMenu_Create2`）的老坑仍在：菜单对象无站点时
   InvokeCommand 一律 E_FAIL（动词改走 GetCommandString 取动词名 + 独立 STA 线程
   ShellExecuteEx + SEE_MASK_ASYNCOK）、ahKeys 不能传（替换默认合并，扩展全丢）、
   壳默认菜单不合并 HKCU progid 动词与 *\shell 静态动词（回退路径手工补到顶部，
