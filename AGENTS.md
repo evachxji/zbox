@@ -95,6 +95,9 @@ Zviber 是 Windows 桌面悬浮面板（日历 + 待办），PyQt5，Python 3.8+
 - `install.py` — 源码方式的系统集成（只装开机自启）
 - `setup.pyw` — 安装包入口：build.py 把它打成 onefile exe，内嵌 onedir 本体为 payload，双击弹安装向导
 - `build.py` / `build.cmd` — 生成图标与 DPI 清单，两段式 PyInstaller：main.pyw 打 onedir 本体（`dist\build\app\`），setup.pyw 内嵌本体打成单个安装包 `dist\ZviberPanel-Setup-v<版本>-<架构>.exe`（架构标识跟随打包用的 Python：x64 / x86 / arm64）
+- `native/` — 外壳菜单宿主：`zshell.cpp`（C++ 源码，契约见下方「格子文件右键」）
+  + `build_native.cmd`（cl /MT 静态 CRT 编译出 `zshell_host.exe`，需 MSVC Build Tools）；
+  exe 随仓库提交，改源码后需重新编译并一起提交
 - `run.cmd` — 双击启动面板；已在运行则切换显隐
 - `stop.cmd` — 双击停止面板：先 `--quit` 经 IPC 礼貌退出（正常清理菜单注入），残留进程强制结束
 - `designs/` — 两套主题的设计稿（HTML，浏览器可直接打开）
@@ -107,6 +110,7 @@ Zviber 是 Windows 桌面悬浮面板（日历 + 待办），PyQt5，Python 3.8+
 pip install PyQt5            :: 唯一依赖（Win7 需 Python 3.8 + "PyQt5==5.15.*"）
 pythonw main.pyw             :: 源码方式运行（或双击 run.cmd）
 python build.py              :: 打包 exe 安装包（或双击 build.cmd）
+native\build_native.cmd      :: 编译外壳菜单宿主 zshell_host.exe（改 native\zshell.cpp 后必跑）
 python install.py            :: 源码方式开启开机自启
 python install.py --remove   :: 移除自启并清理旧的右键菜单
 set ZVIBER_SHOT=designs\verify && python main.pyw   :: 截图自检
@@ -335,23 +339,36 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
   默认按 32 位截断，64 位下指针参数高位丢失，钩子线程静默失效。
 - `boxes.json` 读取用 `utf-8-sig`：手工编辑带出的 BOM 会让 `utf-8` 读失败、save 用空数据
   覆盖原文件（`config.json` 在 app.py 里有同样的坑，暂未动）。
-- **格子文件右键 = 系统外壳菜单**（`shell_context_menu`，与资源管理器同款）：纯 ctypes COM，
-  零新增依赖。实测坑：① 取菜单用 `CDefFolderMenu_Create2`，别走 `IShellFolder::GetUIObjectOf`
-  ——某些系统组件的 vtable 布局不可依赖（实测访问冲突）；② 菜单对象无站点（SetSite）时
-  `InvokeCommand` 对所有动词一律 E_FAIL，动词执行改走 `GetCommandString` 取动词名 +
-  `ShellExecuteEx`；③ ShellExecuteEx 必须在独立 STA 线程里调且带 `SEE_MASK_ASYNCOK`
-  ——Qt 把 GUI 线程初始化成 MTA（壳动词在 MTA 下返回成功但什么都不做），同步调用又会
-  吊死调用线程（壳内部要等本线程泵消息）；④ `QueryContextMenu` 标志要给
-  `CMF_EXPLORE|CMF_CANRENAME`，否则菜单没有「重命名」；⑤ **别传 `ahKeys`**——传了会整个
-  替换壳默认的动词/扩展合并，菜单只剩壳内置项（扩展全丢）；⑥ 壳默认菜单不合并用户范围
-  （HKCU\Software\Classes）注册的 progid 动词，也不合并 `HKCR\*\shell` 静态动词
-  （如 ToDesk 快传）——两类都要手工补到菜单顶部（已存在的不重复补，第 0 项
-  SetMenuDefaultItem 加粗，图标用 ExtractIconExW 取 exe 图标 + SetMenuItemInfo 的
-  `MIIM_BITMAP=0x80` 挂位图，注意 0x20 是 MIIM_DATA 不是位图掩码）；⑦ `IExplorerCommand`
-  型注册项（如 Notepad++ 的 `ANotepad++64`）与 Defender 的 EPP 在非 Explorer 宿主下
-  加载/添加失败，菜单里出不来（Windows 没有借用资源管理器菜单的 API，只能按注册表+COM
-  自己拼，这两项拼不进是宿主限制）；⑧ 菜单跟随系统明暗要调 uxtheme 135 号序数
-  `SetPreferredAppMode`（深色 2 / 浅色 3），不然深色系统上也是浅色菜单。
+- **格子文件右键 = 系统外壳菜单**（`shell_context_menu`，与资源管理器逐项一致）：
+  优先起 `native\zshell_host.exe` 独立进程弹菜单（Python 侧 QTimer 轮询退出码），
+  宿主缺失回退 ctypes 实现（`CDefFolderMenu_Create2`，少 Defender 扫描等宿主型扩展项）。
+  **为什么必须是独立 exe**：Defender 的 EPP 扩展（{09A47860-...}）检查宿主进程，在真正的
+  python.exe 进程里 `QueryContextMenu` 返回成功但一项不加——已逐项排除 exe 名/路径/
+  版本资源/签名/清单/加载 python312.dll，只有真 python 进程被拒，原生 exe（含改名
+  python.exe 的）全部正常；逆向还发现腾讯桌面整理（Features64.dll）用的是
+  `CDefFolderMenu_Create2`（shell32 序数 701）老路径，它的格子菜单同样没有这类项。
+  **菜单构建契约（zshell.cpp，实测得出）**：shell32 序数 335=`SHCreateDataObject`、
+  336=`SHCreateDefaultContextMenu`（Explorer 同款；DEFCONTEXTMENU 尾部可带
+  IDataObject/站点字段）→ 对菜单对象 `IObjectWithSite::SetSite`（最小
+  IOleWindow+IServiceProvider，QueryService 全 E_NOINTERFACE 即可）——**这是 EPP
+  加项的唯一前提**，站点为 NULL 时 EPP 初始化成功但 0 项 →
+  `QueryContextMenu(CMF_EXPLORE|CMF_CANRENAME)`。336 已合并 progid 动词、*\shell
+  动词、IExplorerCommand 项（以 Notepad++ 编辑）与全部 shellex 扩展，**不要手工补**
+  （补了就重复，任务早期按老路径写的硬编码补项已删）。
+  其它坑：① 菜单图标靠 `WM_INITMENUPOPUP` 等消息转发 `IContextMenu3::HandleMenuMsg2`
+  懒加载——TrackPopupMenu 属主用自建隐藏窗转发，不转发则多数项无图标；
+  ② 宿主进程默认拿不到前台锁，菜单窗口收不到键盘（Esc/方向键/助记符全哑）——
+  TrackPopupMenu 前 `AttachThreadInput` 挂到当前前台线程再 `SetForegroundWindow`，
+  弹完还原焦点；③ 「重命名」动词没有文件夹视图不会生效——宿主以退出码 2 交回，
+  Python 侧 `BoxList._rename_item` 行内编辑 + `os.rename`；④ 菜单随系统明暗 =
+  uxtheme 135 序数 `SetPreferredAppMode`（深色 2 / 浅色 3）；⑤ InvokeCommand 带
+  `CMIC_MASK_UNICODE|CMIC_MASK_ASYNCOK`，hwnd 传格子窗口（删除确认框的属主）；
+  ⑥ ctypes 直调 335/336 必 access violation（读 0x1），这是必须 C++ 的原因之一；
+  ⑦ 回退路径（ctypes `CDefFolderMenu_Create2`）的老坑仍在：菜单对象无站点时
+  InvokeCommand 一律 E_FAIL（动词改走 GetCommandString 取动词名 + 独立 STA 线程
+  ShellExecuteEx + SEE_MASK_ASYNCOK）、ahKeys 不能传（替换默认合并，扩展全丢）、
+  壳默认菜单不合并 HKCU progid 动词与 *\shell 静态动词（回退路径手工补到顶部，
+  图标用 ExtractIconExW + SetMenuItemInfo 的 `MIIM_BITMAP=0x80`，0x20 是 MIIM_DATA）。
 - 列表里 `.lnk` 显示名去掉后缀（对齐资源管理器），UserRole 仍存完整路径，拖出/打开不受影响
 - **轮询线程里绝不调任何 Qt 方法（2026-09 真实死锁）**：`DesktopClickHook` 的轮询跑在独立线程，
   旧版 `own_hwnds()` 在其中调 `QWidget::winId()`——winId 会现场创建原生窗口，

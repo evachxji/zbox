@@ -20,6 +20,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from ctypes import wintypes
@@ -276,6 +277,34 @@ class BoxList(QListWidget):
         else:
             super(BoxList, self).keyPressEvent(e)
 
+    def _rename_item(self, it):
+        """外壳菜单「重命名」→ 行内编辑（rename 动词没有文件夹视图不会生效，只能自己做）。
+        编辑框里用真实文件名（含扩展名），提交即 os.rename，取消/失败都刷新恢复。"""
+        path = it.data(Qt.UserRole)
+        it.setText(os.path.basename(path))
+        it.setFlags(it.flags() | Qt.ItemIsEditable)
+
+        def on_changed(item):
+            if item is not it:
+                return
+            new_name = item.text().strip()
+            if new_name and new_name != os.path.basename(path) and \
+                    not any(c in new_name for c in '\\/:*?"<>|'):
+                try:
+                    os.rename(path, os.path.join(os.path.dirname(path), new_name))
+                except OSError:
+                    pass
+
+        def on_closed(*_a):
+            self.itemChanged.disconnect(on_changed)
+            self.itemDelegate().closeEditor.disconnect(on_closed)
+            it.setFlags(it.flags() & ~Qt.ItemIsEditable)
+            self.box.refresh()   # 取消则恢复显示名，改名则重建列表
+
+        self.itemChanged.connect(on_changed)
+        self.itemDelegate().closeEditor.connect(on_closed)
+        self.editItem(it)
+
     def contextMenuEvent(self, e):
         it = self.itemAt(e.pos())
         if it:
@@ -286,7 +315,21 @@ class BoxList(QListWidget):
                 it.setSelected(True)
                 sel = [it]
             paths = [i.data(Qt.UserRole) for i in sel]
-            if shell_context_menu(int(self.winId()), paths, e.globalPos().x(), e.globalPos().y()):
+
+            def _do_rename(it=it):
+                try:
+                    if it.listWidget() is self:   # 菜单开着时列表可能已刷新重建
+                        self._rename_item(it)
+                except RuntimeError:
+                    pass
+
+            r = shell_context_menu(int(self.winId()), paths,
+                                   e.globalPos().x(), e.globalPos().y(),
+                                   on_rename=_do_rename)
+            if r == 'rename':
+                self._rename_item(it)
+                return
+            if r:
                 return
         menu = QMenu(self)
         if it:
@@ -1140,41 +1183,6 @@ def _star_shell_verbs():
     return out
 
 
-def _special_shell_items():
-    """两个宿主打不进来的高频项，按已知行为等价复刻（标签/图标/命令行均与资源管理器一致）：
-    - 「以 Notepad++ 编辑」：来自 *\shell\ANotepad++64 的 IExplorerCommand 注册（非
-      Explorer 宿主加载不了），命令与 `HKCR\Applications\notepad++.exe` 的 open 相同；
-    - 「使用 Microsoft Defender扫描…」：EPP 扩展在非 Explorer 站点下拒绝添加菜单项，
-      其行为就是 MpCmdRun.exe -Scan。
-    返回 [(key, 显示名, 图标路径, exe, 参数模板)]；没装对应软件则为空。"""
-    import winreg
-    out = []
-    # Notepad++ 编辑
-    try:
-        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r'*\shell\ANotepad++64'):
-            pass
-        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT,
-                            r'Applications\notepad++.exe\shell\open\command') as ck:
-            cmd = winreg.QueryValue(ck, None)
-        exe, _params = _split_command(cmd)
-        if exe:
-            out.append(('npp', '以 Notepad++ 编辑', exe, exe, '"%1"'))
-    except OSError:
-        pass
-    # Defender 扫描
-    try:
-        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT,
-                            r'*\shellex\ContextMenuHandlers\EPP'):
-            pass
-        mpcmd = r'C:\Program Files\Windows Defender\MpCmdRun.exe'
-        if os.path.isfile(mpcmd):
-            out.append(('defender', '使用 Microsoft Defender扫描...', mpcmd, mpcmd,
-                        '-Scan -ScanType 3 -File %1'))
-    except OSError:
-        pass
-    return out
-
-
 def _split_command(line):
     """拆命令行模板：带引号的 exe 路径 + 参数模板。空模板返回 (None, '')。"""
     line = (line or '').strip()
@@ -1266,13 +1274,54 @@ def _menu_labels(hmenu):
     return out
 
 
-def shell_context_menu(hwnd, paths, x, y):
-    """在 (x, y) 弹出 paths 的系统外壳右键菜单（资源管理器同款 IContextMenu）。
-    纯 ctypes COM 调用，零新增依赖。成功弹出返回 True；任何一步失败返回 False，
-    调用方回退到内置菜单。菜单消息不转发 HandleMenuMsg：少数自绘扩展项
-    （如压缩软件的子菜单）可能不显示图标，但功能不受影响。"""
+def _zshell_host():
+    """定位 zshell_host.exe（原生外壳菜单宿主，与资源管理器逐项一致）：
+    frozen 时在 exe 同目录，源码运行时在 native\\ 下。缺失返回 None。
+    必须独立进程：Defender 扫描（EPP 扩展）在真正的 python.exe 进程里拒绝加项
+    （逆向结论见 AGENTS.md），只有原生宿主进程能拿到完整菜单。"""
+    if getattr(sys, 'frozen', False):
+        cand = os.path.join(os.path.dirname(sys.executable), 'zshell_host.exe')
+    else:
+        cand = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            'native', 'zshell_host.exe')
+    return cand if os.path.isfile(cand) else None
+
+
+def shell_context_menu(hwnd, paths, x, y, on_rename=None):
+    """在 (x, y) 弹出 paths 的系统外壳右键菜单（资源管理器同款）。
+    优先起 zshell_host.exe 独立进程（SHCreateDefaultContextMenu + SetSite，
+    含 Defender 扫描 / IExplorerCommand 项 / 全量图标，菜单随系统明暗）；
+    宿主缺失回退 ctypes 实现（CDefFolderMenu_Create2，少几个需要宿主环境的扩展项）。
+    on_rename：宿主路径下用户选「重命名」时回调（异步，菜单关闭后触发）。
+    返回 True=已接管；'rename'=ctypes 路径选了重命名；False=回退内置菜单。"""
     if not paths:
         return False
+    host = _zshell_host()
+    if host:
+        try:
+            proc = subprocess.Popen(
+                [host, str(int(hwnd)), str(x), str(y)] + list(paths),
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=0x08000000)   # CREATE_NO_WINDOW
+        except OSError:
+            pass
+        else:
+            # 轮询宿主退出：2=用户选了重命名。QTimer 轮询期间 Qt 事件正常泵送。
+            timer = QTimer(QApplication.instance())
+            timer.setInterval(50)
+
+            def _poll(proc=proc, timer=timer):
+                rc = proc.poll()
+                if rc is None:
+                    return
+                timer.stop()
+                timer.deleteLater()
+                if rc == 2 and on_rename:
+                    on_rename()
+
+            timer.timeout.connect(_poll)
+            timer.start()
+            return True
     own_com = (_o32.CoInitializeEx(None, 0) == 0)   # S_OK 才是我们初始化的，退出才配对释放
     pidls = []      # 待 ILFree 的绝对 PIDL
     objs = []       # 待 Release 的接口指针
@@ -1333,14 +1382,6 @@ def shell_context_menu(hwnd, paths, x, y):
             inserted[0x7F00 + pos] = ('verb', verb)
             _set_item_icon(hmenu, pos, _verb_hicon(None, _split_command(cmd)[0]))
             pos += 1
-        specials = {k: (label, icon, exe, params) for k, label, icon, exe, params
-                    in _special_shell_items()}
-        if 'npp' in specials and 'Notepad++' not in seen:
-            label, icon, exe, params = specials['npp']
-            _h32.InsertMenuW(hmenu, pos, 0x00000400, 0x7F00 + pos, label)
-            inserted[0x7F00 + pos] = ('cmd', (exe, params))
-            _set_item_icon(hmenu, pos, _verb_hicon(icon, exe))
-            pos += 1
         for label, icon, exe, params in _star_shell_verbs():
             if label.split('(')[0] in seen:
                 continue
@@ -1350,19 +1391,6 @@ def shell_context_menu(hwnd, paths, x, y):
             pos += 1
         if pos:
             _h32.SetMenuDefaultItem(hmenu, 0, 1)
-        if 'defender' in specials:
-            # 资源管理器里 Defender 在「打开方式」之前；找不到就放在补入块末尾
-            label, icon, exe, params = specials['defender']
-            dpos = pos
-            for i in range(pos, _h32.GetMenuItemCount(hmenu)):
-                buf = ctypes.create_unicode_buffer(128)
-                _h32.GetMenuStringW(hmenu, i, buf, 128, 0x00000400)
-                if buf.value.startswith('打开方式'):
-                    dpos = i
-                    break
-            _h32.InsertMenuW(hmenu, dpos, 0x00000400, 0x7F00 + dpos, label)
-            inserted[0x7F00 + dpos] = ('cmd', (exe, params))
-            _set_item_icon(hmenu, dpos, _verb_hicon(icon, exe))
         cmd = _h32.TrackPopupMenu(hmenu, 0x0100, x, y, 0, hwnd, None)   # TPM_RETURNCMD
         if cmd in inserted:
             kind, payload = inserted[cmd]

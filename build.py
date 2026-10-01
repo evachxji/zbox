@@ -86,6 +86,13 @@ def main():
     if r:
         return r
 
+    # zshell_host.exe（原生外壳菜单宿主，native\build_native.cmd 生成）放 exe 同目录进 payload
+    zhost = os.path.join(ROOT, 'native', 'zshell_host.exe')
+    if os.path.isfile(zhost):
+        shutil.copy2(zhost, os.path.join(APP_DIR, 'ZviberPanel', 'zshell_host.exe'))
+    else:
+        print('[警告] native\\zshell_host.exe 不存在，外壳菜单回退 ctypes 实现')
+
     # 2) 安装包：onefile，把 onedir 目录整体内嵌为 payload
     name = 'ZviberPanel-Setup-v%s-%s' % (APP_VERSION, ARCH)
     payload = os.path.join(APP_DIR, 'ZviberPanel')
