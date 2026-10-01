@@ -78,6 +78,13 @@ _s32.ILFree.argtypes = [ctypes.c_void_p]
 _s32.ShellExecuteExW.restype = wintypes.BOOL
 _s32.ShellExecuteExW.argtypes = [ctypes.c_void_p]
 _o32 = ctypes.windll.ole32
+_a32 = ctypes.windll.advapi32
+_a32.RegOpenKeyExW.restype = ctypes.c_long
+_a32.RegOpenKeyExW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR, wintypes.DWORD,
+                               wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p)]
+_a32.RegCloseKey.restype = ctypes.c_long
+_a32.RegCloseKey.argtypes = [ctypes.c_void_p]
+_HKCR = ctypes.c_void_p(0x80000000)   # HKEY_CLASSES_ROOT
 _o32.CoInitializeEx.restype = ctypes.c_long
 _o32.CoInitializeEx.argtypes = [ctypes.c_void_p, wintypes.DWORD]
 _o32.CoUninitialize.argtypes = []
@@ -1045,6 +1052,62 @@ def _com_fn(obj, idx, restype, *argtypes):
     return ctypes.WINFUNCTYPE(restype, ctypes.c_void_p, *argtypes)(vtbl[idx])
 
 
+def _progid_verbs(path):
+    """读文件 progid 的 shell 动词（HKCR 合并视图，含 command 子键才算有效），
+    返回 [(verb 名, 显示名)]，open 排最前。显示名取动词键默认值（如 '打开(&O)'），
+    没有则按常见名映射。壳默认菜单不含用户范围注册的 progid 动词（实测），
+    由调用方补进菜单顶部。"""
+    import winreg
+    verbs = []
+    if os.path.isdir(path):
+        return verbs
+    ext = os.path.splitext(path)[1]
+    if not ext:
+        return verbs
+    try:
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, ext) as k:
+            progid = winreg.QueryValue(k, None)
+        if not progid:
+            return verbs
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, progid + r'\shell') as sh:
+            i = 0
+            while True:
+                try:
+                    v = winreg.EnumKey(sh, i)
+                except OSError:
+                    break
+                i += 1
+                try:
+                    with winreg.OpenKey(sh, v + r'\command'):
+                        pass  # 有 command 才是可执行动词
+                except OSError:
+                    continue
+                try:
+                    label = winreg.QueryValue(sh, v)   # 默认值可能是空串（只给了 command）
+                except OSError:
+                    label = None
+                if not label:
+                    label = {'open': '打开(&O)', 'edit': '编辑(&E)',
+                             'print': '打印(&P)'}.get(v, v)
+                verbs.append((v, label))
+    except OSError:
+        pass
+    verbs.sort(key=lambda t: 0 if t[0] == 'open' else 1)
+    return verbs
+
+
+def _menu_labels(hmenu):
+    """菜单里已有的显示名集合（去掉 (&X) 助记符），用于补动词时去重。"""
+    out = set()
+    n = _h32.GetMenuItemCount(hmenu)
+    for i in range(n):
+        buf = ctypes.create_unicode_buffer(128)
+        _h32.GetMenuStringW(hmenu, i, buf, 128, 0x00000400)   # MF_BYPOSITION
+        if buf.value:
+            out.add(buf.value.split('(')[0])
+    return out
+
+
 def shell_context_menu(hwnd, paths, x, y):
     """在 (x, y) 弹出 paths 的系统外壳右键菜单（资源管理器同款 IContextMenu）。
     纯 ctypes COM 调用，零新增依赖。成功弹出返回 True；任何一步失败返回 False，
@@ -1081,7 +1144,7 @@ def shell_context_menu(hwnd, paths, x, y):
             return False
         arr = (ctypes.c_void_p * len(kids))(*kids)
         # CDefFolderMenu_Create2 直接造 IContextMenu（GetUIObjectOf 在某些系统组件
-        # 上的 vtable 布局实测不可依赖，这个导出函数是壳菜单的标准做法）
+        # 上的 vtable 布局实测不可依赖，这个导出函数是壳菜单的标准做法）。
         pcm = ctypes.c_void_p()
         if _s32.CDefFolderMenu_Create2(None, hwnd, len(kids), arr, psf_dir,
                                        None, 0, None, ctypes.byref(pcm)) != 0 or not pcm:
@@ -1093,9 +1156,28 @@ def shell_context_menu(hwnd, paths, x, y):
         qcm = _com_fn(pcm.value, 3, ctypes.c_long,   # IContextMenu::QueryContextMenu
                       ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint,
                       ctypes.c_uint, ctypes.c_uint)
-        if qcm(pcm.value, hmenu, 0, 1, 0x7FFF, 0) < 0:   # CMF_NORMAL（扩展动词按住 Shift 才有，对齐资源管理器）
+        # CMF_EXPLORE|CMF_CANRENAME：对齐资源管理器（不带 CANRENAME 菜单里没有「重命名」；
+        # 扩展动词仍按壳规则按住 Shift 才出）。注意别传 ahKeys——传了会整个替换掉
+        # 壳默认的动词/扩展合并，菜单反而只剩壳内置项（实测）。
+        if qcm(pcm.value, hmenu, 0, 1, 0x7FFF, 0x14) < 0:
             return False
+        # 顶部补「打开 / 编辑」等 progid 动词：壳默认菜单不合并用户范围注册的 progid
+        # 动词（如 Notepad++_file），已存在的不重复补；第 0 项加粗对齐资源管理器。
+        inserted = {}
+        seen = _menu_labels(hmenu)
+        pos = 0
+        for verb, label in _progid_verbs(paths[0]):
+            if label.split('(')[0] in seen:
+                continue
+            _h32.InsertMenuW(hmenu, pos, 0x00000400, 0x7F00 + pos, label)
+            inserted[0x7F00 + pos] = verb
+            pos += 1
+        if pos:
+            _h32.SetMenuDefaultItem(hmenu, 0, 1)
         cmd = _h32.TrackPopupMenu(hmenu, 0x0100, x, y, 0, hwnd, None)   # TPM_RETURNCMD
+        if cmd in inserted:
+            _shell_invoke_async(inserted[cmd], paths)   # 我们补的 progid 动词，直接按名执行
+            return True
         if cmd:
             # 动词字符串 → ShellExecuteEx 执行。不直接用 IContextMenu::InvokeCommand：
             # CDefFolderMenu_Create2 的对象在无站点（SetSite）环境下对动词一律 E_FAIL（实测）。
