@@ -599,7 +599,7 @@ class BoxWindow(QWidget):
         root.setContentsMargins(1, 1, 1, 1)
         root.setSpacing(0)
 
-        # 标题栏：文件夹图标 + 名称 + 收起/锁定/菜单
+        # 标题栏：文件夹图标 + 名称 + 收起/锁定/菜单（图标只有映射格子有，见下）
         self.title = QWidget()
         self.title.setFixedHeight(ui.sc(TITLE_H))
         tb = QHBoxLayout(self.title)
@@ -609,9 +609,13 @@ class BoxWindow(QWidget):
         self.icon.setFixedSize(ui.sc(16), ui.sc(16))
         self.icon.setScaledContents(True)
         if rec['kind'] == 'folder':
-            # 映射格子：点图标打开所在文件夹（本地临时格子是背地里的存储目录，不给入口）
+            # 映射格子：点图标打开所在文件夹
             self.icon.setCursor(Qt.PointingHandCursor)
             self.icon.setToolTip('打开所在文件夹')
+        else:
+            # 空白格子不显示图标——它背后没有对应的文件夹，图标只是个无意义的点缀，
+            # 隐藏后布局不占位（QHBoxLayout 跳过隐藏控件），标题栏只留名称
+            self.icon.hide()
         tb.addWidget(self.icon)
         self.name = QLabel(rec['name'])
         self.name.setObjectName('boxName')
@@ -756,9 +760,10 @@ class BoxWindow(QWidget):
             item.setToolTip(p)
             self.list.addItem(item)
         self.hint.setVisible(not entries and self.rec['kind'] == 'blank')
-        # 标题图标：映射格子用目标文件夹图标，空白格子用桌面文件夹图标
-        pm = self._icon_for(self.display_dir(), True).pixmap(ui.sc(16), ui.sc(16))
-        self.icon.setPixmap(pm)
+        # 标题图标只有映射格子有（空白格子隐藏了图标，只显示名称，见 __init__）
+        if self.rec['kind'] == 'folder':
+            pm = self._icon_for(self.rec['path'], True).pixmap(ui.sc(16), ui.sc(16))
+            self.icon.setPixmap(pm)
 
     def _scan_dir(self, path):
         """映射格子的目录扫描（隐藏文件不显示）。"""
