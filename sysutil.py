@@ -15,7 +15,7 @@ MENU_TITLE = 'zviber桌面格子'
 MENU_ITEMS = [
     ('A_Toggle', '显示 / 隐藏', '--toggle'),
     ('B_NewBox', '新建格子', '--new-box'),
-    ('C_NewFolderBox', '新建文件夹格子', '--new-folder-box'),
+    ('C_NewFolderBox', '新建文件夹格子', '--pick-folder'),
     ('D_ToggleBoxes', '显示 / 隐藏格子', '--toggle-boxes'),
     ('E_Settings', '设置', '--settings'),
     ('F_About', '关于', '--about'),

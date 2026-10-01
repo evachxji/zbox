@@ -2,8 +2,9 @@
 """Zviber 悬浮面板入口：单实例 + 桌面右键菜单 + 节假日联网更新/离线导入。
 用法：pythonw main.pyw        启动并显示
       pythonw main.pyw --toggle   已运行则切换显隐（供桌面右键菜单调用）
-      pythonw main.pyw --new-box / --new-folder-box / --toggle-boxes / --settings / --about / --quit
+      pythonw main.pyw --new-box / --toggle-boxes / --settings / --about / --quit
                                   桌面右键二级菜单项：已运行则 IPC 转发，未运行则启动后本地执行（--quit 除外）
+      pythonw main.pyw --pick-folder   「新建文件夹格子」：本进程弹原生目录框，路径经 IPC 发回面板
 自检：设置环境变量 ZVIBER_SHOT=<目录> 启动，自动导出两主题截图后退出。
 """
 import faulthandler
@@ -143,11 +144,11 @@ def start_holiday_update(hstore, cfg, panel, groups, manual=True, fallback_url=N
     return True
 
 
-# 命令行参数 → IPC 消息（桌面右键二级菜单的七个项）
+# 命令行参数 → IPC 消息（桌面右键二级菜单的七个项；--pick-folder 不查此表，
+# 由独立进程弹完目录框后把路径包进 b'folder:' 消息发回）
 IPC_ACTIONS = {
     '--toggle': b'toggle',
     '--new-box': b'new-box',
-    '--new-folder-box': b'new-folder-box',
     '--toggle-boxes': b'toggle-boxes',
     '--settings': b'settings',
     '--about': b'about',
@@ -192,6 +193,11 @@ def main():
         faulthandler.enable(_crash_log[0])
     except Exception:
         pass
+    # Qt 默认把 GUI 线程的 COM 初始化为 MTA：原生壳对话框（IFileOpenDialog 等）在 MTA 下
+    # 会抛 RPC_E_WRONG_THREAD（0x8001010e）致命错误（「新建文件夹格子」原生目录框闪退）。
+    # 先初始化为 STA：Qt 之后再初始化只会拿到 S_FALSE，不再改变套间类型。
+    import ctypes
+    ctypes.windll.ole32.CoInitializeEx(None, 0)   # COINIT_APARTMENTTHREADED
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
     QApplication.setQuitOnLastWindowClosed(False)
@@ -200,6 +206,16 @@ def main():
 
     if installer.maybe_install():
         return 0  # --uninstall 卸载向导结束后退出（安装包是独立的 setup exe）
+
+    if '--pick-folder' in sys.argv:
+        # 「新建文件夹格子」的目录框放在独立进程里弹，而不是转发给面板开：
+        # ① 面板全程不阻塞，选目录期间设置窗等照常可用；
+        # ② 面板自身全是 Tool/挂带窗口且无活动窗口，原生框在面板进程里开不出可见窗口（实测隐形）。
+        # 选中的路径经 IPC 发回面板建格子。
+        path = QFileDialog.getExistingDirectory(None, '选择要映射的文件夹')
+        if path:
+            notify_existing(b'folder:' + os.path.normpath(path).encode('utf-8'))
+        return 0
 
     cli_arg = next((a for a in sys.argv[1:] if a in IPC_ACTIONS), None)
     if notify_existing(IPC_ACTIONS.get(cli_arg, b'toggle')):
@@ -277,7 +293,7 @@ def main():
                b'about': lambda: ui.AboutDialog(panel).exec_()}
     if boxmgr:
         actions[b'new-box'] = boxmgr.new_blank
-        actions[b'new-folder-box'] = lambda: boxmgr.new_folder()
+        actions[b'folder:'] = boxmgr.new_folder
         actions[b'toggle-boxes'] = boxmgr.toggle_visible
     server.newConnection.connect(lambda: _on_ipc(server, actions))
     if cli_arg and cli_arg != '--toggle':
@@ -321,6 +337,11 @@ def _on_ipc(server, actions):
         sock.waitForReadyRead(300)
         data = bytes(sock.readAll())
         sock.deleteLater()
+    if data.startswith(b'folder:'):   # --pick-folder 独立进程选完目录回传的路径
+        fn = actions.get(b'folder:')
+        if fn:
+            fn(data[7:].decode('utf-8'))
+        return
     fn = actions.get(data)
     if fn:
         fn()

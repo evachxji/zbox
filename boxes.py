@@ -1313,11 +1313,13 @@ class BoxManager(object):
         self._spawn(rec)
 
     def new_folder(self, path=None):
-        """新建文件夹映射格子；path 为空时弹目录选择框。"""
+        """新建文件夹映射格子；path 为空时弹目录选择框（原生资源管理器样式）。"""
         if not path:
-            # 原生壳对话框在 Qt 初始化的 MTA 线程里抛 RPC_E_WRONG_THREAD（0x8001010e）致命错误
-            path = QFileDialog.getExistingDirectory(None, '选择要映射的文件夹', '',
-                                                    QFileDialog.DontUseNativeDialog)
+            # 静态方法原生框：模态只锁属主窗口，设置窗等其它顶层窗口照常可用。
+            # 两个坑：① 必须用静态方法——QFileDialog 实例 + exec_() 在这套环境会开出
+            # 隐形对话框；② GUI 线程必须是 STA（main() 入口已初始化），否则原生壳对话框
+            # 在 Qt 默认的 MTA 下抛 RPC_E_WRONG_THREAD（0x8001010e）致命错误
+            path = QFileDialog.getExistingDirectory(self.panel, '选择要映射的文件夹')
         if not path:
             return
         rec = self._new_rec('folder', os.path.basename(os.path.normpath(path)) or path,
