@@ -1,8 +1,16 @@
 # -*- coding: utf-8 -*-
 """桌面格子：桌面文件归类格子功能。
 
-- 空白格子：背后对应 %APPDATA%\\ZviberPanel\\Boxes\\<id>\\ 真实文件夹，
-  拖入 = 把文件移动进去；解散 = 把文件全部还原回桌面（不删文件）。
+- 空白格子：**只是桌面文件的收纳视图，不搬动文件**（2026-10 改；旧版是把文件真搬进
+  %APPDATA%\\ZviberPanel\\Boxes\\<id>\\，用户实测「属性里路径变成 AppData」「关程序后
+  文件被吞掉」，故改成现在这样）。收进格子的文件留在桌面原路径（右键属性的位置就是桌面），
+  只是给文件加「隐藏」属性把桌面图标藏起来；关程序/解散格子/隐藏格子时把属性还原，
+  文件随即回到桌面。分组记录（rec['items'] + 隐藏属性账本 rec['attrs']）存在 boxes.json，
+  下次启动自动收进格子。不在桌面的文件拖进来会先搬到桌面——「格子里的文件都在桌面」是
+  这套模型的前提。拖出时先把文件挪进桌面下的隐藏暂存夹（文件本来就在桌面上，直接拖到
+  桌面＝移动到它自己所在的目录，资源管理器会报「源文件名和目标文件名相同」），这样拖到
+  桌面/资源管理器文件夹/别的格子都是一次真实移动；落放效果只在真会搬走时才敢报「移动」
+  （报 Move 而文件没走，资源管理器会把源文件删掉）。
 - 文件夹映射格子：实时映射任意磁盘文件夹，QFileSystemWatcher 监听内容变化自动刷新；
   路径失效时显示提示 + 「解散格子」按钮。
 - 窗口：无边框 Tool 窗，半透明磨砂；挂桌面带免疫 Win+D（面板同款 pin_to_desktop）。
@@ -104,6 +112,21 @@ _k32.WriteProcessMemory.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_v
                                     ctypes.c_size_t, ctypes.c_void_p]
 _k32.CloseHandle.restype = wintypes.BOOL
 _k32.CloseHandle.argtypes = [ctypes.c_void_p]
+_k32.GetFileAttributesW.restype = wintypes.DWORD
+_k32.GetFileAttributesW.argtypes = [wintypes.LPCWSTR]
+_k32.SetFileAttributesW.restype = wintypes.BOOL
+_k32.SetFileAttributesW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD]
+_s32.SHChangeNotify.restype = None
+_s32.SHChangeNotify.argtypes = [ctypes.c_long, wintypes.UINT, ctypes.c_void_p, ctypes.c_void_p]
+
+ATTR_HIDDEN = 0x2
+_INVALID_ATTRS = 0xFFFFFFFF
+_SHCNE_UPDATEDIR = 0x00001000
+_SHCNF_PATHW = 0x0005
+_SHCNF_FLUSH = 0x1000
+
+# 拖出空白格子时的暂存目录名（桌面下的隐藏夹，见 BoxWindow.stage_for_drag）
+_STAGE_NAME = '.zviber'
 
 SORT_CHOICES = [('name', '按名称'), ('type', '按类型'), ('mtime', '按修改时间')]
 
@@ -176,6 +199,17 @@ def desktop_dir():
     return os.path.join(os.path.expanduser('~'), 'Desktop')
 
 
+def _shell_refresh(dir_path):
+    """通知外壳「这个目录变了」。SHCNF_FLUSH 让资源管理器当场处理，不等它自己反应过来
+    ——实测桌面图标的隐藏/恢复都在 50ms 内生效（不刷的话图标要过一会儿才消失，
+    就是用户报的「拖进格子后桌面图标有延迟」）。"""
+    try:
+        _s32.SHChangeNotify(_SHCNE_UPDATEDIR, _SHCNF_PATHW | _SHCNF_FLUSH,
+                            ctypes.c_wchar_p(dir_path), None)
+    except Exception:
+        pass
+
+
 def _unique_name(dest_dir, name):
     """目标目录里的不重名文件名：冲突时 '名 (2).ext' 递增。"""
     if not os.path.exists(os.path.join(dest_dir, name)):
@@ -185,6 +219,30 @@ def _unique_name(dest_dir, name):
     while os.path.exists(os.path.join(dest_dir, '%s (%d)%s' % (base, n, ext))):
         n += 1
     return '%s (%d)%s' % (base, n, ext)
+
+
+def _recover_files(path, desk, items):
+    """把 path 里的文件搬回桌面（去重后补进 items），搬空则删掉目录。
+    用于启动恢复：旧版存储目录与拖拽暂存夹的残留都走这里。"""
+    if not path or not os.path.isdir(path):
+        return items
+    try:
+        for name in os.listdir(path):
+            try:
+                dst = os.path.join(desk, _unique_name(desk, name))
+                shutil.move(os.path.join(path, name), dst)
+                if dst not in items:
+                    items.append(dst)
+            except OSError:
+                pass
+    except OSError:
+        pass
+    try:
+        if not os.listdir(path):
+            os.rmdir(path)
+    except OSError:
+        pass
+    return items
 
 
 def _recycle(paths):
@@ -207,8 +265,9 @@ def _recycle(paths):
 
 class BoxStore(object):
     """boxes.json：{'visible': 是否全部显示, 'boxes': [格子记录]}。
-    记录字段：id / name / kind('blank'|'folder') / path / x,y,w,h / collapsed / locked / sort。
-    blank 的 path 是背地里的存储文件夹；folder 的 path 是被映射的磁盘文件夹。"""
+    记录字段：id / name / kind('blank'|'folder') / x,y,w,h / collapsed / locked / sort。
+    folder 用 path（被映射的磁盘文件夹）；blank 用 items（收进来的桌面文件绝对路径）
+    + attrs（被我们隐藏了图标的文件的原属性，退出时按它还原）。"""
 
     def __init__(self, path):
         self.path = path
@@ -278,14 +337,18 @@ class BoxList(QListWidget):
         super(BoxList, self).mouseDoubleClickEvent(e)
 
     def dragEnterEvent(self, e):
-        if e.mimeData().hasUrls() and e.source() is not self:
-            e.acceptProposedAction()
+        paths = self._drag_paths(e)
+        if paths:
+            e.setDropAction(self.box.drag_effect())   # 见 drag_effect：报错会删文件
+            e.accept()
         else:
             super(BoxList, self).dragEnterEvent(e)
 
     def dragMoveEvent(self, e):
-        if e.mimeData().hasUrls() and e.source() is not self:
-            e.acceptProposedAction()
+        paths = self._drag_paths(e)
+        if paths:
+            e.setDropAction(self.box.drag_effect())
+            e.accept()
         else:
             super(BoxList, self).dragMoveEvent(e)
 
@@ -293,16 +356,41 @@ class BoxList(QListWidget):
         if e.source() is self:
             e.ignore()   # 列表按排序填充，不支持内部拖放换位
             return
-        paths = [u.toLocalFile() for u in e.mimeData().urls() if u.isLocalFile()]
+        paths = self._drag_paths(e)
         if paths:
             self.box.import_paths(paths)
-            e.acceptProposedAction()
+            e.setDropAction(self.box.drop_effect(paths))   # 按实际搬没搬走回报
+            e.accept()
+
+    def _drag_paths(self, e):
+        """外部拖进来的本地文件路径（source 是自己的列表 = 格子内部拖拽，不算）。"""
+        if e.source() is self:
+            return []
+        return [u.toLocalFile() for u in e.mimeData().urls() if u.isLocalFile()]
 
     def mimeData(self, items):
-        """拖出时附带文件 URL：落到桌面/资源管理器/别的格子都是一次真实移动。"""
+        """拖出时附带文件 URL：落到桌面/资源管理器/别的格子都是一次真实移动。
+        空白格子的条目在 startDrag 里已经换成暂存路径（见 stage_for_drag）。"""
         md = super(BoxList, self).mimeData(items)
         md.setUrls([QUrl.fromLocalFile(it.data(Qt.UserRole)) for it in items])
         return md
+
+    def startDrag(self, actions):
+        """拖出前：空白格子把文件挪到桌面下的隐藏暂存夹（见 BoxWindow.stage_for_drag）。
+        非挪不可——文件本来就在桌面上，直接拖到桌面＝把文件移动到它自己所在的目录，
+        资源管理器会弹「源文件名和目标文件名相同」（用户实测）；挪出去之后拖到桌面
+        才是一次真实的跨目录移动。拖动数据里也要换成暂存路径，否则报错照旧。"""
+        items = self.selectedItems()
+        saved = self.box.stage_for_drag([it.data(Qt.UserRole) for it in items])
+        staged = dict(saved)
+        for it in items:
+            p = it.data(Qt.UserRole)
+            if p in staged:
+                it.setData(Qt.UserRole, staged[p])
+        try:
+            super(BoxList, self).startDrag(actions)
+        finally:
+            self.box.finish_drag_out(saved)
 
     def keyPressEvent(self, e):
         if e.key() == Qt.Key_Delete:
@@ -323,10 +411,13 @@ class BoxList(QListWidget):
             new_name = item.text().strip()
             if new_name and new_name != os.path.basename(path) and \
                     not any(c in new_name for c in '\\/:*?"<>|'):
+                new_path = os.path.join(os.path.dirname(path), new_name)
                 try:
-                    os.rename(path, os.path.join(os.path.dirname(path), new_name))
+                    os.rename(path, new_path)
                 except OSError:
                     pass
+                else:
+                    self.box.rename_item(path, new_path)
 
         def on_closed(*_a):
             self.itemChanged.disconnect(on_changed)
@@ -383,7 +474,8 @@ class BoxList(QListWidget):
             menu.addAction('删除', lambda: self.box.delete_items(self.selectedItems()))
         else:
             menu.addAction('刷新', self.box.refresh)
-            menu.addAction('在资源管理器中打开', lambda: self.box.open_path(self.box.rec['path']))
+            menu.addAction('在资源管理器中打开',
+                           lambda: self.box.open_path(self.box.display_dir()))
         if menu.actions():
             act = menu.exec_(QCursor.pos())
             ui._dbg('★ Qt 兜底菜单选择: %s' % (act.text() if act else None))
@@ -489,11 +581,16 @@ class BoxWindow(QWidget):
         self.rec = rec
         self._desk_pinned = False
         self._desk_surface = None   # 探测到的第三方桌面表层（抬回锚点缓存）
+        self._dragging = {}         # 拖出期间 {原路径: 暂存路径}（见 stage_for_drag）
         self._op = None          # ('move', 起点全局坐标, 起始几何) 或 ('resize', 边缘掩码, ...)
         self._press_pos = None   # 拖拽起点（全局坐标），用于区分点击与拖动
         self._last_drag_ts = 0.0   # 最近一次发生位移的拖拽结束时间（抑制拖拽连带的双击收起）
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMouseTracking(True)
+        # 整窗接受拖放：只有文件列表（视口）注册了拖放目标，拖到标题栏/空白提示区/
+        # 边缘这些地方 Qt 找不到接受拖放的控件，直接忽略这次拖拽——用户看到的就是
+        # 鼠标变红色禁止图标、怎么都放不进去（收起状态更是整个格子都放不进去）。
+        self.setAcceptDrops(True)
         self.setMinimumSize(ui.sc(MIN_W), ui.sc(TITLE_H) + ui.sc(60))
         self.setStyleSheet(_box_qss())
         self.setFont(QFont(ui.pick_fonts()[0]))
@@ -620,27 +717,28 @@ class BoxWindow(QWidget):
             self._icon_provider = QFileIconProvider()
         return self._icon_provider.icon(QFileInfo(path))
 
+    def display_dir(self):
+        """格子内容所在目录：映射格子是映射的目录，空白格子是桌面（文件都在桌面上）。"""
+        return self.rec['path'] if self.rec['kind'] == 'folder' else desktop_dir()
+
     def refresh(self):
-        """重新扫描目录填充列表；映射文件夹失效时切到失效页。"""
-        path = self.rec['path']
-        if self.rec['kind'] == 'folder' and not os.path.isdir(path):
-            self.pages.setCurrentIndex(1)
-            self._rewatch()
+        """重新扫描填充列表；映射文件夹失效时切到失效页。
+        空白格子按 rec['items'] 记账列文件（文件在桌面上），不再扫目录。"""
+        if self._dragging:
+            # 拖出期间不重建列表：文件此刻在暂存夹里（桌面目录变化会触发 watcher 刷新），
+            # 这时候 clear() 会把拖拽源那一行清掉。拖完 finish_drag_out 会刷新。
             return
+        if self.rec['kind'] == 'folder':
+            path = self.rec['path']
+            if not os.path.isdir(path):
+                self.pages.setCurrentIndex(1)
+                self._rewatch()
+                return
+            entries = self._scan_dir(path)
+        else:
+            entries = self._entries_from_items()
         self.pages.setCurrentIndex(0)
         self._rewatch()
-        entries = []
-        try:
-            for it in os.scandir(path):
-                try:
-                    st = it.stat()
-                except OSError:
-                    continue
-                if getattr(st, 'st_file_attributes', 0) & 0x2:
-                    continue   # 隐藏文件不显示
-                entries.append((it.name, it.path, it.is_dir(), st))
-        except OSError:
-            pass
         sort = self.rec.get('sort', 'name')
         if sort == 'mtime':
             key = lambda e: (not e[2], -e[3].st_mtime, e[0].lower())
@@ -658,20 +756,195 @@ class BoxWindow(QWidget):
             item.setToolTip(p)
             self.list.addItem(item)
         self.hint.setVisible(not entries and self.rec['kind'] == 'blank')
-        # 标题图标：映射格子用目标文件夹图标，空白格子用文件夹图标
-        pm = self._icon_for(path, True).pixmap(ui.sc(16), ui.sc(16))
+        # 标题图标：映射格子用目标文件夹图标，空白格子用桌面文件夹图标
+        pm = self._icon_for(self.display_dir(), True).pixmap(ui.sc(16), ui.sc(16))
         self.icon.setPixmap(pm)
+
+    def _scan_dir(self, path):
+        """映射格子的目录扫描（隐藏文件不显示）。"""
+        entries = []
+        try:
+            for it in os.scandir(path):
+                try:
+                    st = it.stat()
+                except OSError:
+                    continue
+                if getattr(st, 'st_file_attributes', 0) & ATTR_HIDDEN:
+                    continue   # 隐藏文件不显示
+                entries.append((it.name, it.path, it.is_dir(), st))
+        except OSError:
+            pass
+        return entries
+
+    def _entries_from_items(self):
+        """空白格子的条目：只认记账过的路径，已消失的顺手从 items 和隐藏账本里剔除。
+        拖出期间文件在暂存夹里，按暂存路径确认它还在（列表不能中途少一行）。"""
+        attrs = self.rec.setdefault('attrs', {})
+        items, entries, dirty = [], [], False
+        for p in self.rec.get('items') or []:
+            try:
+                st = os.stat(self._dragging.get(p, p))
+            except OSError:
+                if p in self._dragging:
+                    continue     # 暂存文件已被搬走：等 finish_drag_out 收尾，先别动
+                attrs.pop(p, None)   # 文件不在了（被删/被搬走）：隐藏账本一起划掉
+                dirty = True
+                continue
+            items.append(p)
+            entries.append((os.path.basename(p), p, os.path.isdir(p), st))
+        if dirty:
+            self.rec['items'] = items
+            self.mgr.save_rec(self)
+        return entries
 
     def _rewatch(self):
         old = self.watcher.directories()
         if old:
             self.watcher.removePaths(old)
-        if os.path.isdir(self.rec['path']):
-            self.watcher.addPath(self.rec['path'])
+        # 空白格子看桌面：收进格子的文件在桌面被删/改名/剪切走都要跟着刷新
+        watch = self.display_dir()
+        if os.path.isdir(watch):
+            self.watcher.addPath(watch)
+
+    # ---------- 空白格子：桌面图标隐藏账本 ----------
+    def _hide_icon(self, path):
+        """把桌面图标藏起来 = 给文件加「隐藏」属性（资源管理器唯一支持的单项隐藏方式），
+        原属性记进 rec['attrs'] 以便还原。本来就隐藏的（图标本来就不显示）不动、不记账。"""
+        attrs = self.rec.setdefault('attrs', {})
+        if path in attrs:
+            return
+        old = _k32.GetFileAttributesW(path)
+        if old == _INVALID_ATTRS or old & ATTR_HIDDEN:
+            return
+        if _k32.SetFileAttributesW(path, old | ATTR_HIDDEN):
+            attrs[path] = old
+
+    def _show_icon(self, path):
+        """把桌面图标放出来：还原隐藏前的属性。"""
+        old = self.rec.setdefault('attrs', {}).pop(path, None)
+        if old is not None and os.path.exists(path):
+            _k32.SetFileAttributesW(path, old)
+
+    def hide_icons(self):
+        """收进格子：隐藏 items 的桌面图标。"""
+        for p in self.rec.get('items') or []:
+            self._hide_icon(p)
+        _shell_refresh(desktop_dir())
+        self.mgr.save_rec(self)
+
+    def show_icons(self):
+        """放回桌面：还原我们隐藏过的图标（关程序 / 解散格子 / 隐藏格子时调）。"""
+        for p in list(self.rec.get('attrs') or {}):
+            self._show_icon(p)
+        _shell_refresh(desktop_dir())
+        self.mgr.save_rec(self)
+
+    @staticmethod
+    def drag_effect():
+        """拖拽悬停期间回报的落放效果——**只决定鼠标旁那个徽标显示什么**，一律报「移动」。
+
+        徽标是资源管理器按我们从 DragOver 报回的效果画的；而「源方会不会删文件」是另一件事：
+        源方只在 Drop 那一步按我们报的效果决定要不要清理源文件（报 Move 而文件仍在原处 →
+        它会把文件删掉；报 Copy → 什么都不做）。两件事解耦，实测（悬停报 Move + 落放报 Copy）：
+        徽标显示「移动」，源文件安然无恙。所以悬停一律报「移动」：与「文件被收进格子」的直觉
+        一致（也和 DeskGo 的表现一致），真正搬没搬走由 drop_effect() 按实际结果回报。"""
+        return Qt.MoveAction
+
+    @staticmethod
+    def drop_effect(paths):
+        """落放结束时报给拖拽源的效果：**按实际结果**——源文件都不在原处了才算「移动」。
+        为什么不在拖之前就定死：万一我们没搬成（文件被占用、权限不足……），报 Move 会让
+        资源管理器把源文件删掉；按结果回报就绝不会出现「没搬走却被当成搬走了」。
+        桌面文件拖进空白格子属于「没搬走」（文件留在桌面原路径，只是把图标收起来）→ 报
+        Copy，源方于是什么都不做，文件原地不动。"""
+        if paths and all(not os.path.exists(p) for p in paths):
+            return Qt.MoveAction
+        return Qt.CopyAction
+
+    def _stage_dir(self):
+        """拖出期间的暂存目录（桌面下的隐藏夹）。拖完会删掉，所以正常情况下桌面
+        看不到它；进程被强杀留下的残留在启动时扫回桌面（见 BoxManager._upgrade_blank_boxes）。"""
+        d = os.path.join(desktop_dir(), _STAGE_NAME)
+        try:
+            os.makedirs(d, exist_ok=True)
+            _k32.SetFileAttributesW(d, ATTR_HIDDEN)
+        except OSError:
+            return None
+        return d
+
+    def _clear_stage_dir(self):
+        """暂存夹空了就收掉，别在用户桌面上留一个隐藏目录。"""
+        d = os.path.join(desktop_dir(), _STAGE_NAME)
+        try:
+            if os.path.isdir(d) and not os.listdir(d):
+                os.rmdir(d)
+                _shell_refresh(desktop_dir())
+        except OSError:
+            pass
+
+    def stage_for_drag(self, paths):
+        """拖出前把文件挪到桌面下的隐藏暂存夹，返回 [(原路径, 暂存路径)]。
+
+        为什么非挪不可：空白格子里的文件**本来就在桌面上**，直接拖到桌面就是「把文件移动
+        到它自己所在的目录」，资源管理器会弹「源文件名和目标文件名相同」（用户实测）。
+        挪进同盘的隐藏子目录后：拖到桌面 = 一次真实的跨目录移动（文件回到原路径），拖到
+        资源管理器文件夹/别的格子也都正常。顺带在这里摘掉「隐藏」属性——否则属性跟着文件
+        走，落到别的文件夹里也是隐藏的（用户会以为文件丢了）。映射格子不用这一步（文件在
+        别处，不存在「搬到自己的目录」问题）。"""
+        if self.rec['kind'] != 'blank' or not paths:
+            return []
+        stage = self._stage_dir()
+        if not stage:
+            return []
+        saved = []
+        for p in paths:
+            if not os.path.exists(p):
+                continue
+            self._show_icon(p)   # 先把隐藏属性摘掉，别让它跟着文件走
+            dst = os.path.join(stage, _unique_name(stage, os.path.basename(p)))
+            try:
+                shutil.move(p, dst)
+            except OSError:
+                continue
+            saved.append((p, dst))
+        if saved:
+            self._dragging.update(saved)   # 拖拽期间列表要按暂存路径认这几个文件
+            _shell_refresh(desktop_dir())
+            self.mgr.save_rec(self)
+        return saved
+
+    def finish_drag_out(self, saved):
+        """拖拽收尾：暂存文件还在 = 没被搬走（取消拖拽 / 拖回格子）→ 搬回原处继续藏着；
+        暂存文件没了 = 被搬走了（拖到桌面 = 移出格子；拖到文件夹/别的格子 = 不再属于这里）
+        → 从记账里去掉，文件落在新位置、不再需要隐藏。"""
+        if not saved:
+            return
+        items = self.rec.get('items') or []
+        for orig, staged in saved:
+            self._dragging.pop(orig, None)
+            if os.path.exists(staged):
+                try:
+                    shutil.move(staged, orig)
+                except OSError:
+                    continue
+                self._hide_icon(orig)   # 还在格子里：图标继续藏着
+            elif orig in items:
+                items.remove(orig)
+                ui._dbg('box: 拖出 → 移出格子 %s' % os.path.basename(orig))
+        self.rec['items'] = items
+        self._clear_stage_dir()
+        _shell_refresh(desktop_dir())
+        self.mgr.save_rec(self)
+        self.refresh()
 
     # ---------- 文件操作 ----------
     def import_paths(self, paths):
-        """拖入文件：真实移动到格子目录（跨格子拖动也是移动）。跳过已在目录内/父目录拖进自己。"""
+        """拖入文件：文件夹格子真实移动到映射目录（跨格子拖动也是移动，跳过已在目录内/
+        父目录拖进自己）；空白格子只收进账本、把桌面图标藏起来（文件不动）。"""
+        if self.rec['kind'] == 'blank':
+            self._group_paths(paths)
+            self.refresh()
+            return
         dest = os.path.normpath(self.rec['path'])
         for p in paths:
             p = os.path.normpath(p)
@@ -684,6 +957,79 @@ class BoxWindow(QWidget):
             except OSError:
                 pass
         self.refresh()
+
+    def _group_paths(self, paths):
+        """收进空白格子：不在桌面的先搬到桌面（「格子里的文件都在桌面」是这套模型的前提），
+        再记账 + 隐藏桌面图标；同一文件从别的空白格子里移出。"""
+        desk = os.path.normpath(desktop_dir())
+        items = self.rec.setdefault('items', [])
+        added = []
+        for p in paths:
+            p = os.path.normpath(p)
+            if p in items:
+                continue
+            if os.path.normcase(os.path.dirname(p)) != os.path.normcase(desk):
+                try:
+                    dst = os.path.join(desk, _unique_name(desk, os.path.basename(p)))
+                    shutil.move(p, dst)
+                except OSError:
+                    continue
+                p = dst
+            items.append(p)
+            added.append(p)
+            self._hide_icon(p)
+        self.mgr.ungroup_paths(added, self)
+        _shell_refresh(desk)
+        self.mgr.save_rec(self)
+
+    # ---------- 拖入（整窗，不只列表视口） ----------
+    def dragEnterEvent(self, e):
+        """只有文件列表视口注册了拖放目标，拖到标题栏/空白提示区/边缘时 Qt 找不到
+        接受拖放的控件就整个忽略这次拖拽（鼠标变红色禁止图标，怎么都放不进去）。
+        窗口自己接一份，收起状态（整格只剩标题栏）也就能收文件了。"""
+        paths = self._drag_paths(e)
+        if paths:
+            e.setDropAction(self.drag_effect())
+            e.accept()
+        else:
+            super(BoxWindow, self).dragEnterEvent(e)
+
+    def dragMoveEvent(self, e):
+        paths = self._drag_paths(e)
+        if paths:
+            e.setDropAction(self.drag_effect())
+            e.accept()
+        else:
+            super(BoxWindow, self).dragMoveEvent(e)
+
+    def dropEvent(self, e):
+        paths = self._drag_paths(e)
+        if not paths:
+            super(BoxWindow, self).dropEvent(e)
+            return
+        self.import_paths(paths)
+        e.setDropAction(self.drop_effect(paths))   # 按实际搬没搬走回报
+        e.accept()
+
+    def _drag_paths(self, e):
+        """外部拖进来的本地文件路径；格子内部拖拽（source 是自己的列表）不接。"""
+        if e.source() is self.list:
+            return []
+        return [u.toLocalFile() for u in e.mimeData().urls() if u.isLocalFile()]
+
+    def rename_item(self, old, new):
+        """格子里改名（外壳菜单的「重命名」）：空白格子要跟着改记账——文件在桌面，
+        路径变了；隐藏属性跟着文件走，账本的键也得跟着改，否则这个文件就成了
+        「藏着但不在任何格子里」。"""
+        items = self.rec.get('items') or []
+        if old not in items:
+            return
+        items[items.index(old)] = new
+        self.rec['items'] = items
+        attrs = self.rec.get('attrs') or {}
+        if old in attrs:
+            attrs[new] = attrs.pop(old)
+        self.mgr.save_rec(self)
 
     def open_path(self, path):
         # 记下是【谁】打开的：格子里的「点了就打开」问题只有这一个出口，日志里带上
@@ -752,9 +1098,9 @@ class BoxWindow(QWidget):
             self.mgr.save_rec(self)
 
     def _confirm_dissolve(self):
-        """解散二次确认：空白格子提示文件会还原回桌面，映射格子提示不影响原文件夹。"""
+        """解散二次确认：空白格子提示文件会回到桌面，映射格子提示不影响原文件夹。"""
         if self.rec['kind'] == 'blank':
-            detail = '里面的文件会自动还原回桌面。'
+            detail = '里面的文件会回到桌面（取消桌面图标隐藏）。'
         else:
             detail = '只移除格子，不影响文件夹本身。'
         dlg = BoxConfirmDialog(self, '解散格子',
@@ -762,21 +1108,12 @@ class BoxWindow(QWidget):
         return dlg.exec_() == QDialog.Accepted
 
     def dissolve(self):
-        """解散格子：空白格子把文件还原回桌面后删掉背后的存储目录；映射格子直接移除。"""
+        """解散格子：空白格子把桌面图标放出来（文件本来就在桌面，不搬动文件）；
+        映射格子只是移除格子。"""
         if not self._confirm_dissolve():
             return
-        if self.rec['kind'] == 'blank' and os.path.isdir(self.rec['path']):
-            desk = desktop_dir()
-            try:
-                for name in os.listdir(self.rec['path']):
-                    src = os.path.join(self.rec['path'], name)
-                    try:
-                        shutil.move(src, os.path.join(desk, _unique_name(desk, name)))
-                    except OSError:
-                        pass
-            except OSError:
-                pass
-            shutil.rmtree(self.rec['path'], ignore_errors=True)
+        if self.rec['kind'] == 'blank':
+            self.show_icons()
         self.mgr.remove(self)
 
     def _show_menu(self):
@@ -1505,7 +1842,9 @@ def shell_context_menu(hwnd, paths, x, y, on_rename=None):
     # 失败，菜单弹出即被取消——表现为首次右键无效。
     if _get_daemon().request(hwnd, paths, on_rename):
         return True
-    own_com = (_o32.CoInitializeEx(None, 0) == 0)   # S_OK 才是我们初始化的，退出才配对释放
+    # GUI 线程现在已是 STA（main.pyw 入口初始化），这里只是确认；S_OK 才是我们初始化的，
+    # 退出才配对释放（别写成 0——那是 COINIT_MULTITHREADED）。
+    own_com = (_o32.CoInitializeEx(None, 0x2) == 0)
     pidls = []      # 待 ILFree 的绝对 PIDL
     objs = []       # 待 Release 的接口指针
     hmenu = None
@@ -1612,7 +1951,7 @@ def shell_context_menu(hwnd, paths, x, y, on_rename=None):
 def _shell_exec_async(exe, params):
     """独立 STA 线程 ShellExecuteEx 直接执行命令行（坑同 _shell_invoke_async）。"""
     def work():
-        _o32.CoInitializeEx(None, 0)
+        _o32.CoInitializeEx(None, 0x2)   # COINIT_APARTMENTTHREADED（0 是 MTA，别写错）
         try:
             sei = _SHELLEXECUTEINFOW()
             sei.cbSize = ctypes.sizeof(sei)
@@ -1634,7 +1973,7 @@ def _shell_invoke_async(verb, paths):
     （ShellExecuteEx 返回成功但什么都没发生），必须换 STA 线程；
     ② 不带 SEE_MASK_ASYNCOK 的同步调用会吊死调用线程（壳内部要等本线程泵消息）。"""
     def work():
-        _o32.CoInitializeEx(None, 0)   # COINIT_APARTMENTTHREADED
+        _o32.CoInitializeEx(None, 0x2)   # COINIT_APARTMENTTHREADED（0 是 MTA，别写错）
         try:
             for p in paths:
                 sei = _SHELLEXECUTEINFOW()
@@ -1788,21 +2127,58 @@ class BoxManager(object):
         return self._own_hwnd_cache
 
     def restore(self):
+        self._upgrade_blank_boxes()
         ag = QApplication.primaryScreen().virtualGeometry()
+        show = self.store.data.get('visible', True)
         for rec in self.store.data['boxes']:
             win = BoxWindow(self, rec)
             x = min(max(rec.get('x', ag.left() + 60), ag.left()), ag.right() - 80)
             y = min(max(rec.get('y', ag.top() + 60), ag.top()), ag.bottom() - 60)
             win.move(x, y)
             self.windows.append(win)
-            if self.store.data.get('visible', True):
+            if show:
                 win.show()
+                # 收进格子 = 桌面图标藏起来（关程序时已还原，这里重新收起）
+                if rec['kind'] == 'blank':
+                    win.hide_icons()
         self._refresh_own_hwnds()
+
+    def _upgrade_blank_boxes(self):
+        """启动时把空白格子的文件弄回桌面，两种情况：
+
+        ① 旧版把文件真搬进了 %APPDATA%\\ZviberPanel\\Boxes\\<id>\\（用户实测关程序后这些
+           文件「被吞在里面」）—— 搬回桌面并转成 items，rec['path'] 随之作废；
+        ② 新版那些目录只当「拖出暂存」用（见 `BoxWindow.stage_for_drag`），另一种暂存是
+           桌面下的隐藏夹 `.zviber`：拖拽途中进程被强杀会留下残留 —— 一并搬回桌面并补进
+           记账，否则文件就留在隐藏夹里看不见了。"""
+        desk = os.path.normpath(desktop_dir())
+        stage = os.path.join(desk, _STAGE_NAME)
+        for rec in self.store.data['boxes']:
+            if rec.get('kind') != 'blank':
+                continue
+            items = [p for p in (rec.get('items') or []) if os.path.exists(p)]
+            legacy = rec.get('path') or ''
+            dirs = [os.path.join(self.box_root, rec['id']), stage]
+            if os.path.isdir(legacy) and legacy not in dirs:
+                dirs.append(legacy)
+            for d in dirs:
+                items = _recover_files(d, desk, items)
+            rec.pop('path', None)
+            rec['items'] = items
+        for d in (stage, self.box_root):   # 空目录收掉（新版不再用它们常驻）
+            try:
+                if os.path.isdir(d) and not os.listdir(d):
+                    os.rmdir(d)
+            except OSError:
+                pass
+        self.store.save()
 
     def _new_rec(self, kind, name, path):
         rec = {'id': 'b%d' % int(time.time() * 1000), 'kind': kind, 'name': name,
-               'path': path, 'x': None, 'y': None, 'w': 0, 'h': 0,
+               'x': None, 'y': None, 'w': 0, 'h': 0,
                'collapsed': False, 'locked': False, 'sort': 'name'}
+        if path:
+            rec['path'] = path
         n = len(self.windows)
         rec['x'] = 60 + (n % 5) * 40
         rec['y'] = 60 + (n % 5) * 40
@@ -1811,14 +2187,28 @@ class BoxManager(object):
         return rec
 
     def new_blank(self):
-        """新建空白格子：背地里是数据目录下的真实文件夹。"""
+        """新建空白格子：只是桌面文件的收纳视图（items 记账 + 隐藏桌面图标）。"""
         n = len([r for r in self.store.data['boxes'] if r['kind'] == 'blank'])
         name = '新建格子' if n == 0 else '新建格子 %d' % (n + 1)
-        rec = self._new_rec('blank', name, '')
-        rec['path'] = os.path.join(self.box_root, rec['id'])
-        os.makedirs(rec['path'], exist_ok=True)
+        rec = self._new_rec('blank', name, None)
+        rec['items'] = []
+        rec['attrs'] = {}
         self.store.save()
         self._spawn(rec)
+
+    def ungroup_paths(self, paths, except_win):
+        """把 paths 从别的空白格子里摘掉（一个文件只属于一个格子）。"""
+        if not paths:
+            return
+        for w in self.windows:
+            if w is except_win or w.rec.get('kind') != 'blank':
+                continue
+            items = w.rec.get('items') or []
+            rest = [p for p in items if p not in paths]
+            if rest != items:
+                w.rec['items'] = rest
+                w.refresh()
+        self.store.save()
 
     def new_folder(self, path=None):
         """新建文件夹映射格子；path 为空时弹目录选择框（原生资源管理器样式）。"""
@@ -1895,7 +2285,17 @@ class BoxManager(object):
         self.store.save()
         for w in self.windows:
             w.setVisible(show)
+            # 格子藏起来时文件就该回到桌面：否则文件既不在格子（格子藏着）、
+            # 也不在桌面（图标还被我们藏着），用户会觉得文件凭空没了。
+            if w.rec['kind'] == 'blank':
+                (w.hide_icons if show else w.show_icons)()
 
     def shutdown(self):
         self.hook.stop()
+        # 关程序：空白格子里的文件全部「还原」到桌面（文件本来就在桌面，只是被隐藏了
+        # 图标）——不还原的话用户关掉程序后桌面上找不到它们。分组记录留着，下次启动
+        # 再收进格子（用户实测：关程序后文件被吞在 AppData 里，就是这个没做）。
+        for w in self.windows:
+            if w.rec.get('kind') == 'blank':
+                w.show_icons()
         self.store.save()

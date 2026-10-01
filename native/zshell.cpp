@@ -10,12 +10,17 @@
 // 服务模式协议（stdin/stdout，UTF-8 行）：
 //   请求: "M <hwnd> <路径数>\n" + 每行一个路径；响应: "R <退出码>\n"
 //   退出码: 0=已执行所选命令或用户取消；2=用户选了「重命名」（调用方做行内重命名）；1=失败。
+//   两个动词在宿主内部特判（原因见下面对应注释）：「属性」走独立 STA 线程 ShellExecuteExW，
+//   「剪切/复制/创建快捷方式」先把文件的隐藏位摘掉（格子文件是靠隐藏桌面图标藏起来的）。
 //   常驻 + 预热（启动时先构建一次菜单把壳扩展 DLL 全部载入）解决每次右键 ~500ms 的延迟。
 #include <windows.h>
 #include <shlobj.h>
+#include <shellapi.h>
 #include <shlwapi.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <stdlib.h>
+#include <string.h>
 
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "shlwapi.lib")
@@ -339,6 +344,68 @@ static DWORD wait_rbutton_up(DWORD cap_ms, bool *out_timeout) {
     return GetTickCount() - t0;
 }
 
+// 「属性」动词：不能走 IContextMenu::InvokeCommand。壳是**另起线程**建属性框的，而那个
+// 线程要调用方公寓（本线程）继续泵消息才把创建做完——本宿主弹完菜单就阻塞回 serve 的
+// fgets 上、不泵消息，于是属性框一直不出现，直到用户下一次右键（TrackPopupMenu 内部泵
+// 消息）才补冒出来：正是用户报的「右键属性一直不弹，再右键格子里的别的文件，上一个属性
+// 框才弹出」。临时探针实测（属主窗分别用挂在桌面带下的窗口 / 顶层窗口 / NULL，全一样）：
+// 不泵消息 2.5s 一个都不出；InvokeCommand 后开始泵消息，531ms 出，且属性框在**壳自己的
+// 线程**上（不是本线程，所以泵消息不会卡住本线程）；改独立 STA 线程 ShellExecuteExW
+// 只要 79ms 出，且完全不需要调用方线程配合。故走后者：主机线程照常立刻回 R。
+// 多选时每个文件一个属性框（原来 InvokeCommand 是一条合并的「N 个项目」属性框，放弃这个
+// 冷门形态换确定性；单选是常态，框内容与资源管理器一致）。
+static DWORD WINAPI PropertiesThread(LPVOID param) {
+    wchar_t *path = (wchar_t *)param;
+    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    SHELLEXECUTEINFOW sei = {};
+    sei.cbSize = sizeof(sei);
+    sei.fMask = SEE_MASK_ASYNCOK;   // 同步调用会吊死本线程（壳要等调用线程泵消息）
+    sei.lpVerb = L"properties";
+    sei.lpFile = path;
+    sei.nShow = SW_SHOWNORMAL;
+    ShellExecuteExW(&sei);
+    free(path);
+    return 0;   // 不 CoUninitialize：属性框归壳自己的线程，实测本线程退出后照常显示
+}
+
+static void show_properties(int pathc, wchar_t **pathv) {
+    for (int i = 0; i < pathc; i++) {
+        wchar_t *dup = _wcsdup(pathv[i]);
+        if (!dup) continue;
+        HANDLE th = CreateThread(NULL, 0, PropertiesThread, dup, 0, NULL);
+        if (th) CloseHandle(th);
+        else free(dup);
+    }
+}
+
+// 剪切 / 复制 / 创建快捷方式：会把文件（连同属性）搬到或复制到别处。格子里的文件是带着
+// 「隐藏」属性藏着的，属性会跟着走——目标文件夹里那个文件也是隐藏的，用户会以为文件丢了。
+// 动手之前先把隐藏位摘掉（面板侧照旧记着账，退出时按原值还原成同一个值，无副作用）。
+static bool is_hidden_leak_verb(const wchar_t *verb) {
+    return lstrcmpiW(verb, L"cut") == 0 || lstrcmpiW(verb, L"copy") == 0
+        || lstrcmpiW(verb, L"link") == 0;
+}
+
+static void clear_hidden_bit(int pathc, wchar_t **pathv) {
+    bool any = false;
+    for (int i = 0; i < pathc; i++) {
+        DWORD a = GetFileAttributesW(pathv[i]);
+        if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_HIDDEN) &&
+            SetFileAttributesW(pathv[i], a & ~FILE_ATTRIBUTE_HIDDEN))
+            any = true;
+    }
+    if (!any)
+        return;
+    wchar_t parent[MAX_PATH];   // 格子列表必然同目录，取第一个文件的父目录刷一下
+    lstrcpynW(parent, pathv[0], MAX_PATH);
+    wchar_t *slash = wcsrchr(parent, L'\\');
+    if (slash) {
+        *slash = 0;
+        SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATHW | SHCNF_FLUSH, parent, NULL);
+    }
+    dbg_log("  clear HIDDEN for cut/copy (%d)\n", pathc);
+}
+
 static int show_menu_once(HWND hwnd, int pathc, wchar_t **pathv) {
     apply_menu_theme();
 
@@ -493,9 +560,16 @@ static int show_menu_once(HWND hwnd, int pathc, wchar_t **pathv) {
         // rename 交回调用方：内联重命名（rename 动词没有文件夹视图不会生效）
         wchar_t verb[64] = {0};
         HRESULT hrG = pcm->GetCommandString(cmd - 1, GCS_VERBW, NULL, (LPSTR)verb, 63);
-        if (SUCCEEDED(hrG) && verb[0] && lstrcmpiW(verb, L"rename") == 0) {
+        bool has_verb = SUCCEEDED(hrG) && verb[0] != 0;
+        if (has_verb && lstrcmpiW(verb, L"rename") == 0) {
             rc = 2;
+        } else if (has_verb && lstrcmpiW(verb, L"properties") == 0) {
+            dbg_log("  verb=%ls -> 独立 STA 线程弹属性框\n", verb);
+            show_properties(pathc, pathv);   // 不走 InvokeCommand（原因见 PropertiesThread）
+            rc = 0;
         } else {
+            if (has_verb && is_hidden_leak_verb(verb))
+                clear_hidden_bit(pathc, pathv);
             CMINVOKECOMMANDINFOEX ci = {};
             ci.cbSize = sizeof(ci);
             ci.fMask = CMIC_MASK_UNICODE | CMIC_MASK_ASYNCOK;

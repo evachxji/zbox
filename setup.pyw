@@ -7,7 +7,9 @@ import sys
 
 # 同 main.pyw：Qt 默认把 GUI 线程的 COM 初始化为 MTA，安装向导「浏览…」的原生目录框
 # 在 MTA 下会抛 RPC_E_WRONG_THREAD（0x8001010e）致命错误。必须在 PyQt5 导入前初始化 STA。
-ctypes.windll.ole32.CoInitializeEx(None, 0)   # COINIT_APARTMENTTHREADED
+# ⚠️ COINIT_APARTMENTTHREADED 是 **0x2**，不是 0（0 = COINIT_MULTITHREADED；写错的话这里
+# 反而把线程初始化成 MTA，Qt 的 OleInitialize 会失败 RPC_E_CHANGED_MODE）。
+ctypes.windll.ole32.CoInitializeEx(None, 0x2)   # COINIT_APARTMENTTHREADED
 
 from PyQt5.QtWidgets import QApplication
 

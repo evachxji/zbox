@@ -86,7 +86,7 @@ Zviber 是 Windows 桌面悬浮面板（日历 + 待办），PyQt5，Python 3.8+
 
 - `main.pyw` — 入口：单实例 IPC（`QLocalServer`）、节假日后台更新、（frozen 时）`--uninstall` 卸载向导入口
 - `app.py` — 面板 UI（日历 / 待办 / 双栏 / 顶部栏滑出与拖动）、`SettingsDialog` 与节假日导入引导窗
-- `boxes.py` — 桌面格子：空白格子（文件移入数据目录）与文件夹映射格子、双击桌面显隐
+- `boxes.py` — 桌面格子：空白格子（桌面文件的收纳视图，不搬文件、只隐藏桌面图标）与文件夹映射格子、双击桌面显隐
 - `calendar_data.py` — 内置国务院节假日数据、农历换算、三源联网回退与离线导入
 - `themes.py` — 两套主题 QSS（深色 `nocturne` / 浅色 `mica`）加 `auto` 伪主题；`%CN%`/`%NUM%` 为字体占位符
 - `version.py` — 版本号唯一来源：关于窗、设置窗左下角、安装向导、卸载注册表项共用 `APP_VERSION`，发版只改这一个文件
@@ -309,16 +309,74 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
 - **看门狗必须极廉**：每 tick 只做一次中心命中（`_covered_by_surface`），真被压住才跑
   `probe_desktop` 找锚点。probe 的多点 WindowFromPoint 是跨进程同步调用，命中无响应窗口
   会阻塞主线程——曾因每 500ms × 4 格子 × 6 点探测把界面打到转圈假死。
-- **空白格子是真实文件夹**（`Boxes\<id>\`）：拖入 = `shutil.move` 进去，解散 = 全部还原回
-  桌面（SHGetFolderPath 取真桌面，处理 OneDrive 重定向），不删文件。映射格子只读目录、
-  `QFileSystemWatcher` 300ms 去抖刷新；路径失效显示「解散格子」页。
+- **空白格子只是桌面文件的收纳视图，不搬动文件**（2026-10 改，四个用户实测 bug 的根因）：
+  拖入 = 把文件记进 `rec['items']` + 给它加「隐藏」属性把桌面图标藏起来（文件仍在桌面原路径，
+  右键属性的位置就是桌面）；关程序（`BoxManager.shutdown`）/ 解散格子 / 「显示隐藏格子」里
+  隐藏格子时用 `show_icons()` 还原属性，文件随即回到桌面。分组记录留在 `boxes.json`，
+  下次启动 `restore()` 再 `hide_icons()` 收起来——「程序开着=文件在格子里，程序关着=文件在桌面」。
+  - 旧版是把文件真 `shutil.move` 进 `%APPDATA%\ZviberPanel\Boxes\<id>\`：用户实测「属性里
+    路径变成 AppData」「关程序后文件被吞在里面」，故改成现在这样。`_upgrade_blank_boxes()`
+    在启动时把旧存储目录里的文件搬回桌面并转成 `items`（搬空才删目录）。
+  - 不在桌面的文件拖进来会先搬到桌面（「格子里的文件都在桌面」是这套模型的前提）。
+  - 隐藏机制只有「文件的隐藏属性」这一条路（资源管理器没有单项隐藏的 API）：
+    `_hide_icon` 记下原属性到 `rec['attrs']`，`_show_icon` 按原值还原；改完必须
+    `SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATHW|SHCNF_FLUSH, 桌面)`（`_shell_refresh`），
+    实测图标显隐 30-50ms 生效——不刷的话图标要过一会儿才消失（用户报的「有延迟」）。
+    坑：① 若用户开了「显示隐藏的文件」，图标不会消失；② 属性会跟着「复制/剪切」走，
+    所以拖出前先把隐藏位摘掉（`stage_for_drag` 里做的），宿主侧对 cut/copy/link
+    动词也先摘隐藏位（见「格子文件右键」）；③ 面板被强杀（任务管理器 / 崩溃）时图标留在
+    隐藏状态，下次启动会重新收进格子，一致但需要知道这一点。
+  - **拖出 = 先把文件挪进桌面下的隐藏暂存夹 `桌面\.zviber\`（`stage_for_drag`）**：
+    格子里的文件本来就在桌面上，直接拖到桌面就是把文件移动到它自己所在的目录 ——
+    资源管理器会弹「源文件名和目标文件名相同」（用户实测）。挪进同盘的隐藏子目录后，
+    拖到桌面 = 一次真实的跨目录移动（文件回到原路径），拖到资源管理器文件夹/别的格子
+    也都正常。`finish_drag_out` 收尾：暂存文件还在 = 没搬走（取消拖拽/拖回格子）→ 搬回
+    原路径继续藏着；暂存文件没了 = 被搬走了 → 从 `items` 里去掉（拖到桌面即「移出格子」，
+    图标不再隐藏）。拖拽期间 `self._dragging` 有值：`refresh()` 直接返回（不然重建列表会把
+    拖拽源那一行清掉）、`_entries_from_items()` 按暂存路径确认文件还在。暂存夹空了立刻删掉
+    （桌面上不留目录），拖拽途中被强杀留下的残留在启动时由 `_upgrade_blank_boxes()`
+    （内部 `_recover_files`）搬回桌面并补进记账。映射格子不参与这套（文件在别处）。
+  - 拖到别的空白格子 = 换归属（`ungroup_paths`）；格子里改名要同步 `items`/`attrs` 的键
+    （`rename_item`，否则文件会「藏着但不在任何格子里」）。
+  - **落放效果（鼠标旁那个徽标）分两步，别混为一谈**：OLE 里徽标由 **DragOver** 报回的效果
+    决定，而「源方要不要清理源文件」只看 **Drop** 报回的效果（`IDropTarget::Drop` 的
+    `*pdwEffect`）。所以：
+    - `drag_effect()`（悬停）**一律报 MoveAction** → 徽标显示「移动」。这与「文件被收进格子」
+      的直觉一致，也是 DeskGo 那种「移动到 <格子名>」的观感；
+    - `drop_effect(paths)`（落放）**按实际结果**回报：源文件都不在原处了才算 Move，否则 Copy。
+    ⚠️ 绝不能把 **Drop** 一律报成 Move：报 Move 而文件仍在原处时，资源管理器会认为移动已完成、
+    **把源文件删掉**（实测：探针回报 Move 不搬文件，桌面上的源文件当场消失；Qt 源码里那句
+    `CFSTR_PERFORMEDDROPEFFECT` 也拦不住它）。实测组合「悬停 Move + 落放 Copy」：徽标写「移动」，
+    源文件安然无恙、原地不动。
+    为什么桌面文件拖进空白格子只能这样：文件本来就在桌面上、原地不动，报 Drop=Move 会被删，
+    报 Drop=Copy 又只剩「复制」徽标；解耦之后徽标与文件实际去向各归各的。
+    回归工具 `%TEMP%\dsh_badge_e2e.py`（真机从桌面图标拖进空白格子：抓徽标 + 校验源文件还在、
+    图标被隐藏、进了记账、无错误框）。
+- **映射格子只读目录**、`QFileSystemWatcher` 300ms 去抖刷新；路径失效显示「解散格子」页。
+  空白格子也挂同一个 watcher，但看的是桌面目录（外面的删除/改名/剪切粘贴都要跟着刷新）。
+- **整窗接受拖放（`BoxWindow.setAcceptDrops(True)` + `dragEnter/dragMove/dropEvent`）**：
+  只有文件列表视口注册了拖放目标，拖到标题栏/空白提示区/边缘时 Qt 的 `findDnDTarget()`
+  从光标下的控件往上找到窗口为止，窗口自己不接受就返回空 → **整个拖拽被忽略**，用户看到的
+  就是鼠标变成红色禁止图标、怎么都放不进去（收起状态整格只剩标题栏，更是必然放不进去）。
+  别只把列表当拖放目标，窗口这层必须接住。
+- **拖放的前提是进程里 OLE 已初始化（STA）**：`main.pyw` 入口那句
+  `CoInitializeEx(None, 0x2)` —— ⚠️ **`COINIT_APARTMENTTHREADED` 是 0x2，不是 0**
+  （0 = `COINIT_MULTITHREADED`）。2026-10 用户报的「拖不进格子、鼠标变红色禁止图标」的
+  **真身就是这个 0**：它把 GUI 线程定成 MTA，Qt 随后的 `OleInitialize()` 必然失败
+  `RPC_E_CHANGED_MODE`（run.cmd 启动时 stderr 里那句警告），于是 `RegisterDragDrop`
+  全线失败——**进程里所有窗口的拖放目标都没注册上**，往格子里拖什么都是禁止光标（跟
+  「拖到哪个位置」「窗口是不是在列表上」都无关）。判据：`RevokeDragDrop(hwnd)` 在 MTA 下
+  返回 `DRAGDROP_E_NOTREGISTERED`、STA 下返回 `S_OK`（一次性小实验即可判定）。
+  `setup.pyw`、`_shell_invoke_async` / `_shell_exec_async` 里同样的初始化也都写 0x2。
+  另注：OLE 没初始化时**从格子往外拖也拖不动**（`DoDragDrop` 起不来），注入式拖拽脚本
+  会表现为「Qt 的 startDrag 跑了但目标收不到任何 DragEnter」。
 - **解散格子有二次确认**（`BoxConfirmDialog`：无边框 Tool 窗，结构仿面板「关于」窗，
   视觉沿用格子的深色磨砂圆角，空白/映射格子提示语不同）。`QMessageBox` 只还剩删除确认在用，
   `_box_qss` 里给它补了深色底——白字落默认浅色底会看不清。
 - **双击标题名称 = 原地内联重命名**（QLineEdit 替换 QLabel，回车/失焦提交、Esc 取消；
   事件在过滤器里吃掉，不再触发双击收起）。映射格子点左上角文件夹图标 = 打开所在文件夹
-  （eventFilter 里按下即开，双击/松开都吃掉防连带拖动与收起）；空白格子是背地里的
-  存储目录，图标不可点。
+  （eventFilter 里按下即开，双击/松开都吃掉防连带拖动与收起）；空白格子没有对应的目录
+  （文件就在桌面上），图标不可点。
 - **视觉固定深色磨砂**，不挂主题系统。`WA_TranslucentBackground` 的 ClearType 问题这里接受
   （参考软件本身就是半透明）。**半透明窗口 show 的首帧会闪一帧白屏**（paint 未跑先合成），
   `_spawn` 里先 `setWindowOpacity(0)` 隐身、120ms 后再现身（同时盖住挂带 SetParent 的隐藏-重现）。
@@ -370,8 +428,23 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
   TrackPopupMenu 前 `AttachThreadInput` 挂到当前前台线程再 `SetForegroundWindow`，
   弹完还原焦点；③ 「重命名」动词没有文件夹视图不会生效——宿主以退出码 2 交回，
   Python 侧 `BoxList._rename_item` 行内编辑 + `os.rename`；④ 菜单随系统明暗 =
-  uxtheme 135 序数 `SetPreferredAppMode`（深色 2 / 浅色 3）；⑤ InvokeCommand 带
+  uxtheme 135 序数 `SetPreferredAppMode`（深色 2 / 浅色 3）；⑤ 普通动词走 InvokeCommand，带
   `CMIC_MASK_UNICODE|CMIC_MASK_ASYNCOK`，hwnd 传格子窗口（删除确认框的属主）；
+  ⑤-b **「属性」动词不能走 InvokeCommand**：壳是**另起线程**建属性框的，而那个线程要调用方
+  公寓继续泵消息才建得出来，宿主弹完菜单就阻塞在 serve 的 `fgets` 上不泵消息 ⇒ 属性框一直不
+  出现，直到用户下一次右键（TrackPopupMenu 内部泵消息）才补冒出来——用户实测原话「右键属性
+  一直不弹，再右键格子里的别的文件，上一个属性框才弹出」。临时原生探针（属主窗分别用挂桌面带
+  的窗口 / 顶层窗口 / NULL，三种都一样）实测：InvokeCommand 后不泵消息 2.5s 一个都不出；
+  开始泵消息 531ms 出（属性框在**壳自己的线程**上，不在调用方线程）；改独立 STA 线程
+  `ShellExecuteExW("properties")` + `SEE_MASK_ASYNCOK` 只要 79ms 出、完全不需要调用方配合。
+  故宿主对 `properties` 动词特判走 `PropertiesThread`（多选时每文件一个框，放弃原来那条合并的
+  「N 个项目」框，换确定性）。
+  ⑤-c **cut / copy / link 动词先把文件的隐藏位摘掉**（`clear_hidden_bit` + `SHChangeNotify`）：
+  格子文件是靠隐藏属性藏起来的，属性会跟着复制/剪切走——目标文件夹里那个文件也是隐藏的，
+  用户会以为文件丢了。面板侧照旧记账，退出时按原值还原成同一个值，无副作用。
+  回归工具 `%TEMP%\dsh_propmenu_test.py <宿主exe>`：驱动真宿主弹菜单 → 按菜单项矩形点「属性」
+  → 测属性框出现时间（旧宿主：4s 不出、再弹一次菜单 0.08s 才出；新宿主：0.34s 出，宿主日志里
+  有 `verb=properties -> 独立 STA 线程弹属性框`）。
   ⑥ 菜单位置自己 `GetCursorPos`（物理坐标）——Qt 传过来的 globalPos 是逻辑像素，
   多显示器/缩放下不可靠；宿主入口必须 `SetProcessDpiAwarenessContext(PM_V2)`，
   否则菜单被系统按 96 DPI 渲染再位图放大（字体发糊）；TrackPopupMenu 要给

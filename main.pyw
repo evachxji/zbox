@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """Zviber 悬浮面板入口：单实例 + 桌面右键菜单 + 节假日联网更新/离线导入。
 用法：pythonw main.pyw        启动并显示
       pythonw main.pyw --toggle   已运行则切换显隐（供桌面右键菜单调用）
@@ -196,8 +196,13 @@ def main():
     # Qt 默认把 GUI 线程的 COM 初始化为 MTA：原生壳对话框（IFileOpenDialog 等）在 MTA 下
     # 会抛 RPC_E_WRONG_THREAD（0x8001010e）致命错误（「新建文件夹格子」原生目录框闪退）。
     # 先初始化为 STA：Qt 之后再初始化只会拿到 S_FALSE，不再改变套间类型。
+    # ⚠️ COINIT_APARTMENTTHREADED 是 **0x2**，不是 0（0 = COINIT_MULTITHREADED）——原来是 0，
+    # 于是这里把 GUI 线程初始化成了 MTA，Qt 随后的 OleInitialize 必然返回 RPC_E_CHANGED_MODE
+    # （run.cmd 启动时那句 `OleInitialize() failed: RPC_E_CHANGED_MODE`），而 OLE 没初始化
+    # ⇒ **Qt 所有窗口的拖放目标都注册不上**（实测 RevokeDragDrop：MTA 下 DRAGDROP_E_NOTREGISTERED，
+    # STA 下 S_OK）⇒ 往格子里拖任何文件都是红色禁止光标（用户报的 bug 1 真身）。
     import ctypes
-    ctypes.windll.ole32.CoInitializeEx(None, 0)   # COINIT_APARTMENTTHREADED
+    ctypes.windll.ole32.CoInitializeEx(None, 0x2)   # COINIT_APARTMENTTHREADED
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
     QApplication.setQuitOnLastWindowClosed(False)
