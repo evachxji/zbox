@@ -16,7 +16,7 @@ if errorlevel 1 set "PYW=pyw"
 ping -n 3 127.0.0.1 >nul
 
 rem ---- 兜底：仍有残留进程（卡死时 --quit 可能等不到响应）则强制结束 ----
-powershell -NoProfile -Command " $k = $false; Get-WmiObject Win32_Process | Where-Object { ($_.Name -match '^(pythonw?|ZviberPanel)\.exe$') -and ($_.CommandLine -match 'main\.pyw|ZviberPanel\.exe') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force; $k = $true }; if ($k) { exit 0 } else { exit 1 }"
+powershell -NoProfile -Command " $k = $false; Get-WmiObject Win32_Process | Where-Object { ($_.Name -match '^(pythonw?|zviber)\.exe$') -and ($_.CommandLine -match 'main\.pyw|zviber\.exe') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force; $k = $true }; if ($k) { exit 0 } else { exit 1 }"
 if errorlevel 1 (
     echo   [完成] 已停止（或本就没有运行中的实例）。
 ) else (

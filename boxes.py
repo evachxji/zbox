@@ -2,7 +2,7 @@
 """桌面格子：桌面文件归类格子功能。
 
 - 空白格子：**只是桌面文件的收纳视图，不搬动文件**（2026-10 改；旧版是把文件真搬进
-  %APPDATA%\\ZviberPanel\\Boxes\\<id>\\，用户实测「属性里路径变成 AppData」「关程序后
+  %APPDATA%\\zviber\\Boxes\\<id>\\，用户实测「属性里路径变成 AppData」「关程序后
   文件被吞掉」，故改成现在这样）。收进格子的文件留在桌面原路径（右键属性的位置就是桌面），
   只是给文件加「隐藏」属性把桌面图标藏起来；关程序/解散格子/隐藏格子时把属性还原，
   文件随即回到桌面。分组记录（rec['items'] + 隐藏属性账本 rec['attrs']）存在 boxes.json，
@@ -2151,7 +2151,7 @@ class BoxManager(object):
     def _upgrade_blank_boxes(self):
         """启动时把空白格子的文件弄回桌面，两种情况：
 
-        ① 旧版把文件真搬进了 %APPDATA%\\ZviberPanel\\Boxes\\<id>\\（用户实测关程序后这些
+        ① 旧版把文件真搬进了 %APPDATA%\\zviber\\Boxes\\<id>\\（用户实测关程序后这些
            文件「被吞在里面」）—— 搬回桌面并转成 items，rec['path'] 随之作废；
         ② 新版那些目录只当「拖出暂存」用（见 `BoxWindow.stage_for_drag`），另一种暂存是
            桌面下的隐藏夹 `.zviber`：拖拽途中进程被强杀会留下残留 —— 一并搬回桌面并补进

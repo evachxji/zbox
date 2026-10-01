@@ -1,13 +1,14 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """系统集成：开机自启 + 桌面右键菜单 + 应用列表卸载项。
 默认写 HKCU（免管理员，Win7/10/11 通用）；all_users=True 写 HKLM（exe 安装向导「此计算机」选项，需管理员）。"""
 import os
+import shutil
 import sys
 import winreg
 
 from version import APP_VERSION
 
-APP_NAME = 'ZviberPanel'
+APP_NAME = 'zviber'
 MENU_TITLE = 'zviber桌面格子'
 
 # 桌面右键二级菜单项（与托盘右键完全一致）：(注册表子键名, 显示文字, exe 命令行参数)
@@ -21,11 +22,15 @@ MENU_ITEMS = [
     ('F_About', '关于', '--about'),
     ('G_Quit', '退出', '--quit'),
 ]
-IPC_KEY = 'zviber-panel-v1'
+IPC_KEY = 'zviber-panel-v2'   # 换名字时一并换版本号：旧版（-v1）与新版本互不串话
 RUN_KEY = r'Software\Microsoft\Windows\CurrentVersion\Run'
-SHELL_KEY = r'Software\Classes\Directory\Background\shell\ZviberPanel'
+# 右键菜单键相对 HKCR 的路径；ExtendedSubCommandsKey 要的就是这段（不带 Software\Classes\）
+SHELL_SUBKEY = r'Directory\Background\shell\zviber'
+SHELL_KEY = r'Software\Classes\\' + SHELL_SUBKEY
+LEGACY_SHELL_KEY = r'Software\Classes\Directory\Background\shell\ZviberPanel'  # 旧名残留，安装/退出时清掉
 COMMANDSTORE_KEY = r'Software\Microsoft\Windows\CurrentVersion\Explorer\CommandStore\shell'  # 只为清理旧版残留
-UNINSTALL_KEY = r'Software\Microsoft\Windows\CurrentVersion\Uninstall\ZviberPanel'
+UNINSTALL_KEY = r'Software\Microsoft\Windows\CurrentVersion\Uninstall\zviber'
+LEGACY_UNINSTALL_KEY = r'Software\Microsoft\Windows\CurrentVersion\Uninstall\ZviberPanel'
 PERSONALIZE_KEY = r'Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
 
 
@@ -34,11 +39,67 @@ def _root(all_users=False):
 
 
 def appdata_dir():
+    """运行时数据目录 %APPDATA%\\zviber（配置 / 待办 / 节假日 / 格子 / 图标）。
+    旧版目录名是 ZviberPanel，首次运行时整体改名搬过来，老用户的待办与格子不会丢。"""
     base = os.environ.get('APPDATA') or os.path.expanduser('~')
-    p = os.path.join(base, 'ZviberPanel')
+    p = os.path.join(base, APP_NAME)
+    _migrate_appdata(base, p)
     if not os.path.isdir(p):
         os.makedirs(p)
     return p
+
+
+def _migrate_appdata(base, new_dir):
+    """一次性把 %APPDATA%\\ZviberPanel 改名成 %APPDATA%\\zviber。
+
+    实测坑：面板正在运行（或资源管理器缓存着 icon.ico）时整个目录 rename 会失败，
+    所以三级回退——① 整目录改名；② 逐文件搬到新目录（同名文件以新目录为准，不覆盖）；
+    ③ 搬剩的（被占用的活文件）留着不动，下次启动再搬。全部搬完才删旧目录。"""
+    old = os.path.join(base, 'ZviberPanel')
+    if not os.path.isdir(old):
+        return
+    if not os.path.isdir(new_dir):
+        try:
+            os.rename(old, new_dir)
+            return
+        except OSError:
+            try:
+                os.makedirs(new_dir)
+            except OSError:
+                return
+    _merge_tree(old, new_dir)
+    try:
+        os.rmdir(old)      # 只为「空目录残留」清场；非空会抛错，放着下次再搬
+    except OSError:
+        pass
+
+
+def _merge_tree(old, new_dir):
+    """把 old 里的文件按目录结构搬到 new_dir：同名已存在就跳过（新目录是权威），
+    被占用的单个文件跳过、不打断其余搬运。"""
+    for root, _dirs, names in os.walk(old, topdown=False):
+        rel = os.path.relpath(root, old)
+        dst_dir = new_dir if rel == '.' else os.path.join(new_dir, rel)
+        for n in names:
+            src = os.path.join(root, n)
+            dst = os.path.join(dst_dir, n)
+            if os.path.exists(dst):
+                continue
+            try:
+                if not os.path.isdir(dst_dir):
+                    os.makedirs(dst_dir)
+                os.rename(src, dst)
+            except OSError:
+                try:
+                    shutil.copy2(src, dst)
+                    os.remove(src)
+                except OSError:
+                    pass
+        if rel != '.':
+            try:
+                os.rmdir(root)
+            except OSError:
+                pass
 
 
 def download_dir():
@@ -85,13 +146,15 @@ def autostart_set(exe=None, all_users=False):
 
 
 def autostart_remove():
-    """清除自启（HKCU/HKLM 均尝试；HKLM 无管理员权限时静默跳过）。"""
+    """清除自启（HKCU/HKLM 均尝试；HKLM 无管理员权限时静默跳过）。
+    旧名（ZviberPanel）的残留值一并清掉，免得重装后开机启动两个。"""
     for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
-        try:
-            with winreg.OpenKey(root, RUN_KEY, 0, winreg.KEY_SET_VALUE) as k:
-                winreg.DeleteValue(k, APP_NAME)
-        except OSError:
-            pass
+        for name in (APP_NAME, 'ZviberPanel'):
+            try:
+                with winreg.OpenKey(root, RUN_KEY, 0, winreg.KEY_SET_VALUE) as k:
+                    winreg.DeleteValue(k, name)
+            except OSError:
+                pass
 
 
 def _shell_tree_subs():
@@ -117,10 +180,38 @@ def _delete_shell_tree(root):
             pass
 
 
+def _delete_legacy_shell_tree(root):
+    """旧名 SHELL_KEY（ZviberPanel）整棵子树的删除顺序。"""
+    names = [n for n, _t, _a in MENU_ITEMS]
+    subs = [LEGACY_SHELL_KEY + r'\shell\%s\command' % n for n in names]
+    subs += [LEGACY_SHELL_KEY + r'\shell\%s' % n for n in names]
+    subs += [LEGACY_SHELL_KEY + r'\shell', LEGACY_SHELL_KEY + r'\command', LEGACY_SHELL_KEY]
+    legacy = ['Toggle', 'NewBox', 'NewFolderBox', 'ToggleBoxes', 'Settings', 'About', 'Quit']
+    subs += [COMMANDSTORE_KEY + r'\ZviberPanel.%s\command' % n for n in legacy]
+    subs += [COMMANDSTORE_KEY + r'\ZviberPanel.%s' % n for n in legacy]
+    for sub in subs:
+        try:
+            winreg.DeleteKey(root, sub)
+        except OSError:
+            pass
+
+
 def context_menu_remove():
     """清除右键菜单（HKCU/HKLM 均尝试；HKLM 无管理员权限时静默跳过）。"""
     for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
         _delete_shell_tree(root)
+        _delete_legacy_shell_tree(root)
+
+
+def legacy_integration_remove():
+    """清掉旧名（ZviberPanel）留下的注册表残留：旧右键菜单树 + 旧卸载项。
+    新名安装/卸载时都调一次，避免「设置→应用」里同时躺着两个卸载项、桌面右键多一个旧菜单。"""
+    for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+        _delete_legacy_shell_tree(root)
+        try:
+            winreg.DeleteKey(root, LEGACY_UNINSTALL_KEY)
+        except OSError:
+            pass
 
 
 def _menu_icon(exe, icon_path):
@@ -148,8 +239,7 @@ def _write_cascade(root, exe, icon_path):
     解析，HKCU 的不认，免管理员安装没法用；② 父项有 command 子键会退化成直链不展开。"""
     with winreg.CreateKey(root, SHELL_KEY) as k:
         winreg.SetValueEx(k, 'MUIVerb', 0, winreg.REG_SZ, MENU_TITLE)
-        winreg.SetValueEx(k, 'ExtendedSubCommandsKey', 0, winreg.REG_SZ,
-                          r'Directory\Background\shell\ZviberPanel')
+        winreg.SetValueEx(k, 'ExtendedSubCommandsKey', 0, winreg.REG_SZ, SHELL_SUBKEY)
         icon = _menu_icon(exe, icon_path)
         if icon:
             winreg.SetValueEx(k, 'Icon', 0, winreg.REG_SZ, icon)
@@ -210,10 +300,16 @@ def uninstall_reg_get(name, all_users=False):
     return _get(_root(all_users), UNINSTALL_KEY, name)
 
 
+def legacy_uninstall_reg_get(name, all_users=False):
+    """旧名（ZviberPanel）卸载项里的值，供安装向导识别旧版本并接管。"""
+    return _get(_root(all_users), LEGACY_UNINSTALL_KEY, name)
+
+
 def uninstall_reg_remove():
-    """清除卸载项（HKCU/HKLM 均尝试；HKLM 无管理员权限时静默跳过）。"""
+    """清除卸载项（HKCU/HKLM 均尝试；HKLM 无管理员权限时静默跳过）；旧名的也一并清掉。"""
     for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
-        try:
-            winreg.DeleteKey(root, UNINSTALL_KEY)
-        except OSError:
-            pass
+        for key in (UNINSTALL_KEY, LEGACY_UNINSTALL_KEY):
+            try:
+                winreg.DeleteKey(root, key)
+            except OSError:
+                pass

@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """构建 exe 安装包：两次 PyInstaller——
-1) main.pyw → onedir 程序本体（dist\\build\\app\\ZviberPanel\\，安装后就是这个目录：一堆小文件、启动快）；
+1) main.pyw → onedir 程序本体（dist\\build\\app\\zviber\\，安装后就是这个目录：一堆小文件、启动快）；
 2) setup.pyw → onefile 安装包，把 onedir 目录整体内嵌为 payload（--add-data），
-   产物 dist\\ZviberPanel-Setup-v<版本>-<架构>.exe——用户只拿到这一个 exe，双击弹安装向导。
+   产物 dist\\zviber-Setup-v<版本>-<架构>.exe——用户只拿到这一个 exe，双击弹安装向导。
 中间文件（图标、DPI 清单、spec、PyInstaller 工作目录、onedir 本体）一律收在 dist\\build\\ 下，
 根目录保持干净；dist 整个目录已在 .gitignore 里。
 用法：python build.py
@@ -24,6 +24,9 @@ MANIFEST = os.path.join(WORK, '_build_manifest.xml')
 # 架构标识跟随打包用的 Python 解释器（PyInstaller 不能交叉编译）
 ARCH = {'AMD64': 'x64', 'x86': 'x86', 'ARM64': 'arm64'}.get(
     platform.machine(), platform.machine().lower())
+
+# 程序本体名（全小写）：onedir 目录名、exe 名、安装包名前缀都用它，与 sysutil.APP_NAME 一致
+APP_NAME = 'zviber'
 
 # DPI 感知清单：PyInstaller 默认 exe 无 DPI 感知声明，进程按 unaware 虚拟化，
 # ui_scale() 读到 96 DPI 导致界面不放大（源码由 Qt 运行时设置感知，无此问题）。
@@ -66,13 +69,15 @@ def run_pyinstaller(entry, name, mode, dist_dir, work_dir, extra=()):
 def main():
     os.makedirs(WORK, exist_ok=True)     # 图标与清单要写进去，得先有目录
     # 旧形态残留：onefile app、onedir 直发目录、zip 分发包，顺手清掉避免误发
-    stale = os.path.join(DIST, 'ZviberPanel.exe')
-    if os.path.isfile(stale):
-        os.remove(stale)
-    if os.path.isdir(os.path.join(DIST, 'ZviberPanel')):
-        shutil.rmtree(os.path.join(DIST, 'ZviberPanel'))
-    for z in glob.glob(os.path.join(DIST, 'ZviberPanel-v*.zip')):
-        os.remove(z)
+    # （含改名之前的 ZviberPanel 产物）
+    for name in (APP_NAME, 'ZviberPanel'):
+        if os.path.isfile(os.path.join(DIST, name + '.exe')):
+            os.remove(os.path.join(DIST, name + '.exe'))
+        if os.path.isdir(os.path.join(DIST, name)):
+            shutil.rmtree(os.path.join(DIST, name))
+    for pat in ('%s-v*.zip' % APP_NAME, 'ZviberPanel-v*.zip'):
+        for z in glob.glob(os.path.join(DIST, pat)):
+            os.remove(z)
     if not gen_icon():
         print('[ERR] 图标生成失败')
         return 1
@@ -81,7 +86,7 @@ def main():
     from version import APP_VERSION
 
     # 1) 程序本体：onedir（安装到用户机器的就是这份）
-    r = run_pyinstaller('main.pyw', 'ZviberPanel', '--onedir', APP_DIR,
+    r = run_pyinstaller('main.pyw', APP_NAME, '--onedir', APP_DIR,
                         os.path.join(WORK, 'work_app'))
     if r:
         return r
@@ -89,15 +94,15 @@ def main():
     # zshell_host.exe（原生外壳菜单宿主，native\build_native.cmd 生成）放 exe 同目录进 payload
     zhost = os.path.join(ROOT, 'native', 'zshell_host.exe')
     if os.path.isfile(zhost):
-        shutil.copy2(zhost, os.path.join(APP_DIR, 'ZviberPanel', 'zshell_host.exe'))
+        shutil.copy2(zhost, os.path.join(APP_DIR, APP_NAME, 'zshell_host.exe'))
     else:
         print('[警告] native\\zshell_host.exe 不存在，外壳菜单回退 ctypes 实现')
 
     # 2) 安装包：onefile，把 onedir 目录整体内嵌为 payload
     # --noupx：onefile 首次运行要把内嵌 payload 解到临时目录，若本体被 UPX 压过，
     # 每次启动都得多花解压时间（实测拖慢明显）。安装包只大几 MB，换启动快。
-    name = 'ZviberPanel-Setup-v%s-%s' % (APP_VERSION, ARCH)
-    payload = os.path.join(APP_DIR, 'ZviberPanel')
+    name = '%s-Setup-v%s-%s' % (APP_NAME, APP_VERSION, ARCH)
+    payload = os.path.join(APP_DIR, APP_NAME)
     r = run_pyinstaller('setup.pyw', name, '--onefile', DIST,
                         os.path.join(WORK, 'work_setup'),
                         extra=['--noupx', '--add-data', '%s;payload' % payload])

@@ -207,7 +207,7 @@ def main():
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
     QApplication.setQuitOnLastWindowClosed(False)
     qapp = QApplication(sys.argv)
-    qapp.setApplicationName('ZviberPanel')
+    qapp.setApplicationName(sysutil.APP_NAME)
 
     if installer.maybe_install():
         return 0  # --uninstall 卸载向导结束后退出（安装包是独立的 setup exe）

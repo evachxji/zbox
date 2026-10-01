@@ -25,13 +25,13 @@ Windows 桌面整理格子工具：把堆在桌面的文件拖进格子即归类
 
 ## 快速开始
 
-到 [Releases](https://github.com/evachxji/zviber/releases) 下载 `ZviberPanel-Setup-v<版本>-x64.exe`，双击打开安装向导即可（仅当前用户安装免管理员）。
+到 [Releases](https://github.com/evachxji/zviber/releases) 下载 `zviber-Setup-v<版本>-x64.exe`，双击打开安装向导即可（仅当前用户安装免管理员）。
 
 源码运行：双击 `run.cmd`（缺 PyQt5 会提示自动安装）。
 
 ## exe 安装包（自行构建）
 
-双击 `build.cmd`（或 `python build.py`），产物为单个安装包 `dist\ZviberPanel-Setup-v<版本>-<架构>.exe`（架构跟随打包用的 Python，如 x64）：双击即安装向导，安装范围、安装位置、桌面右键菜单、开机自启均可选；安装出来是 onedir 目录（exe + 一堆依赖文件），常驻启动免解压更快；卸载走 Windows「设置 → 应用」列表，弹出与安装同风格的卸载向导（带进度）：默认保留用户数据（`%APPDATA%\ZviberPanel\`，重装后自动恢复），勾选「同时删除个人数据」则连同待办、格子与配置一并删除。
+双击 `build.cmd`（或 `python build.py`），产物为单个安装包 `dist\zviber-Setup-v<版本>-<架构>.exe`（架构跟随打包用的 Python，如 x64）：双击即安装向导，安装范围、安装位置、桌面右键菜单、开机自启均可选；安装出来是 onedir 目录（`zviber\zviber.exe` + 一堆依赖文件），常驻启动免解压更快；卸载走 Windows「设置 → 应用」列表，弹出与安装同风格的卸载向导（带进度）：默认保留用户数据（`%APPDATA%\zviber\`，重装后自动恢复），勾选「同时删除个人数据」则连同待办、格子与配置一并删除。
 
 完整右键菜单（含 Defender 扫描等扩展项）依赖 `native\zshell_host.exe`，已随仓库提交；改动 `native\zshell.cpp` 后需先跑 `native\build_native.cmd` 重新编译（需 MSVC Build Tools）。
 
