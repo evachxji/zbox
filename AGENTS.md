@@ -320,8 +320,10 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
   `_spawn` 里先 `setWindowOpacity(0)` 隐身、120ms 后再现身（同时盖住挂带 SetParent 的隐藏-重现）。
 - **双击桌面空白显隐**（`BoxManager.toggle_all`）：桌面图标 + 全部格子 + 面板一起显隐，
   图标显隐 = ShowWindow 桌面的 `SysListView32`（`find_desktop_listview` 定位，Progman
-  找不到再扫 WorkerW）。`DesktopClickHook` 独立线程装 `WH_MOUSE_LL`（LL 钩子收不到
-  `WM_LBUTTONDBLCLK`，自己按 GetDoubleClickTime 判双击）。坑：① 命中链先排我们自己的窗口；
+  找不到再扫 WorkerW）。`DesktopClickHook` 独立线程**轮询左键沿**（GetAsyncKeyState 每 20ms）
+  按 GetDoubleClickTime 判双击——**不要用 WH_MOUSE_LL 全局钩子**：每个系统鼠标事件都要同步等
+  Python 回调拿 GIL，GUI 线程拖拽重绘时全系统鼠标卡顿 5-10 秒，ctypes 回调里的崩溃还直接
+  闪退进程（2026-10 拖拽格子卡顿→闪退的根因，c000041d + 访问冲突）。坑：① 命中链先排我们自己的窗口；
   ② 认 Progman 家族 + `SysListView32` + 全屏工具窗（桌面整理软件覆盖层）；
   ③ **`SysListView32` 要过跨进程 `LVM_HITTEST`**：点在图标/文件夹上不算空白（结构体开在
   explorer 地址空间里 SendMessage 才读得到）；
@@ -341,11 +343,11 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
   ——Qt 把 GUI 线程初始化成 MTA（壳动词在 MTA 下返回成功但什么都不做），同步调用又会
   吊死调用线程（壳内部要等本线程泵消息）。
 - 列表里 `.lnk` 显示名去掉后缀（对齐资源管理器），UserRole 仍存完整路径，拖出/打开不受影响
-- **钩子线程里绝不调任何 Qt 方法（2026-09 真实死锁）**：`DesktopClickHook` 的 `proc` 回调跑在
-  独立线程，旧版 `own_hwnds()` 在其中调 `QWidget::winId()`——winId 会现场创建原生窗口，
-  `flushWindowSystemEvents → QWaitCondition` 阻塞等主线程刷窗口事件，而钩子线程持有 GIL、
+- **轮询线程里绝不调任何 Qt 方法（2026-09 真实死锁）**：`DesktopClickHook` 的轮询跑在独立线程，
+  旧版 `own_hwnds()` 在其中调 `QWidget::winId()`——winId 会现场创建原生窗口，
+  `flushWindowSystemEvents → QWaitCondition` 阻塞等主线程刷窗口事件，而工作线程持有 GIL、
   主线程绘制时 `PyGILState_Ensure` 又在等 GIL，两线程互等永久死锁（症状：任意左键点击后界面
-  冻结；钩子不返回期间系统对每个鼠标事件等超时 = 鼠标瞬间爬行）。修复：`own_hwnds` 只读主线程
+  冻结；LL 钩子不返回期间系统对每个鼠标事件等超时 = 鼠标瞬间爬行）。修复：`own_hwnds` 只读主线程
   预建的 `frozenset` 快照（`_refresh_own_hwnds`，启动与格子增删时刷新、整体换引用）。
   Win32 API（WindowFromPoint / GetParent / GetClassNameW 等）跨线程调用是安全的，Qt 对象一律不碰。
 

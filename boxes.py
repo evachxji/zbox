@@ -8,8 +8,9 @@
 - 窗口：无边框 Tool 窗，半透明磨砂；挂桌面带免疫 Win+D（面板同款 pin_to_desktop）。
   与面板的差异：永不主动沉底（格子沉到应用窗口之下 = 用户眼里的「消失」）；
   只在被桌面整理软件表层压住时由 WinEvent 钩子/看门狗抬回表层之上。
-- 双击桌面空白处显隐「桌面图标 + 全部格子 + 面板」：WH_MOUSE_LL 低级钩子自判双击，
-  命中桌面家族窗口才算数；点在图标/文件夹上经跨进程 LVM_HITTEST 排除，不算空白。
+- 双击桌面空白处显隐「桌面图标 + 全部格子 + 面板」：独立线程轮询左键沿自判双击
+  （不用 WH_MOUSE_LL 全局钩子——每个系统鼠标事件都要等 Python 回调拿 GIL，拖拽时全系统
+  鼠标卡顿，ctypes 回调里的崩溃还会直接闪退进程）；命中判定与旧钩子版一致。
 - 视觉固定深色磨砂：格子贴在壁纸上，跟随面板明暗主题都不合适，故不挂主题系统。
   注意 WA_TranslucentBackground 会禁用 ClearType（app.py 面板因此不用它），
   格子文字少且参考软件本身就是半透明的，这里接受这个取舍。
@@ -37,14 +38,10 @@ import sysutil
 
 # 64 位安全的 ctypes 签名（windll 默认按 32 位 int 截断，句柄/指针高位会丢）
 _h32 = ctypes.windll.user32
-_h32.SetWindowsHookExW.restype = ctypes.c_void_p
-_h32.SetWindowsHookExW.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD]
-_h32.UnhookWindowsHookEx.restype = wintypes.BOOL
-_h32.UnhookWindowsHookEx.argtypes = [ctypes.c_void_p]
-_h32.CallNextHookEx.restype = ctypes.c_longlong
-_h32.CallNextHookEx.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_size_t, ctypes.c_void_p]
-_h32.PostThreadMessageW.restype = wintypes.BOOL
-_h32.PostThreadMessageW.argtypes = [wintypes.DWORD, wintypes.UINT, ctypes.c_size_t, ctypes.c_void_p]
+_h32.GetAsyncKeyState.restype = wintypes.SHORT   # SHORT 返回值，不声明会被 windll 按 32 位读
+_h32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+_h32.GetCursorPos.restype = wintypes.BOOL
+_h32.GetCursorPos.argtypes = [ctypes.c_void_p]
 _h32.GetMessageW.restype = ctypes.c_int
 _h32.GetMessageW.argtypes = [ctypes.c_void_p, ctypes.c_void_p, wintypes.UINT, wintypes.UINT]
 _h32.TranslateMessage.restype = wintypes.BOOL
@@ -1172,22 +1169,13 @@ class DesktopClickHook(QThread):
     def __init__(self, own_hwnds, parent=None):
         super(DesktopClickHook, self).__init__(parent)
         self.own_hwnds = own_hwnds   # callable -> set(int)
-        self._tid = []
-        self._hook = []
+        self._stop = False
 
     def run(self):
         u32 = ctypes.windll.user32
         k32 = ctypes.windll.kernel32
-        proc_t = ctypes.WINFUNCTYPE(wintypes.LPARAM, ctypes.c_int,
-                                    wintypes.WPARAM, wintypes.LPARAM)
-
-        class MSLLHOOKSTRUCT(ctypes.Structure):
-            _fields_ = [('pt', wintypes.POINT), ('mouseData', wintypes.DWORD),
-                        ('flags', wintypes.DWORD), ('time', wintypes.DWORD),
-                        ('dwExtraInfo', ctypes.c_void_p)]
-
-        state = {'t': 0, 'x': -9999, 'y': -9999}
-        dbl_t = u32.GetDoubleClickTime()
+        state = {'t': 0.0, 'x': -9999, 'y': -9999}
+        dbl_t = u32.GetDoubleClickTime() / 1000.0
         dbl_x = u32.GetSystemMetrics(36)   # SM_CXDOUBLECLK
         dbl_y = u32.GetSystemMetrics(37)   # SM_CYDOUBLECLK
 
@@ -1224,47 +1212,38 @@ class DesktopClickHook(QThread):
                 h = ui._u32.GetParent(h)
             return False
 
-        def proc(nCode, wParam, lParam):
-            # 钩子回调有系统时间预算，异常必须当场兜住：落盘 + 照常放行，
-            # 不能留给 ctypes（吞掉后返回垃圾值，且格式化 traceback 拖慢鼠标）
-            try:
-                if nCode == 0 and wParam == 0x0201:   # WM_LBUTTONDOWN
-                    s = ctypes.cast(lParam, ctypes.POINTER(MSLLHOOKSTRUCT)).contents
-                    now = s.time
-                    on_desktop = _is_desktop(s.pt)
+        # 轮询左键沿代替 LL 钩子：只在本线程内做事，_is_desktop 的跨进程命中测试
+        # 最坏多占几毫秒，也绝不影响系统鼠标管道。
+        prev_down = False
+        while not self._stop:
+            down = bool(u32.GetAsyncKeyState(0x01) & 0x8000)   # VK_LBUTTON 当前按下
+            if down and not prev_down:
+                pt = wintypes.POINT()
+                u32.GetCursorPos(ctypes.byref(pt))
+                # 命中判定要兜异常：落盘 + 本轮放弃，不能拖垮轮询线程
+                try:
+                    on_desktop = _is_desktop(pt)
+                    now = time.time()
                     if (on_desktop and state['t'] and now - state['t'] <= dbl_t
-                            and abs(s.pt.x - state['x']) <= dbl_x
-                            and abs(s.pt.y - state['y']) <= dbl_y):
-                        state['t'] = 0
+                            and abs(pt.x - state['x']) <= dbl_x
+                            and abs(pt.y - state['y']) <= dbl_y):
+                        state['t'] = 0.0
                         self.double_clicked.emit()
                     elif on_desktop:
-                        state['t'], state['x'], state['y'] = now, s.pt.x, s.pt.y
+                        state['t'], state['x'], state['y'] = now, pt.x, pt.y
                     else:
                         # 第一击也必须落在桌面上：点在格子/窗口上要把双击序列清零，
                         # 否则「拖开格子 → 快速点它腾出来的空位」会被误判成双击桌面，
                         # 全部格子被隐藏——用户眼里就是拖完格子消失了
-                        state['t'] = 0
-            except Exception:
-                _log_hook_error()
-            return _h32.CallNextHookEx(None, nCode, wParam, lParam)
-
-        self._proc = proc_t(proc)   # 留引用防 GC
-        hook = _h32.SetWindowsHookExW(14, ctypes.cast(self._proc, ctypes.c_void_p), None, 0)   # WH_MOUSE_LL
-        if not hook:
-            return
-        self._hook[:] = [hook]
-        self._tid[:] = [k32.GetCurrentThreadId()]
-        msg = wintypes.MSG()
-        while _h32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
-            _h32.TranslateMessage(ctypes.byref(msg))
-            _h32.DispatchMessageW(ctypes.byref(msg))
-        _h32.UnhookWindowsHookEx(hook)
-        self._hook[:] = []
+                        state['t'] = 0.0
+                except Exception:
+                    _log_hook_error()
+            prev_down = down
+            time.sleep(0.02)
 
     def stop(self):
-        if self._tid:
-            _h32.PostThreadMessageW(self._tid[0], 0x0012, 0, 0)   # WM_QUIT
-            self.wait(2000)
+        self._stop = True
+        self.wait(2000)
 
 
 class BoxManager(object):
@@ -1336,7 +1315,9 @@ class BoxManager(object):
     def new_folder(self, path=None):
         """新建文件夹映射格子；path 为空时弹目录选择框。"""
         if not path:
-            path = QFileDialog.getExistingDirectory(None, '选择要映射的文件夹')
+            # 原生壳对话框在 Qt 初始化的 MTA 线程里抛 RPC_E_WRONG_THREAD（0x8001010e）致命错误
+            path = QFileDialog.getExistingDirectory(None, '选择要映射的文件夹', '',
+                                                    QFileDialog.DontUseNativeDialog)
         if not path:
             return
         rec = self._new_rec('folder', os.path.basename(os.path.normpath(path)) or path,
