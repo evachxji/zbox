@@ -94,11 +94,13 @@ def main():
         print('[警告] native\\zshell_host.exe 不存在，外壳菜单回退 ctypes 实现')
 
     # 2) 安装包：onefile，把 onedir 目录整体内嵌为 payload
+    # --noupx：onefile 首次运行要把内嵌 payload 解到临时目录，若本体被 UPX 压过，
+    # 每次启动都得多花解压时间（实测拖慢明显）。安装包只大几 MB，换启动快。
     name = 'ZviberPanel-Setup-v%s-%s' % (APP_VERSION, ARCH)
     payload = os.path.join(APP_DIR, 'ZviberPanel')
     r = run_pyinstaller('setup.pyw', name, '--onefile', DIST,
                         os.path.join(WORK, 'work_setup'),
-                        extra=['--add-data', '%s;payload' % payload])
+                        extra=['--noupx', '--add-data', '%s;payload' % payload])
     if r == 0:
         print('[OK] 安装包：%s' % os.path.join(DIST, name + '.exe'))
     return r
