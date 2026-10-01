@@ -55,6 +55,8 @@ _h32.ScreenToClient.restype = wintypes.BOOL
 _h32.ScreenToClient.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 _h32.SendMessageW.restype = ctypes.c_longlong
 _h32.SendMessageW.argtypes = [ctypes.c_void_p, wintypes.UINT, ctypes.c_size_t, ctypes.c_void_p]
+_h32.AllowSetForegroundWindow.restype = wintypes.BOOL
+_h32.AllowSetForegroundWindow.argtypes = [wintypes.DWORD]
 _h32.CreatePopupMenu.restype = ctypes.c_void_p
 _h32.CreatePopupMenu.argtypes = []
 _h32.DestroyMenu.restype = wintypes.BOOL
@@ -244,6 +246,18 @@ class BoxList(QListWidget):
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.itemDoubleClicked.connect(lambda it: self.box.open_path(it.data(Qt.UserRole)))
 
+    def mouseDoubleClickEvent(self, e):
+        """双击只认左键——Qt 对**右键**也会发双击事件（实测：同一位置两次右键、间隔 60ms
+        即触发 DblClick；Windows 的 500ms 双击间隔内、位移小于阈值都算）。而上面那行把
+        itemDoubleClicked 直接接到 open_path（打开），于是「连续两次右键同一项」就会把它
+        打开：用户实测的「第二次右键必然打开第二个文件」就是这个（位移超过 ~40px 时不触发，
+        所以并非每次都犯）。这里把非左键的双击吃掉，别传给 QListWidget——传下去照样会发
+        itemDoubleClicked。左键路径原样走 super()，双击打开的行为不变。"""
+        if e.button() != Qt.LeftButton:
+            e.accept()
+            return
+        super(BoxList, self).mouseDoubleClickEvent(e)
+
     def dragEnterEvent(self, e):
         if e.mimeData().hasUrls() and e.source() is not self:
             e.acceptProposedAction()
@@ -309,7 +323,9 @@ class BoxList(QListWidget):
         # e.pos()/globalPos() 在非 100%% DPI 下不可信：Qt5 不换算 WM_CONTEXTMENU
         # lParam 的物理坐标（渲染 ×1.25 但事件不除），itemAt 必错位。
         # 光标实时位置 QCursor.pos() 换算是正确的，以此为准。
-        it = self.itemAt(self.mapFromGlobal(QCursor.pos()))
+        pos = self.mapFromGlobal(QCursor.pos())
+        it = self.itemAt(pos)
+        ui._dbg('ctxmenu-event: pos=%s it=%s' % (pos, it.text() if it else None))
         if it:
             # 右键落在多选之外：先改成只选它（与资源管理器的选择语义一致）
             sel = self.selectedItems()
@@ -330,11 +346,15 @@ class BoxList(QListWidget):
             r = shell_context_menu(int(self.winId()), paths,
                                    gp.x(), gp.y(),
                                    on_rename=_do_rename)
+            ui._dbg('ctxmenu: 接管结果 r=%r' % (r,))
             if r == 'rename':
                 self._rename_item(it)
                 return
             if r:
                 return
+            # ★ Qt 兜底菜单：**只有宿主与 ctypes 两条路都没接管才会走到这**。它弹在
+            # 光标处、第一项是「打开」，而右键之后按键可能还按着——松开就会被当成选中它。
+            ui._dbg('★ 走了 Qt 兜底菜单（宿主/ctypes 都没接管）it=%s' % it.text())
         menu = QMenu(self)
         if it:
             path = it.data(Qt.UserRole)
@@ -346,7 +366,8 @@ class BoxList(QListWidget):
             menu.addAction('刷新', self.box.refresh)
             menu.addAction('在资源管理器中打开', lambda: self.box.open_path(self.box.rec['path']))
         if menu.actions():
-            menu.exec_(QCursor.pos())
+            act = menu.exec_(QCursor.pos())
+            ui._dbg('★ Qt 兜底菜单选择: %s' % (act.text() if act else None))
 
 
 class BoxConfirmDialog(QDialog):
@@ -1000,6 +1021,11 @@ class BoxWindow(QWidget):
             self.move(x, y)
 
     def mouseDoubleClickEvent(self, e):
+        # 同上：Qt 对右键也发双击，不设防的话「快速两次右键标题」会平白收起格子。
+        # 双击只认左键。
+        if e.button() != Qt.LeftButton:
+            e.accept()
+            return
         # 快速连续两次点标题拖拽时，第二次 press 会被系统判成双击：
         # 若前一次点击发生了位移（是在拖不是在点），或在拖拽途中，都不收起
         if self._op is not None or time.time() - self._last_drag_ts < 0.5:
@@ -1303,10 +1329,13 @@ class _HostDaemon(QObject):
         self.proc = None
         self.callbacks = []          # 每次请求对应的 on_rename（FIFO）
         self.result.connect(self._on_result)
+        self._req_key = None         # 在途请求的 (hwnd, paths)——重复请求去重
+        self._req_ts = 0.0           # 在途请求发出时间（卡死看门狗用）
 
     def ensure(self):
         if self.proc is not None and self.proc.poll() is None:
             return True
+        self.callbacks = []          # 旧宿主已死，待配对回调全部作废（GUI 线程清理）
         host = _zshell_host()
         if not host:
             return False
@@ -1317,6 +1346,15 @@ class _HostDaemon(QObject):
         except OSError:
             self.proc = None
             return False
+        # 记一笔「这次用的是哪个宿主」：排查时最常见的坑就是面板没重启、还在跑旧宿主
+        #（run.cmd 对已在运行的面板只切显隐，不会重启！），加上 exe 的 mtime 一眼可辨。
+        try:
+            mt = time.strftime('%m-%d %H:%M:%S',
+                               time.localtime(os.path.getmtime(host)))
+            ui._dbg('host 启动 pid=%s exe_mtime=%s path=%s'
+                    % (self.proc.pid, mt, host))
+        except OSError:
+            pass
         threading.Thread(target=self._read_loop, daemon=True).start()
         return True
 
@@ -1329,12 +1367,42 @@ class _HostDaemon(QObject):
                     self.result.emit(int(line[2:]))
                 except ValueError:
                     pass
-        # 进程死了：清空待配对回调，下次请求时 ensure 会重启
-        self.callbacks = []
+        # 进程死了：不在此清 callbacks——读线程与 GUI 线程共享该列表无锁，
+        # 重启后新请求的回调可能被旧读线程误清；改由 ensure() 在重启前清理。
 
     def request(self, hwnd, paths, on_rename):
+        key = (int(hwnd), tuple(paths))
+        if self.callbacks:
+            if time.time() - self._req_ts > 15:
+                # 看门狗：上一请求 15s 无响应且又来了新请求 = 宿主卡死
+                # （菜单开着时用户再点右键会先经 TPM_RECURSE 取消旧菜单，
+                # R 必然已回，所以在途 15s+ 还有新请求不可能是正常弹窗）。
+                # 杀掉重启自愈——宿主与它弹的菜单一起消失，前台与输入随即释放。
+                ui._dbg('ctxmenu: 宿主 15s 无响应，杀掉重启')
+                try:
+                    self.proc.kill()
+                except (OSError, AttributeError):
+                    pass
+                self.proc = None
+                self.callbacks = []
+            elif self._req_key == key:
+                # 在途去重：同一次物理右键可能经两条路径各触发一次请求
+                # （TPM_RECURSE 按下时转发 + 抬起时 DefWindowProc 再发
+                # WM_CONTEXTMENU）。只对【在途】请求去重——上一菜单已关闭后
+                # 的同项右键是合法的重定向连击，绝不能吞（旧版 1.5s 时间窗
+                # 会把它吃掉，表现为「首次右键不弹，第二次才行」）。
+                return True
         if not self.ensure():
             return False
+        # 把「置前台」权限【只】授给宿主自己的 pid：宿主弹菜单前要 SetForegroundWindow
+        # 它的隐藏属主窗——这是必须的（菜单要靠前台线程的鼠标捕获才能被「点别处」关掉，
+        # 实测不抢前台时点菜单外关不掉菜单）。用 ASFW_ANY 则等于把权限敞开给桌面上任意
+        # 进程、关掉系统防抢前台的那道锁，**绝不能用**。键盘误执行菜单项的问题由宿主侧
+        # 线程级 WH_GETMESSAGE 钩子解决（见 AGENTS.md ⑨-b），不靠这里的授权。
+        try:
+            _h32.AllowSetForegroundWindow(self.proc.pid)
+        except OSError:
+            pass
         try:
             head = 'M %d %d\n' % (int(hwnd), len(paths))
             body = ''.join(p + '\n' for p in paths).encode('utf-8')
@@ -1343,11 +1411,21 @@ class _HostDaemon(QObject):
         except (OSError, ValueError):
             self.proc = None
             return False
-        self.callbacks.append(on_rename)
+        self.callbacks.append((on_rename, time.time()))   # 每个请求各带自己的发出时刻
+        self._req_key = key
+        self._req_ts = time.time()
         return True
 
     def _on_result(self, rc):
-        cb = self.callbacks.pop(0) if self.callbacks else None
+        # 记「宿主回了什么、这一次花了多久」：出事复盘时若只有发出去的请求、没有
+        # 回来的应答，就无从判断宿主当时是否还健康（2026-10 冻结事故就吃了这个亏）。
+        # 时间必须按【每个请求自己】的发出时刻算——连点时会有多个请求在途，拿最新的
+        # 时间戳算会把先回的那条算成很短（真踩过：7 连点的日志因此对不上号）。
+        item = self.callbacks.pop(0) if self.callbacks else None
+        cb, sent_at = item if item else (None, 0.0)
+        if sent_at:
+            ui._dbg('ctxmenu: R=%d 用时=%.2fs 在途=%d'
+                    % (rc, time.time() - sent_at, len(self.callbacks)))
         if rc == 2 and cb:
             cb()
 
@@ -1381,6 +1459,10 @@ def shell_context_menu(hwnd, paths, x, y, on_rename=None):
     返回 True=已接管；'rename'=ctypes 路径选了重命名；False=回退内置菜单。"""
     if not paths:
         return False
+    ui._dbg('ctxmenu: %d 项, 首个=%s' % (len(paths), os.path.basename(paths[0])))
+    # 置前台权限在 _HostDaemon.request 里授（只给宿主自己的 pid）：不授权的话，
+    # 焦点刚变过（Win+D 回桌面 / 切过别的程序）的首次右键，宿主 SetForegroundWindow
+    # 失败，菜单弹出即被取消——表现为首次右键无效。
     if _get_daemon().request(hwnd, paths, on_rename):
         return True
     own_com = (_o32.CoInitializeEx(None, 0) == 0)   # S_OK 才是我们初始化的，退出才配对释放

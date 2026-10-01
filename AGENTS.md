@@ -343,6 +343,13 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
   走常驻宿主 `native\zshell_host.exe --serve`（面板启动即拉起并预热壳扩展 DLL，
   每次右键只是管道写一行请求——单次起进程 + 重载壳扩展有 ~500ms 延迟）；
   请求/响应按 FIFO 配对（退出码 2 = 重命名，回调 `BoxList._rename_item`）。
+  去重只对【在途】请求生效（一次物理右键可能经 TPM_RECURSE 转发与 DefWindowProc
+  两条路径各来一次）——上一菜单已关闭后的同项右键是合法的重定向连击，用时间窗
+  去重会把它吃掉（「首次右键不弹、第二次才行」的成因之一）。看门狗：在途 15s+
+  还有新请求 = 宿主卡死（菜单开着时用户再点右键会先经 TPM_RECURSE 取消旧菜单、
+  R 必然已回，故正常弹窗不可能命中），杀掉重启自愈，宿主与它弹的菜单一起消失、
+  前台与输入随即释放。`_read_loop` 不在读线程清 callbacks（与 GUI 线程共享无锁，旧读线程
+  会误清重启后的新回调），改由 `ensure()` 重启前在 GUI 线程清。
   宿主缺失回退 ctypes 实现（`CDefFolderMenu_Create2`，少 Defender 扫描等宿主型扩展项）。
   **为什么必须是独立 exe**：Defender 的 EPP 扩展（{09A47860-...}）检查宿主进程，在真正的
   python.exe 进程里 `QueryContextMenu` 返回成功但一项不加——已逐项排除 exe 名/路径/
@@ -380,8 +387,86 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
   InvokeCommand 一律 E_FAIL（动词改走 GetCommandString 取动词名 + 独立 STA 线程
   ShellExecuteEx + SEE_MASK_ASYNCOK）、ahKeys 不能传（替换默认合并，扩展全丢）、
   壳默认菜单不合并 HKCU progid 动词与 *\shell 静态动词（回退路径手工补到顶部，
-  图标用 ExtractIconExW + SetMenuItemInfo 的 `MIIM_BITMAP=0x80`，0x20 是 MIIM_DATA）。
+  图标用 ExtractIconExW + SetMenuItemInfo 的 `MIIM_BITMAP=0x80`，0x20 是 MIIM_DATA）；
+  ⑨ 菜单必须在【右键抬起之后、且按键状态已清零】时才弹：`TPM_RECURSE` 是右键**按下**
+  就把 WM_CONTEXTMENU 转发过来，而菜单在「按键仍按着」的状态下被创建会进入 KB 65256 的
+  「按下跟踪」模式（原文：只在按住期间显示，一松手就消失、并按菜单语义选中光标下那项）
+  ——菜单永远弹在光标处，于是首项「打开」被直接执行（真实 bug：A 菜单开着右键 B，B 被打开）。
+  两道防线，都在 `show_menu_once`：
+  ① `wait_rbutton_up(1200ms)` 轮询 `GetAsyncKeyState(VK_RBUTTON)`（读的是物理按键当前状态，
+     不需要消息泵；别用 GetKeyState——那是本线程队列里的状态，而 serve 正阻塞在 fgets 上）。
+     **要调两次**：一次在建隐藏窗之前（等这次点击松开，菜单才出现在松手之后），一次
+     **紧挨着 TrackPopupMenu**——中间那串动作（建隐藏窗 / 取坐标 / 排干队列）要十几到几十
+     毫秒，用户完全可能在期间又按下去。
+  ② 紧挨 TPM 处调 `clear_button_keystate()`（`GetKeyboardState`/`SetKeyboardState` 清掉
+     VK_RBUTTON/VK_LBUTTON）——KB 65256 的官方 workaround，清掉后菜单**不再看**按键状态，
+     这才是**确定性**的一刀（单靠等待总有残余窗口：按下可能落在等待返回之后、TPM 内部建
+     菜单之前）。Win11 是否仍读这份线程键盘状态未实测，所以①留着。诊断看宿主日志的
+     `wait_rbutton_up=` / `pre-tpm recheck waited=` 行。
+  ⑨-b **「菜单卡住 + 后面请求排队、再一个个顶上来」的真身：右键落在菜单自身上（2026-10 定案）**
+  ——用户原话：「弹出一个菜单项后，再右键点击其他项目，上一个菜单项不会消失，也不会弹出新的
+  菜单项；点空白处或选它里面某一项，就会陆续自动弹出一些新的菜单项，感觉好像第一个菜单卡住了，
+  后面几个都在排队等着渲染」。机制：菜单弹在第一次右键处、向右下展开，连点列表时后几次点击
+  正好落在**菜单矩形内**，而 `TPM_RECURSE` **只转发菜单外**的右键 ⇒ 落在菜单内的被菜单自己吞掉，
+  既不关菜单也不产生新请求 ⇒ 面板照发的请求全堵在管子里排队 ⇒ 菜单终于关掉后一个个顶上来。
+  **对策（就是桌面整理/资源管理器的「右键连击重定向」）**：`MenuInputProc` 里判断右键是否落在
+  **我们自己线程的菜单窗（`find_own_menu()`，class `#32768`）**矩形内——是则吃掉该按下并
+  `PostMessage(ZM_ENDMENU)` 关掉菜单，随后由 `show_menu_once` 在 **TPM 之后**给调用方
+  （格子列表）补发 `WM_CONTEXTMENU`，面板就会为**光标下那一项**重新弹菜单。
+  ⚠️ 补发必须在 TPM 之后、主代码里做：EndMenu 让 TPM 立刻返回、钩子随即卸掉，而用户松手在那之后、
+  且线程立即回到 fgets 不再取消息——钩子里永远等不到那次抬起（实测丢，重定向就没了）。
+  另注：落在菜单上的**右键**本来就不会激活菜单项（TPM 未带 `TPM_RIGHTBUTTON`），
+  真正会激活的是**左键**——用户为了解开卡住的菜单去点某一项，就是那次「文件夹被打开」的来源；
+  点文件不动只是因为点到的不是「打开」那类动词。
+  回归工具：`%TEMP%\repro_menu_click.py`（弹菜单 → 注入输入 → 读宿主日志的 `cmd` 与调用方收到的
+  `WM_CONTEXTMENU` 次数），四模式：`inside`（右键落在菜单上 → **必须关掉 + 调用方收到 ≥1 次
+  重定向**）/ `outside`（点菜单外 → **必须关掉**）/ `key`（注入 'O' → **cmd 必须 0、菜单关掉**）/
+  `left`（左键点项 → 正常选中，阳性对照）。2026-10 定稿四项全过；`inside` 与 `key` 分别是
+  「没有重定向」和「没有键盘拦截」时会挂的那两项。注意 `outside` 依赖注入点落在菜单外，
+  菜单几何随光标变化，偶尔会落进菜单里而误判，别只跑一次。
+  ⚠️ **别再用全局 WH_MOUSE_LL 钩子**：2026-10 试过一版（专职泵消息线程 + 400ms 延时卸钩 +
+  回调里做 EnumThreadWindows/GetWindowRect/WindowFromPoint），既没修好（抬起照样漏给菜单）
+  又把局部时序问题升级成全系统输入故障。对照腾讯桌面整理 Features64.dll 的做法：它用的是
+  **线程级** `SetWindowsHookExW(WH_GETMESSAGE, proc, NULL, GetCurrentThreadId())`（另一处
+  WH_CBT）+ `SetCapture`，句柄缓存装一次、不随菜单装卸，作用域不出本进程——要复刻「菜单内
+  右键重定向」就走这条线程级路线（注意 WH_GETMESSAGE 的钩子**不能靠返回非零丢消息**，
+  正规做法是把 MSG 改成 WM_NULL）。
+  ⑩ TPM 前必须排干线程队列里积压的鼠标/WM_CONTEXTMENU 消息——serve 循环平时阻塞在
+  fgets 不泵消息，上一次菜单经 TPM_RECURSE 转发给属主窗的右键消息一直积压，下次 TPM
+  一上来就捞到它、按 TPM_RECURSE 语义立刻取消自己（实测 0ms 闪现取消、Win+D 后首次
+  右键不弹的根因）；闪现取消的兜底重试**已删除**：主因由排干解决，而两条守卫候选都不
+  成立（「右键是否按下」是空守卫——等待已保证键是抬起的；「管道里还有没有新请求」被
+  serve 的 `fgets` 预读挡住，CRT 缓冲里的请求在管道句柄上查不到）。别再往回加盲重试。
+  ⑪ **前台锁必须留着，但顺序必须是「先恢复前台、再销毁隐藏窗」**：菜单要能被「点别处」
+  关掉/切换、能被 `TPM_RECURSE` 转发，靠的是它持有鼠标捕获，而**捕获只对前台线程生效**
+  ——实测：完全不动前台时，点在菜单外的鼠标事件直接进了别的应用，菜单收不到、关不掉。
+  所以 `show_menu_once` 保留 `AttachThreadInput + SetForegroundWindow(hhidden)`（配
+  `ThreadInputAttach` 作用域守卫配对；前台线程已挂起则不 attach）+ 弹完恢复前台。
+  **顺序反了会出事**（2026-10 我自己踩的）：先 `DestroyWindow(hhidden)` 再恢复 ⇒ 那一刻
+  本进程已不是前台进程 ⇒ `SetForegroundWindow` 资格丢失 ⇒ 恢复必然失败 ⇒ 前台变 NULL ⇒
+  下一个菜单**拿不到捕获**（没有可 attach 的前台线程）⇒ 点菜单外关不掉 ⇒ 菜单卡住、后续
+  请求排队（⑨-b 那串现象）。正确顺序：**恢复前台 → 再销毁隐藏窗**。
+  前台恢复失败时：`GetShellWindow()`（桌面）与任务栏 `Shell_TrayWnd` **都置不上前台**
+  （实测 ok=0），别白费劲兜底；但**前台为 NULL 是可自愈的**——没人占着，下一个菜单的
+  `SetForegroundWindow` 反而能成功。日志里 `restore fg to … (class=… tid=… attach=…) failed`
+  会打出目标类名，方便判断当时前台是不是我们自己的桌面带窗口（那种窗口本来就不该被当作
+  可恢复的前台）。面板侧授权只给宿主 pid（`AllowSetForegroundWindow(self.proc.pid)`），
+  **绝不用 ASFW_ANY**。
+  宿主诊断：`ZSHELL_LOG=1` 落盘 %TEMP%\zshell_host.log（每请求的 `wait_rbutton_up=` /
+  `pre-tpm recheck waited=` / `tpm cmd=… elapsed=… btnR=…`）；面板 `ZVIBER_DEBUG=1` 记
+  `ctxmenu: R=… 用时=…s 在途=…`（按每个请求自己的发出时刻算；有请求没应答=宿主不健康）。
+  排查「误激活」时 `tpm cmd≠0` 就是「有项被执行了」的判据（cmd=0 既可能是用户取消、
+  也可能是正常关闭），`elapsed` 是菜单存活时长——空放很久的菜单突然返回 cmd，八成是键盘。
 - 列表里 `.lnk` 显示名去掉后缀（对齐资源管理器），UserRole 仍存完整路径，拖出/打开不受影响
+- **双击只认左键**：`BoxList.mouseDoubleClickEvent` / `BoxWindow.mouseDoubleClickEvent` 开头都对
+  非左键早退。原因：**Qt 对右键也发双击事件**（实测：同一位置两次右键、间隔 <500ms 即触发
+  `itemDoubleClicked`；位移 ~40px 以上不触发），而 `BoxList` 把 `itemDoubleClicked` 直接接到了
+  `open_path` ——不设防时「同一项连点两下右键」就会把它**打开**，这正是 2026-10 用户实测
+  「第二次右键必然打开第二个文件」的真身（当时宿主菜单侧全程 `cmd=0`、与菜单毫无关系；
+  位移阈值解释了为什么"点相邻行不一定犯、点同一项必犯"）。`BoxWindow` 同理，否则右键双击标题
+  会平白收起格子。`app.py` 的 `TodoList.mouseDoubleClickEvent` 还没设防（右键双击待办会打开其
+  编辑器），要动就一起加。排查这类"点了就打开"的问题，先看有多少条 `itemDoubleClicked`/
+  `doubleClicked`/`mouseDoubleClickEvent` 的连接，别一上来就往菜单/钩子方向查。
 - **轮询线程里绝不调任何 Qt 方法（2026-09 真实死锁）**：`DesktopClickHook` 的轮询跑在独立线程，
   旧版 `own_hwnds()` 在其中调 `QWidget::winId()`——winId 会现场创建原生窗口，
   `flushWindowSystemEvents → QWaitCondition` 阻塞等主线程刷窗口事件，而工作线程持有 GIL、
