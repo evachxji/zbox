@@ -31,46 +31,14 @@ Windows 桌面整理格子工具：把堆在桌面的文件拖进格子即归类
 
 源码运行：双击 `run.cmd`（缺 PyQt5 会提示自动安装）。
 
-## exe 安装包（自行构建）
+## 自行构建
 
-双击 `build.cmd`（或 `python build.py`），产物为单个安装包 `dist\zviber-Setup-v<版本>-<架构>.exe`（架构跟随打包用的 Python，如 x64）：双击即安装向导，安装范围、安装位置、桌面右键菜单、开机自启均可选；安装出来是 onedir 目录（`zviber\zviber.exe` + 一堆依赖文件），常驻启动免解压更快；卸载走 Windows「设置 → 应用」列表，弹出与安装同风格的卸载向导（带进度）：默认保留用户数据（`%APPDATA%\zviber\`，重装后自动恢复），勾选「同时删除个人数据」则连同待办、格子与配置一并删除。
-
-完整右键菜单（含 Defender 扫描等扩展项）依赖 `native\zshell_host.exe`，已随仓库提交；改动 `native\zshell.cpp` 后需先跑 `native\build_native.cmd` 重新编译（需 MSVC Build Tools）。
-
-## 局域网传输（PC ↔ Android）
-
-两端连**同一 WiFi** 即可互传文件，不走公网、无需账号：
-
-- PC 端：面板第三个 tab「传输」。**功能默认关闭**（不监听端口）：首次使用点传输页中央的
-  「启用传输」（或在「设置 → 传输」勾选）后才开始监听端口 53327，**启用那一刻 Windows 防火墙可能弹授权提示，需允许**，
-  否则设备互相搜不到；之后在设置里可随时关闭。开启后自动发现同网设备；接收文件需手动确认，可选保存目录
-  （默认「下载\Zviber」，记住选择）；等待确认与传输中，发送方都能点「取消」中断（半成品文件自动清理）。
-- Android 端：`android/` 是独立 Gradle 工程（Android 8.0 / minSdk 26 起）。构建前置：本机需有 JDK 17
-  与 Android SDK——装 Android Studio，或只用 cmdline-tools 装 `platforms;android-36` 与
-  `build-tools;36.0.0` 即可（无需整个 Studio）。SDK 位置用环境变量 `ANDROID_HOME`、或
-  `android/local.properties` 里的 `sdk.dir=<SDK路径>` 告诉 Gradle（该文件已 gitignore，各机器各写各的；
-  Windows 用户名含中文时建议把 SDK 装到纯英文路径）。构建 debug 包：
-
-```bat
-cd android && gradlew.bat assembleDebug
-```
-
-产物在 `android\app\build\outputs\apk\debug\`，拷贝到手机安装即可。仅前台传输，
-App 退到后台即停止服务。
-
-实现参照 LocalSend Protocol v2，但端口与组播地址为自定义，**与官方 LocalSend 不互通**；
-HTTP 无加密，请只在可信局域网使用。
+- exe 安装包：双击 `build.cmd`（或 `python build.py`），产物为 `dist\zviber-Setup-v<版本>-<架构>.exe`
+- Android APK：双击 `build-apk.cmd`（需 JDK 17 与 Android SDK），产物在 `android\app\build\outputs\apk\debug\`
 
 ## 兼容性
 
 PyQt5（Qt 5.15），Win7 / Win10 / Win11 通用；Win7 需 Python 3.8 + `PyQt5==5.15.*`。
-
-## 自检
-
-```bat
-set ZVIBER_SHOT=designs\verify && python main.pyw
-```
-导出两主题 × 日历/待办/传输共 6 张截图到指定目录后自动退出。
 
 ## 开源致谢
 
