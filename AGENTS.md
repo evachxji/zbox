@@ -437,7 +437,7 @@ IPC 通道（与 `--pick-folder` 同一条）发回面板建格子；`new_folder
   `_spawn` 里先 `setWindowOpacity(0)` 隐身、120ms 后再现身（同时盖住挂带 SetParent 的隐藏-重现）。
 - **双击桌面空白显隐**（`BoxManager.toggle_all`）：桌面图标 + 全部格子 + 面板一起显隐，
   图标显隐 = ShowWindow 桌面的 `SysListView32`（`find_desktop_listview` 定位，Progman
-  找不到再扫 WorkerW）。`DesktopClickHook` 独立线程**轮询左键沿**（GetAsyncKeyState 每 20ms）
+  找不到再扫 WorkerW）。`DesktopClickHook` 独立线程**轮询左键**（GetAsyncKeyState 每 10ms，一次按下两条路都认：低位 0x0001「距上次调用以来按下过」+ 高位 0x8000 由松到按的沿——只看高位沿时触摸板轻点/快速点击可整个落在轮询间隔里被漏掉，双击显隐就「有时不灵」；只看低位又会被别的进程调 GetAsyncKeyState 抢读，故二者互补）；**重启线程靠 `run()` 开头清 `_stop`**——stop() 置位后不再清的话，设置里关一次再打开，start() 重进 run() 立即退出，双击功能永久失效直到重启程序）
   按 GetDoubleClickTime 判双击——**不要用 WH_MOUSE_LL 全局钩子**：每个系统鼠标事件都要同步等
   Python 回调拿 GIL，GUI 线程拖拽重绘时全系统鼠标卡顿 5-10 秒，ctypes 回调里的崩溃还直接
   闪退进程（2026-10 拖拽格子卡顿→闪退的根因，c000041d + 访问冲突）。坑：① 命中链先排我们自己的窗口；

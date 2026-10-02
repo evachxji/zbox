@@ -16,7 +16,7 @@
 - 窗口：无边框 Tool 窗，半透明磨砂；挂桌面带免疫 Win+D（面板同款 pin_to_desktop）。
   与面板的差异：永不主动沉底（格子沉到应用窗口之下 = 用户眼里的「消失」）；
   只在被桌面整理软件表层压住时由 WinEvent 钩子/看门狗抬回表层之上。
-- 双击桌面空白处显隐「桌面图标 + 全部格子 + 面板」：独立线程轮询左键沿自判双击
+- 双击桌面空白处显隐「桌面图标 + 全部格子 + 面板」：独立线程轮询左键自判双击
   （不用 WH_MOUSE_LL 全局钩子——每个系统鼠标事件都要等 Python 回调拿 GIL，拖拽时全系统
   鼠标卡顿，ctypes 回调里的崩溃还会直接闪退进程）；命中判定与旧钩子版一致。
 - 视觉固定深色磨砂：格子贴在壁纸上，跟随面板明暗主题都不合适，故不挂主题系统。
@@ -2256,6 +2256,10 @@ class DesktopClickHook(QThread):
         self._stop = False
 
     def run(self):
+        # _stop 必须在 run() 开头清掉：stop() 置位后再次 start() 会重进 run()，
+        # 不清的话 while 条件立刻为假、线程秒退——设置里把开关关掉再打开，
+        # 双击功能就永久失效（2026-10 用户实测，docstring 却写着「重启是安全的」）。
+        self._stop = False
         u32 = ctypes.windll.user32
         k32 = ctypes.windll.kernel32
         state = {'t': 0.0, 'x': -9999, 'y': -9999}
@@ -2296,12 +2300,18 @@ class DesktopClickHook(QThread):
                 h = ui._u32.GetParent(h)
             return False
 
-        # 轮询左键沿代替 LL 钩子：只在本线程内做事，_is_desktop 的跨进程命中测试
+        # 轮询左键代替 LL 钩子：只在本线程内做事，_is_desktop 的跨进程命中测试
         # 最坏多占几毫秒，也绝不影响系统鼠标管道。
+        # 一次「按下」两条路都认——低位记账（0x0001 = 距上次调用以来按下过）或高位沿
+        # （0x8000 当前态由松到按）：只看高位沿的话，触摸板轻点/快速点击的按下-松开可
+        # 整个落在两次轮询之间被漏掉，双击丢一击 → 「双击显隐有时不灵」（2026-10 用户
+        # 实测）；只看低位又不行——低位会被**别的进程**调 GetAsyncKeyState 抢先读走
+        # （MSDN 注明，实测注入点击时低位置位也不稳定），所以高位沿留着兜底。
         prev_down = False
         while not self._stop:
-            down = bool(u32.GetAsyncKeyState(0x01) & 0x8000)   # VK_LBUTTON 当前按下
-            if down and not prev_down:
+            v = u32.GetAsyncKeyState(0x01)   # VK_LBUTTON
+            down = bool(v & 0x8000)
+            if (v & 0x0001) or (down and not prev_down):
                 pt = wintypes.POINT()
                 u32.GetCursorPos(ctypes.byref(pt))
                 # 命中判定要兜异常：落盘 + 本轮放弃，不能拖垮轮询线程
@@ -2323,7 +2333,7 @@ class DesktopClickHook(QThread):
                 except Exception:
                     _log_hook_error()
             prev_down = down
-            time.sleep(0.02)
+            time.sleep(0.01)
 
     def stop(self):
         self._stop = True
@@ -2504,7 +2514,8 @@ class BoxManager(object):
 
     def set_dblclick_enabled(self, on):
         """设置窗开关：启停「双击桌面显隐格子」的低级鼠标钩子。
-        QThread 停止后可再次 start；stop() 会等线程退出，重启是安全的。"""
+        QThread 停止后可再次 start；stop() 会等线程退出，
+        重启能起作用靠 run() 开头清 _stop（见那里注释）。"""
         if on and not self.hook.isRunning():
             self.hook.start()
         elif not on and self.hook.isRunning():
