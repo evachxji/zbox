@@ -4,7 +4,7 @@
 
 # Zviber 桌面格子
 
-Windows 桌面整理格子工具：把堆在桌面的文件拖进格子即归类，附带日历 + 待办悬浮小面板。Win7 / Win10 / Win11 通用。
+Windows 桌面整理格子工具：把堆在桌面的文件拖进格子即归类，附带日历 + 待办 + 局域网传输悬浮小面板。Win7 / Win10 / Win11 通用。
 
 ## 功能
 
@@ -21,6 +21,7 @@ Windows 桌面整理格子工具：把堆在桌面的文件拖进格子即归类
 
 - **日历**：顶部时钟 + 三档倒计时（距午休 / 距上班 / 距下班）；周一起始月视图，法定节假日「休」/ 调休「班」角标、农历与节日副标题；滚轮平移翻月
 - **待办**：双击空白新建，勾选完成置灰沉底；截止日期 tag（逾期标红 / 今天 / 还剩 N 天）；长文本自动折行
+- **传输**：局域网内 PC ↔ Android 互传文件（参照 LocalSend 协议的私有实现，与官方 LocalSend 不互通）：自动发现同网设备，文件多选 + 拖拽发送；接收需手动确认，可选保存目录（默认「下载\Zviber」）；发送方在等待确认与传输中可随时取消
 - **主题切换**：深色 / 浅色 / 跟随系统三档，设置窗口一键切换，自动记忆
 
 ## 快速开始
@@ -35,9 +36,39 @@ Windows 桌面整理格子工具：把堆在桌面的文件拖进格子即归类
 
 完整右键菜单（含 Defender 扫描等扩展项）依赖 `native\zshell_host.exe`，已随仓库提交；改动 `native\zshell.cpp` 后需先跑 `native\build_native.cmd` 重新编译（需 MSVC Build Tools）。
 
+## 局域网传输（PC ↔ Android）
+
+两端连**同一 WiFi** 即可互传文件，不走公网、无需账号：
+
+- PC 端：面板第三个 tab「传输」，自动发现同网设备；接收文件需手动确认，可选保存目录
+  （默认「下载\Zviber」，记住选择）；等待确认与传输中，发送方都能点「取消」中断（半成品文件自动清理）。**首次运行时 Windows 防火墙会弹授权提示，需允许**，
+  否则设备互相搜不到。
+- Android 端：`android/` 是独立 Gradle 工程（Android 8.0 / minSdk 26 起）。构建前置：本机需有 JDK 17
+  与 Android SDK——装 Android Studio，或只用 cmdline-tools 装 `platforms;android-36` 与
+  `build-tools;36.0.0` 即可（无需整个 Studio）。SDK 位置用环境变量 `ANDROID_HOME`、或
+  `android/local.properties` 里的 `sdk.dir=<SDK路径>` 告诉 Gradle（该文件已 gitignore，各机器各写各的；
+  Windows 用户名含中文时建议把 SDK 装到纯英文路径）。构建 debug 包：
+
+```bat
+cd android && gradlew.bat assembleDebug
+```
+
+产物在 `android\app\build\outputs\apk\debug\`，拷贝到手机安装即可。仅前台传输，
+App 退到后台即停止服务。
+
+实现参照 LocalSend Protocol v2，但端口与组播地址为自定义，**与官方 LocalSend 不互通**；
+HTTP 无加密，请只在可信局域网使用。
+
 ## 兼容性
 
 PyQt5（Qt 5.15），Win7 / Win10 / Win11 通用；Win7 需 Python 3.8 + `PyQt5==5.15.*`。
+
+## 自检
+
+```bat
+set ZVIBER_SHOT=designs\verify && python main.pyw
+```
+导出两主题 × 日历/待办/传输/双栏共 8 张截图到指定目录后自动退出。
 
 ## License
 

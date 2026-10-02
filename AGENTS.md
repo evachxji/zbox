@@ -81,13 +81,16 @@ LLM 经常默默选择一种解释然后执行。这个原则强制明确推理�
 
 ## Project Structure & Module Organization
 
-Zviber 是 Windows 桌面悬浮面板（日历 + 待办），PyQt5，Python 3.8+，Win7 / Win10 / Win11 通用。
+Zviber 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyQt5，Python 3.8+，Win7 / Win10 / Win11 通用。
 平铺布局，一个模块一个职责：
 
-- `main.pyw` — 入口：单实例 IPC（`QLocalServer`）、节假日后台更新、（frozen 时）`--uninstall` 卸载向导入口
-- `app.py` — 面板 UI（日历 / 待办 / 双栏 / 顶部栏滑出与拖动）、`SettingsDialog` 与节假日导入引导窗
+- `main.pyw` — 入口：单实例 IPC（`QLocalServer`）、节假日后台更新、局域网传输服务启动、（frozen 时）`--uninstall` 卸载向导入口
+- `app.py` — 面板 UI（日历 / 待办 / 传输 / 双栏 / 顶部栏滑出与拖动）、`SettingsDialog` 与节假日导入引导窗
 - `boxes.py` — 桌面格子：空白格子（桌面文件的收纳视图，不搬文件、只隐藏桌面图标）与文件夹映射格子、双击桌面显隐
 - `calendar_data.py` — 内置国务院节假日数据、农历换算、三源联网回退与离线导入
+- `transfer.py` — 局域网文件传输协议核心（参照 LocalSend v2 的私有实例）：UDP 组播发现 + HTTP REST 传输，纯标准库零 Qt
+- `transfer_ui.py` — 面板「传输」tab：设备列表、文件多选 + 拖拽发送、传输记录、接收确认层、发送方取消
+- `transfer_selftest.py` — 传输协议自动化自检（13 用例，动态端口，不依赖组播/Qt）
 - `themes.py` — 两套主题 QSS（深色 `nocturne` / 浅色 `mica`）加 `auto` 伪主题；`%CN%`/`%NUM%` 为字体占位符
 - `version.py` — 版本号唯一来源：关于窗、设置窗左下角、安装向导、卸载注册表项共用 `APP_VERSION`，发版只改这一个文件
 - `sysutil.py` — 注册表集成：开机自启、桌面右键菜单、应用列表卸载项（默认 HKCU，免管理员）
@@ -101,6 +104,7 @@ Zviber 是 Windows 桌面悬浮面板（日历 + 待办），PyQt5，Python 3.8+
 - `run.cmd` — 双击启动面板；已在运行则切换显隐
 - `stop.cmd` — 双击停止面板：先 `--quit` 经 IPC 礼貌退出（正常清理菜单注入），残留进程强制结束
 - `designs/` — 两套主题的设计稿（HTML，浏览器可直接打开）
+- `android/` — Android 端独立 Gradle 工程（Kotlin + Compose，与 PC 代码完全分离）
 
 运行时数据在 `%APPDATA%\zviber\`（`config.json` / `todos.json` / `holidays.json` / `icons/`）——不要提交。
 **目录名 2026-10 由 `ZviberPanel` 改成 `zviber`**：`sysutil.appdata_dir()` 首次调用时自动把旧目录搬过来
@@ -116,10 +120,12 @@ python build.py              :: 打包 exe 安装包（或双击 build.cmd）
 native\build_native.cmd      :: 编译外壳菜单宿主 zshell_host.exe（改 native\zshell.cpp 后必跑）
 python install.py            :: 源码方式开启开机自启
 python install.py --remove   :: 移除自启并清理旧的右键菜单
+python transfer_selftest.py  :: 传输协议自检（全过打印 SELFTEST OK）
+cd android && gradlew.bat assembleDebug   :: 构建 Android debug APK
 set ZVIBER_SHOT=designs\verify && python main.pyw   :: 截图自检
 ```
 
-自检导出两主题 × 日历/待办/双栏截图后自动退出，改 UI / 主题 / 布局后必跑。
+自检导出两主题 × 日历/待办/双栏/传输共 8 张截图后自动退出，改 UI / 主题 / 布局后必跑。
 **跑之前先退出正在运行的实例**：否则单实例分支会把这次启动当成一次 `--toggle` 转发给已运行实例
 （用户的面板被显隐一次），本进程直接退出，一张图都不会导出，而且没有任何报错。
 截图目录与设计稿渲染图已 gitignore，不要提交。
@@ -145,7 +151,9 @@ set ZVIBER_SHOT=designs\verify && python main.pyw   :: 截图自检
 
 `main()` 的顺序是有意的，改动前先读懂：设置 excepthook → `installer.maybe_install()`
 （仅 frozen exe 生效，只处理 `--uninstall` 卸载向导，返回 True 直接退出）→ 单实例 IPC 探测
-（`QLocalSocket` 连 `sysutil.IPC_KEY`，已运行则发 `toggle` 后退出）→ 建面板 → 起 `QLocalServer`
+（`QLocalSocket` 连 `sysutil.IPC_KEY`，已运行则发 `toggle` 后退出）→ 建传输服务
+（`transfer.TransferServer` + `Discovery`，端口 53327 被占则注入 None、传输页降级空态；
+`ZVIBER_SHOT` 下不起服务）→ 建面板 → 起 `QLocalServer`
 接收 `toggle` / `quit` → `context_menu_set_running(True)` 注入桌面右键级联菜单。
 
 - 单实例靠 `QLocalServer` 名称 `zviber-panel-v2`；消息由 `_on_ipc` 按 `actions` 字典分发，`quit` 消息供卸载程序请求退出。
@@ -153,6 +161,9 @@ set ZVIBER_SHOT=designs\verify && python main.pyw   :: 截图自检
 - `installer.setup_main()`（setup exe 入口）里 `ZVIBER_AUTO_INSTALL` 是静默安装测试钩子。
 - **没有系统托盘图标**（已移除）：显隐/新建格子/设置/关于/退出等入口全在桌面右键级联菜单，
   别再往回加托盘。设置窗口是**非模态**的（桌面右键「设置」），已开着就 `raise_()`，不会叠第二个。
+  传输分支的托盘气泡通知通道因此整体不合并：传输服务起不来靠传输页「不可用」空态呈现；
+  收到文件请求时 `_transfer_notify` 改为唤起面板并切到传输 tab（接收确认卡片弹在那里），
+  「传输完成」等纯通知在传输页记录区可见。需要 Windows toast 通知的话另行加（AUMID 已设 `Zviber`）。
 
 ### 崩溃诊断与日志
 
@@ -601,6 +612,39 @@ IPC 通道（与 `--pick-folder` 同一条）发回面板建格子；`new_folder
   预建的 `frozenset` 快照（`_refresh_own_hwnds`，启动与格子增删时刷新、整体换引用）。
   Win32 API（WindowFromPoint / GetParent / GetClassNameW 等）跨线程调用是安全的，Qt 对象一律不碰。
 
+### 局域网传输（`transfer.py` + `transfer_ui.py` + `transfer_selftest.py`）
+
+参照 LocalSend Protocol v2 实现的**私有实例**：UDP 组播发现（224.0.0.168:53327）+ HTTP REST 传输
+（TCP 53327，前缀 `/api/localsend/v2/`，路由 register / info / prepare-upload / upload / cancel）。
+端口与组播地址都是自定义的（官方是 53317），**与官方 LocalSend 完全隔离、互不相通**——别想着去兼容；
+HTTP 模式无加密，只面向可信局域网。组播失效时有 /24 子网扫描回退。
+
+
+
+- `transfer.py` 纯标准库零 Qt，可独立测试：`DeviceInfo` / `Discovery` / `TransferServer` /
+  `send_files` / `load_or_create_fingerprint`。防护全在服务端：会话状态机 + token 校验、
+  sha256 校验、64KB 流式写盘、同名自动加 " (2)"、路径穿越净化、1MB JSON 上限、
+  会话 TTL 10 分钟（按最后活跃刷新）。
+- `transfer_ui.py` 是面板第三个 tab「传输」：设备列表、文件多选 + 拖拽发送、传输记录、
+  接收确认层（可选保存目录，默认 `%USERPROFILE%\Downloads\Zviber` 并记住，170 秒确认超时）。
+  **网络回调全走 pyqtSignal 回主线程**，不跨线程动 UI；53327 被占用时降级为空态，不影响日历/待办。
+- `transfer_selftest.py` 是自动化协议自检：`python transfer_selftest.py`，13 用例全过打印
+  `SELFTEST OK`；用动态端口、不依赖组播与 Qt，**改 `transfer.py` 后必跑**。
+- Android 端在 `android/`：独立 Gradle 工程（Kotlin + Compose + OkHttp + NanoHTTPD，minSdk 26），
+  与 PC 代码完全分离；指纹/别名/保存目录存 SharedPreferences，SAF 落盘，仅前台传输
+  （`onStop` 即停服务）。
+- `config.json` 新增键：`transfer_fingerprint` / `transfer_alias` / `transfer_dir`。
+
+
+
+坑位：
+
+- `cfg.save()` 是整体回写，会抹掉 `load_or_create_fingerprint` 直写 config.json 的指纹——
+  `main.pyw` 启动时已把指纹同步进 `cfg.data`，改启动流程时别丢掉这一步。
+- 未 `start()` 的 `TransferServer` 调 `stop()` 会死等，退出路径靠 `transfer_started` 标志守卫。
+- 改别名要重启才会重新广播（发现报文只在启动时发）。
+- Windows 防火墙首次监听 53327 会弹授权框，用户拒绝后传输静默不可用——排查先问这一步。
+
 ## Coding Style & Naming Conventions
 
 - 每个模块首行 `# -*- coding: utf-8 -*-`，4 空格缩进
@@ -625,3 +669,5 @@ PR 需说明改了什么与为什么；视觉改动附自检截图；注明验�
 - 注册表只写 HKCU（免管理员）；「此计算机」安装写 HKLM 才需要 UAC 提权
 - 网络访问仅限 timor.tech 的节假日接口——该接口不带 User-Agent 会回 403；
   内网用户走离线 JSON 导入，这条路径必须一直可用
+- 局域网传输监听 TCP/UDP 53327（自定义端口，与官方 LocalSend 53317 隔离不互通）；
+  HTTP 无加密，仅限可信局域网；Windows 防火墙首次监听会弹授权，需允许

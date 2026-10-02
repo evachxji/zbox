@@ -191,6 +191,63 @@ QCalendarWidget QSpinBox {
 }
 QCalendarWidget QHeaderView::section { background: #23252d; color: #6d6a62; border: none; font: 10px "%NUM%"; }
 QToolTip { background-color: #2a2d36; border: 1px solid rgba(255,255,255,40); padding: 4px 8px; }
+
+/* ---- 传输页 ---- */
+QFrame#transferRoot { background: transparent; }
+QWidget#transferBox { background: transparent; }
+QLabel#transferTitle { color: #f0ede6; font: 600 12.5px "%CN%"; background: transparent; }
+QLabel#transferLabel { color: #8d8a82; font: 12px "%CN%"; background: transparent; }
+QLabel#transferHint { color: #6d6a62; font: 11.5px "%CN%"; background: transparent; }
+QLineEdit#aliasEdit {
+    background: rgba(255,255,255,12); border: 1px solid rgba(255,255,255,28); border-radius: 7px;
+    color: #f0ede6; font: 12px "%CN%"; padding: 4px 8px; selection-background-color: rgba(232,163,61,90);
+}
+QLineEdit#aliasEdit:focus { border-color: #e8a33d; }
+QScrollArea#transferScroll { background: transparent; border: none; }
+QFrame#deviceRow { background: transparent; border-radius: 8px; }
+QFrame#deviceRow:hover { background: rgba(255,255,255,12); }
+QFrame#deviceRow[sel="true"] { background: rgba(232,163,61,30); }
+QLabel#deviceType {
+    color: #e8a33d; background: rgba(232,163,61,26); border-radius: 7px;
+    font: 600 10px "%CN%"; padding: 1px 6px;
+}
+QLabel#deviceAlias { color: #e8e6e1; font: 12.5px "%CN%"; background: transparent; }
+QLabel#deviceIp { color: #6d6a62; font: 10.5px "%NUM%"; background: transparent; }
+QToolButton#refreshBtn, QToolButton#cancelBtn {
+    background: transparent; border: 1px solid rgba(255,255,255,30); border-radius: 6px;
+    color: #8d8a82; font: 11px "%CN%"; padding: 2px 10px;
+}
+QToolButton#refreshBtn:hover, QToolButton#cancelBtn:hover { border-color: rgba(232,163,61,130); color: #e8a33d; }
+QToolButton#refreshBtn:disabled { color: #4c4a45; border-color: rgba(255,255,255,16); }
+QToolButton#pickBtn {
+    background: transparent; border: 1px dashed rgba(255,255,255,40); border-radius: 8px;
+    color: #8d8a82; font: 11.5px "%CN%"; padding: 5px 10px;
+}
+QToolButton#pickBtn:hover { border-color: rgba(232,163,61,130); color: #e8a33d; }
+QToolButton#pickBtn[drop="true"] { border-color: #e8a33d; border-style: solid; color: #e8a33d; background: rgba(232,163,61,22); }
+QPushButton#sendBtn {
+    background: #e8a33d; border: none; border-radius: 8px;
+    color: #1a1610; font: 600 12px "%CN%"; padding: 6px 16px;
+}
+QPushButton#sendBtn:hover { background: #f2b45a; }
+QPushButton#sendBtn:disabled { background: rgba(255,255,255,14); color: #57554f; }
+QFrame#transferRow { background: rgba(255,255,255,8); border-radius: 8px; }
+QLabel#transferDir { color: #e8a33d; font: 600 12px "%NUM%"; background: transparent; }
+QLabel#transferName { color: #e8e6e1; font: 12px "%CN%"; background: transparent; }
+QLabel#transferState { color: #6d6a62; font: 10.5px "%CN%"; background: transparent; }
+QLabel#transferState[state="busy"] { color: #e8a33d; }
+QLabel#transferState[state="done"] { color: #7fb069; }
+QLabel#transferState[state="fail"], QLabel#transferState[state="rejected"],
+QLabel#transferState[state="cancelled"] { color: #e05252; }
+QFrame#transferRow QProgressBar { background: rgba(255,255,255,16); border: none; border-radius: 3px; }
+QFrame#transferRow QProgressBar::chunk { background: #e8a33d; border-radius: 3px; }
+QFrame#recvDialog { background: #20222a; border: 1px solid rgba(255,255,255,30); border-radius: 10px; }
+QFrame#recvFromCard { background: rgba(232,163,61,18); border: 1px solid rgba(232,163,61,55); border-radius: 8px; }
+QLabel#recvFrom { color: #e8a33d; font: 600 13px "%CN%"; background: transparent; }
+QLabel#recvMeta { color: #8d8a82; font: 10.5px "%CN%"; background: transparent; }
+QFrame#recvFileCard { background: rgba(255,255,255,8); border: 1px solid rgba(255,255,255,16); border-radius: 8px; }
+QLabel#recvFiles { color: #cfccc4; font: 12px "%CN%"; background: transparent; }
+QLabel#recvDir { color: #8d8a82; font: 11px "%CN%"; background: transparent; }
 """,
 }
 
@@ -370,6 +427,63 @@ QCalendarWidget QToolButton#qt_calendar_prevmonth, QCalendarWidget QToolButton#q
 QCalendarWidget QToolButton::menu-indicator { image: none; width: 0; }
 QCalendarWidget QSpinBox { color: #1b1b1f; background: transparent; font: 12px "%NUM%"; }
 QCalendarWidget QHeaderView::section { background: #ffffff; color: #8a8a90; border: none; font: 10px "%CN%"; }
+
+/* ---- 传输页 ---- */
+QFrame#transferRoot { background: transparent; }
+QWidget#transferBox { background: transparent; }
+QLabel#transferTitle { color: #1b1b1f; font: 600 12.5px "%CN%"; background: transparent; }
+QLabel#transferLabel { color: #8a8a90; font: 12px "%CN%"; background: transparent; }
+QLabel#transferHint { color: #8a8a90; font: 11.5px "%CN%"; background: transparent; }
+QLineEdit#aliasEdit {
+    background: #ffffff; border: 1px solid rgba(0,0,0,26); border-radius: 7px;
+    color: #1b1b1f; font: 12px "%CN%"; padding: 4px 8px; selection-background-color: rgba(0,103,192,60);
+}
+QLineEdit#aliasEdit:focus { border-color: #0067c0; }
+QScrollArea#transferScroll { background: transparent; border: none; }
+QFrame#deviceRow { background: transparent; border-radius: 8px; }
+QFrame#deviceRow:hover { background: rgba(0,0,0,11); }
+QFrame#deviceRow[sel="true"] { background: rgba(0,103,192,18); }
+QLabel#deviceType {
+    color: #0067c0; background: rgba(0,103,192,20); border-radius: 7px;
+    font: 600 10px "%CN%"; padding: 1px 6px;
+}
+QLabel#deviceAlias { color: #1b1b1f; font: 12.5px "%CN%"; background: transparent; }
+QLabel#deviceIp { color: #8a8a90; font: 10.5px "%NUM%"; background: transparent; }
+QToolButton#refreshBtn, QToolButton#cancelBtn {
+    background: #ffffff; border: 1px solid rgba(0,0,0,26); border-radius: 6px;
+    color: #5b5b60; font: 11px "%CN%"; padding: 2px 10px;
+}
+QToolButton#refreshBtn:hover, QToolButton#cancelBtn:hover { border-color: #0067c0; color: #0067c0; }
+QToolButton#refreshBtn:disabled { color: #b4b4ba; border-color: rgba(0,0,0,14); }
+QToolButton#pickBtn {
+    background: transparent; border: 1px dashed rgba(0,0,0,46); border-radius: 8px;
+    color: #5b5b60; font: 11.5px "%CN%"; padding: 5px 10px;
+}
+QToolButton#pickBtn:hover { border-color: #0067c0; color: #0067c0; background: rgba(0,103,192,13); }
+QToolButton#pickBtn[drop="true"] { border-color: #0067c0; border-style: solid; color: #0067c0; background: rgba(0,103,192,26); }
+QPushButton#sendBtn {
+    background: #0067c0; border: none; border-radius: 8px;
+    color: #ffffff; font: 600 12px "%CN%"; padding: 6px 16px;
+}
+QPushButton#sendBtn:hover { background: #1a77cc; }
+QPushButton#sendBtn:disabled { background: rgba(0,0,0,14); color: #a8a8ae; }
+QFrame#transferRow { background: rgba(0,0,0,8); border-radius: 8px; }
+QLabel#transferDir { color: #0067c0; font: 600 12px "%NUM%"; background: transparent; }
+QLabel#transferName { color: #1b1b1f; font: 12px "%CN%"; background: transparent; }
+QLabel#transferState { color: #8a8a90; font: 10.5px "%CN%"; background: transparent; }
+QLabel#transferState[state="busy"] { color: #0067c0; }
+QLabel#transferState[state="done"] { color: #107c10; }
+QLabel#transferState[state="fail"], QLabel#transferState[state="rejected"],
+QLabel#transferState[state="cancelled"] { color: #c42b1c; }
+QFrame#transferRow QProgressBar { background: rgba(0,0,0,16); border: none; border-radius: 3px; }
+QFrame#transferRow QProgressBar::chunk { background: #0067c0; border-radius: 3px; }
+QFrame#recvDialog { background: #ffffff; border: 1px solid rgba(0,0,0,26); border-radius: 10px; }
+QFrame#recvFromCard { background: rgba(0,103,192,12); border: 1px solid rgba(0,103,192,42); border-radius: 8px; }
+QLabel#recvFrom { color: #0067c0; font: 600 13px "%CN%"; background: transparent; }
+QLabel#recvMeta { color: #8a8a90; font: 10.5px "%CN%"; background: transparent; }
+QFrame#recvFileCard { background: rgba(0,0,0,6); border: 1px solid rgba(0,0,0,16); border-radius: 8px; }
+QLabel#recvFiles { color: #1b1b1f; font: 12px "%CN%"; background: transparent; }
+QLabel#recvDir { color: #8a8a90; font: 11px "%CN%"; background: transparent; }
 """,
 }
 

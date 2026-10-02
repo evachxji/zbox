@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 局域网传输所需权限 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!-- 传输中息屏保持 WiFi 不休眠（退后台保活路径用） -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- usesCleartextTraffic：协议走明文 HTTP（仅局域网），Android 9+ 默认拦截明文流量 -->
+    <application
+        android:usesCleartextTraffic="true"
+        android:label="Zviber 传输"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.ZviberTransfer">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

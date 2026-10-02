@@ -8,8 +8,10 @@
       pythonw main.pyw --add-folder <路径>   文件夹右键「添加到zviber桌面格子」：路径经 IPC 发回面板建格子
 自检：设置环境变量 ZVIBER_SHOT=<目录> 启动，自动导出两主题截图后退出。
 """
+import ctypes
 import faulthandler
 import os
+import platform
 import re
 import sys
 import time
@@ -26,6 +28,7 @@ import boxes as bx
 import calendar_data as cd
 import installer
 import sysutil
+import transfer
 from themes import THEME_ORDER
 
 IPC_KEY = sysutil.IPC_KEY
@@ -201,13 +204,18 @@ def main():
     # （run.cmd 启动时那句 `OleInitialize() failed: RPC_E_CHANGED_MODE`），而 OLE 没初始化
     # ⇒ **Qt 所有窗口的拖放目标都注册不上**（实测 RevokeDragDrop：MTA 下 DRAGDROP_E_NOTREGISTERED，
     # STA 下 S_OK）⇒ 往格子里拖任何文件都是红色禁止光标（用户报的 bug 1 真身）。
-    import ctypes
     ctypes.windll.ole32.CoInitializeEx(None, 0x2)   # COINIT_APARTMENTTHREADED
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
     QApplication.setQuitOnLastWindowClosed(False)
     qapp = QApplication(sys.argv)
     qapp.setApplicationName(sysutil.APP_NAME)
+    # 通知归属独立应用身份：Windows 按进程/AUMID 缓存气泡图标，
+    # 旧版「黄底日期」图标就是这么残留在通知里的；独立 AUMID 绕开旧缓存
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('Zviber')
+    except Exception:
+        pass
 
     if installer.maybe_install():
         return 0  # --uninstall 卸载向导结束后退出（安装包是独立的 setup exe）
@@ -251,7 +259,26 @@ def main():
     cfg = ui.Config(os.path.join(data_dir, 'config.json'))
     hstore = cd.HolidayStore(os.path.join(data_dir, 'holidays.json'))
     tstore = ui.TodoStore(os.path.join(data_dir, 'todos.json'))
-    panel = ui.FloatingPanel(cfg, hstore, tstore)
+
+    # 局域网传输：指纹持久化在 config.json（同步进 cfg.data，防 cfg.save() 回写时丢键）；
+    # 别名默认电脑名（传输页可改）。端口被占时注入 None，传输页降级为「不可用」空态
+    fingerprint = transfer.load_or_create_fingerprint(cfg.path)
+    cfg.data['transfer_fingerprint'] = fingerprint
+    alias = cfg.transfer_alias or platform.node() or 'Zviber'
+    device_info = transfer.DeviceInfo.local(alias, fingerprint)
+    try:
+        transfer_server = transfer.TransferServer(device_info)
+    except Exception:
+        transfer_server = None   # 端口 53327 被占用
+    discovery = transfer.Discovery(device_info) if transfer_server is not None else None
+    panel = ui.FloatingPanel(cfg, hstore, tstore, transfer_server, discovery, device_info)
+
+    # 截图自检不起服务：避免网络发现/对端接入让截图不确定。
+    # 记住启动状态：未 start 过的 server 不能 stop（socketserver.shutdown() 会死等）
+    transfer_started = transfer_server is not None and not os.environ.get('ZVIBER_SHOT')
+    if transfer_started:
+        transfer_server.start()
+        discovery.start()
     # 桌面格子：截图自检模式不创建，避免格子入镜干扰面板截图
     boxmgr = None
     if not os.environ.get('ZVIBER_SHOT') and not os.environ.get('ZVIBER_GRABSCREEN'):
@@ -275,6 +302,31 @@ def main():
             boxmgr.shutdown()
             sysutil.context_menu_set_running(False)  # 桌面右键切回直链「单击启动」
     qapp.aboutToQuit.connect(_quit_cleanup)
+
+    # 无系统托盘，分支的托盘气泡通道整体不进：
+    # ① 传输服务起不来（端口被占）——传输页本身已降级为「不可用」空态，无需另提示；
+    # ② 收到文件请求——唤起面板切到传输 tab（接收确认卡片就弹在那里，不唤起用户
+    #   根本看不到，会拖到对端 180s 超时）；「传输完成」等纯通知在传输页记录区可见，不打扰
+    def _transfer_notify(title, msg):
+        if title != '收到文件':
+            return
+        try:
+            panel.set_tab(2, save=False)   # tabs：日历 0 / 待办 1 / 传输 2
+            panel.show()
+            panel.raise_()
+            panel.activateWindow()
+        except Exception:
+            pass
+    panel.transfer.notify.connect(_transfer_notify)
+
+    def _stop_transfer():
+        try:
+            if transfer_started:
+                discovery.stop()
+                transfer_server.stop()
+        except Exception:
+            pass
+    qapp.aboutToQuit.connect(_stop_transfer)
 
     # 节假日数据：设置窗「联网更新」与导入窗里各源的「下载并导入」都走同一条后台通道
     def fetch_holidays(on_finish=None):
@@ -387,7 +439,7 @@ def _import_holidays(hstore, panel, on_download):
 
 
 def _self_shot(shot_dir, panel, cfg, tstore, qapp):
-    """验证用：注入示例待办，导出两主题 × 日历/待办/双栏 截图后还原并退出。"""
+    """验证用：注入示例待办，导出两主题 × 日历/待办/传输/双栏 截图后还原并退出。"""
     os.makedirs(shot_dir, exist_ok=True)
     backup = list(tstore.items)
     today = date.today()
@@ -406,6 +458,7 @@ def _self_shot(shot_dir, panel, cfg, tstore, qapp):
     for key in THEME_ORDER:
         jobs.append((key, 'cal'))
         jobs.append((key, 'todo'))
+        jobs.append((key, 'transfer'))
         jobs.append((key, 'dual'))
     state = {'i': 0}
 
@@ -424,7 +477,7 @@ def _self_shot(shot_dir, panel, cfg, tstore, qapp):
             panel.set_dual(True, save=False)
         else:
             panel.set_dual(False, save=False)
-            panel.set_tab(0 if view == 'cal' else 1, save=False)
+            panel.set_tab({'cal': 0, 'todo': 1, 'transfer': 2}[view], save=False)
         QApplication.processEvents()
         state['i'] += 1
         QTimer.singleShot(250, lambda: _grab(shot_dir, key, view, step))
