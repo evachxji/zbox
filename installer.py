@@ -115,11 +115,6 @@ def is_installed():
     return _exe_dir() in (os.path.normcase(install_dir(False)), os.path.normcase(install_dir(True)))
 
 
-def is_all_users_install():
-    loc = sysutil.uninstall_reg_get('InstallLocation', True)
-    return bool(loc) and os.path.normcase(loc) == _exe_dir()
-
-
 def registered_install_dir():
     """已注册的安装目录（HKCU 优先，HKLM 兜底）；没有安装记录返回 None。
     旧名（ZviberPanel）的安装记录也算，供升级时接管。"""

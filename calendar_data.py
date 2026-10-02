@@ -137,20 +137,6 @@ def fetch_url(url, timeout=10):
     return parse_holiday_json(fetch_text(url, timeout))
 
 
-def fetch_year_data(year, timeout=10, sources=None):
-    """按 SOURCES 顺序依次尝试抓取某一年，返回 (off, work)。
-    全部失败时抛 ValueError，消息里带上每个源各自的失败原因（供气泡显示）。"""
-    errs = []
-    for src in (sources or SOURCES):
-        try:
-            # URL 里带 %d 的按年份填；已经填好年份的（导入窗口里用户改过的）原样用
-            url = src['url'] % year if '%d' in src['url'] else src['url']
-            return fetch_url(url, timeout)
-        except Exception as e:
-            errs.append('%s：%s' % (src['name'], e))
-    raise ValueError('；'.join(errs))
-
-
 class HolidayStore(object):
     """节假日数据：自定义（联网/导入）优先，内置官方数据兜底，其余年份只标节日不标休班。"""
 
@@ -212,14 +198,6 @@ class HolidayStore(object):
         with open(path, 'r', encoding='utf-8') as f:
             return self.import_api_json(f.read())
 
-    def fetch_year(self, year, timeout=10):
-        """联网抓取某一年（按 SOURCES 依次尝试），返回条目数。"""
-        return self.merge(*fetch_year_data(year, timeout))
-
-    def reset(self):
-        self.off, self.work = {}, set()
-        self.save()
-
 
 # ---------- 农历（1900-2100 通用查表法） ----------
 LUNAR_INFO = [
@@ -249,8 +227,6 @@ LUNAR_INFO = [
 MONTH_NAMES = ['正', '二', '三', '四', '五', '六', '七', '八', '九', '十', '冬', '腊']
 DAY_PREFIX = ['初', '十', '廿', '卅']
 DAY_NUM = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十']
-GAN = '甲乙丙丁戊己庚辛壬癸'
-ZHI = '子丑寅卯辰巳午未申酉戌亥'
 LUNAR_FESTIVALS = {(1, 1): '春节', (1, 15): '元宵', (5, 5): '端午', (7, 7): '七夕',
                    (8, 15): '中秋', (9, 9): '重阳', (12, 8): '腊八'}
 SOLAR_FESTIVALS = {(1, 1): '元旦', (5, 1): '劳动节', (10, 1): '国庆'}
@@ -367,7 +343,3 @@ def lunar_text(d):
     if not lun:
         return ''
     return lunar_day_text(lun[1], lun[2], lun[3])
-
-
-def ganzhi_year(lunar_year):
-    return GAN[(lunar_year - 4) % 10] + ZHI[(lunar_year - 4) % 12]
