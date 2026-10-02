@@ -13,8 +13,8 @@ android {
         applicationId = "com.zviber.transfer"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 3
+        versionName = "0.3"
     }
 
     buildTypes {
@@ -52,3 +52,4 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
+
