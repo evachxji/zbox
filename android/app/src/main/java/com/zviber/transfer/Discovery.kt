@@ -27,7 +27,8 @@ import java.util.concurrent.TimeUnit
 
 /**
  * 局域网发现：UDP 组播 announce / 监听 + /register 应答 + 手动 /24 子网扫描。
- * 协议：组播 224.0.0.168:53327，每 5 秒重发 announce，30 秒未见剔除。
+ * 协议：组播 224.0.0.168:53327；LocalSend 语义——启动时宣告一次，不做 TTL 剔除，
+ * 刷新=清空列表重新宣告（组播宽限内无设备才回退子网扫描）。
  */
 class Discovery(private val context: Context, private val scope: CoroutineScope) {
 
@@ -62,8 +63,7 @@ class Discovery(private val context: Context, private val scope: CoroutineScope)
             acquire()
         }
         scope.launch(Dispatchers.IO) { listenLoop() }
-        scope.launch(Dispatchers.IO) { announceLoop() }
-        scope.launch(Dispatchers.IO) { pruneLoop() }
+        scope.launch(Dispatchers.IO) { sendAnnounce() }   // LocalSend 语义：只在启动时宣告一次
     }
 
     fun stop() {
@@ -74,11 +74,16 @@ class Discovery(private val context: Context, private val scope: CoroutineScope)
         multicastLock = null
     }
 
-    /** 手动刷新：立即发一次 announce，并对本机 /24 子网逐 IP POST /register 扫描；完成后在主线程回调 onDone */
+    /** 手动刷新：LocalSend 语义——清空设备列表并重新宣告一次，只信本次应答；
+     *  组播宽限（3 秒）内一台都没有才回退 /24 子网扫描（减少请求）；完成后在主线程回调 onDone */
     fun refresh(onDone: (() -> Unit)? = null) {
         scope.launch(Dispatchers.IO) {
+            DeviceStore.clear()
             sendAnnounce()
-            scanSubnet()
+            delay(3_000)
+            if (DeviceStore.devices.isEmpty()) {
+                scanSubnet()
+            }
             onDone?.let { withContext(Dispatchers.Main) { it() } }
         }
     }
@@ -133,13 +138,6 @@ class Discovery(private val context: Context, private val scope: CoroutineScope)
 
     // ---------- announce 广播 ----------
 
-    private suspend fun announceLoop() {
-        while (running) {
-            sendAnnounce()
-            delay(5_000)
-        }
-    }
-
     private fun sendAnnounce() {
         try {
             if (sendSocket == null || sendSocket?.isClosed == true) {
@@ -192,15 +190,6 @@ class Discovery(private val context: Context, private val scope: CoroutineScope)
                     semaphore.withPermit { postRegister(ip, PROTOCOL_PORT, scanClient) }
                 }
             }.forEach { it.await() }
-        }
-    }
-
-    // ---------- 30 秒剔除 ----------
-
-    private suspend fun pruneLoop() {
-        while (running) {
-            delay(5_000)
-            DeviceStore.prune()
         }
     }
 

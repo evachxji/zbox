@@ -85,11 +85,11 @@ Zviber 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），P
 平铺布局，一个模块一个职责：
 
 - `main.pyw` — 入口：单实例 IPC（`QLocalServer`）、节假日后台更新、局域网传输服务启动、（frozen 时）`--uninstall` 卸载向导入口
-- `app.py` — 面板 UI（日历 / 待办 / 传输 / 双栏 / 顶部栏滑出与拖动）、`SettingsDialog` 与节假日导入引导窗
+- `app.py` — 面板 UI（日历 / 待办 / 传输 / 顶部栏滑出与拖动）、`SettingsDialog` 与节假日导入引导窗
 - `boxes.py` — 桌面格子：空白格子（桌面文件的收纳视图，不搬文件、只隐藏桌面图标）与文件夹映射格子、双击桌面显隐
 - `calendar_data.py` — 内置国务院节假日数据、农历换算、三源联网回退与离线导入
 - `transfer.py` — 局域网文件传输协议核心（参照 LocalSend v2 的私有实例）：UDP 组播发现 + HTTP REST 传输，纯标准库零 Qt
-- `transfer_ui.py` — 面板「传输」tab：设备列表、文件多选 + 拖拽发送、传输记录、接收确认层、发送方取消
+- `transfer_ui.py` — 面板「传输」tab：设备列表、文件多选 + 拖拽发送、传输记录、接收确认层、发送方取消；传输服务生命周期自持（默认关闭的门禁层、启用/停用、「?」说明弹窗）
 - `transfer_selftest.py` — 传输协议自动化自检（13 用例，动态端口，不依赖组播/Qt）
 - `themes.py` — 两套主题 QSS（深色 `nocturne` / 浅色 `mica`）加 `auto` 伪主题；`%CN%`/`%NUM%` 为字体占位符
 - `version.py` — 版本号唯一来源：关于窗、设置窗左下角、安装向导、卸载注册表项共用 `APP_VERSION`，发版只改这一个文件
@@ -125,7 +125,7 @@ cd android && gradlew.bat assembleDebug   :: 构建 Android debug APK
 set ZVIBER_SHOT=designs\verify && python main.pyw   :: 截图自检
 ```
 
-自检导出两主题 × 日历/待办/双栏/传输共 8 张截图后自动退出，改 UI / 主题 / 布局后必跑。
+自检导出两主题 × 日历/待办/传输共 6 张截图后自动退出，改 UI / 主题 / 布局后必跑。
 **跑之前先退出正在运行的实例**：否则单实例分支会把这次启动当成一次 `--toggle` 转发给已运行实例
 （用户的面板被显隐一次），本进程直接退出，一张图都不会导出，而且没有任何报错。
 截图目录与设计稿渲染图已 gitignore，不要提交。
@@ -151,9 +151,9 @@ set ZVIBER_SHOT=designs\verify && python main.pyw   :: 截图自检
 
 `main()` 的顺序是有意的，改动前先读懂：设置 excepthook → `installer.maybe_install()`
 （仅 frozen exe 生效，只处理 `--uninstall` 卸载向导，返回 True 直接退出）→ 单实例 IPC 探测
-（`QLocalSocket` 连 `sysutil.IPC_KEY`，已运行则发 `toggle` 后退出）→ 建传输服务
-（`transfer.TransferServer` + `Discovery`，端口 53327 被占则注入 None、传输页降级空态；
-`ZVIBER_SHOT` 下不起服务）→ 建面板 → 起 `QLocalServer`
+（`QLocalSocket` 连 `sysutil.IPC_KEY`，已运行则发 `toggle` 后退出）→ 建面板
+（传输服务由面板自持：`cfg['transfer_enabled']` 为真才创建并 start `TransferServer` + `Discovery`，
+端口 53327 被占则传输页显示「不可用」门禁层；`ZVIBER_SHOT` 下不起服务也不盖门禁层）→ 起 `QLocalServer`
 接收 `toggle` / `quit` → `context_menu_set_running(True)` 注入桌面右键级联菜单。
 
 - 单实例靠 `QLocalServer` 名称 `zviber-panel-v2`；消息由 `_on_ipc` 按 `actions` 字典分发，`quit` 消息供卸载程序请求退出。
@@ -161,7 +161,7 @@ set ZVIBER_SHOT=designs\verify && python main.pyw   :: 截图自检
 - `installer.setup_main()`（setup exe 入口）里 `ZVIBER_AUTO_INSTALL` 是静默安装测试钩子。
 - **没有系统托盘图标**（已移除）：显隐/新建格子/设置/关于/退出等入口全在桌面右键级联菜单，
   别再往回加托盘。设置窗口是**非模态**的（桌面右键「设置」），已开着就 `raise_()`，不会叠第二个。
-  传输分支的托盘气泡通知通道因此整体不合并：传输服务起不来靠传输页「不可用」空态呈现；
+  传输分支的托盘气泡通知通道因此整体不合并：传输服务起不来（端口被占）靠传输页门禁层的「不可用」提示呈现；
   收到文件请求时 `_transfer_notify` 改为唤起面板并切到传输 tab（接收确认卡片弹在那里），
   「传输完成」等纯通知在传输页记录区可见。需要 Windows toast 通知的话另行加（AUMID 已设 `Zviber`）。
 
@@ -194,20 +194,21 @@ ClearType，文字发灰），圆角靠 Win11 DWM，Win7/10 降级为圆角遮�
 （`FloatingPanel.__init__` 里那句「阴影改为 paintEvent 手绘」是旧注释，类中已无 `paintEvent`。）
 
 - **`QStackedLayout` 必须先挂父控件再 `addWidget`**：第一个页面会立刻成为当前页被 `show()`，
-  无父状态下闪出一个默认大小的顶层白框（2026-10 启动/建格子白闪的根因，`app.py` 的 `content`
-  与 `boxes.py` 的 `pages` 两处同坑，都是先 `addLayout` 进父控件再添加页面）。
-- 单栏用 `_SlideStack`（横向滑动切页动画，接口兼容 QStackedWidget 子集），
-  双栏用 `QHBoxLayout`，两者由 `self.content`（QStackedLayout）切换。
-- 尺寸常量 `SINGLE_W / DUAL_W / PANEL_H`；`cfg` 键：`theme` / `dual` / `tab` / `pos` /
+  无父状态下闪出一个默认大小的顶层白框（2026-10 建格子白闪的根因，`boxes.py` 的 `pages`
+  踩过这个坑，要先 `addLayout` 进父控件再添加页面）。
+- 内容区是 `_SlideStack`（横向滑动切页动画）：日历/待办/传输三页**按 tab 顺序入栈**——
+  `slide_to` 靠页面在列表里的先后判断左滑/右滑，顺序错了方向就反。
+- 尺寸常量 `SINGLE_W / PANEL_H`；`cfg` 键：`theme` / `tab` / `pos` /
   `off_noon` / `off_evening`，`Config` 用 `__getattr__` 暴露为属性。
 - **桌面格子模式**：窗口标志是 `FramelessWindowHint | Tool`，**故意不带 `WindowStaysOnTopHint`**
   ——面板就该被别的窗口正常盖住，别再顺手加回去。
 - **顶部栏默认收起**（`_slide_titlebar`）：栏窗高度 0↔`sc(42)` 做动画，靠 `_set_tb_height` 把它摆到
   面板顶边**上方**（`y = self.y() - h`）实现「向上滑出」，主窗口不动。进入面板（`enterEvent`）展开；
   离开后等 150ms 用 `_check_hover()` 看光标落点再决定收不收（光标从面板挪进展开栏会先触发面板的
-  `leave`，不等这一拍就会抖）。栏内布局 = tab 按钮组 + 最右「最小化」按钮（`min_btn`，'—'，
-  样式 `#minBtn` 两主题各一条）：点击走 `close_panel()` 收起整张卡片（栏窗随面板一起收），
-  再显示走既有通道（桌面右键 / 双击桌面 / 再跑一次 run.cmd 的 `--toggle`）。
+  `leave`，不等这一拍就会抖）。栏内布局 = tab 按钮组 + 最右「齿轮」+「最小化」按钮（`gear_btn`
+  '⚙' / `min_btn` '—'，共用 `#minBtn, #gearBtn` 样式，两主题各一条）：齿轮发 `settingsRequested`
+  信号弹设置窗（非模态去重在入口 `open_settings`）；最小化走 `close_panel()` 收起整张卡片
+  （栏窗随面板一起收），再显示走既有通道（桌面右键 / 双击桌面 / 再跑一次 run.cmd 的 `--toggle`）。
   注意 `#closeBtn` 不是面板顶部栏的旧残留——它是设置窗/关于窗/日期弹层等弹窗关闭按钮的
   活样式（hover 变红），别当死代码删。
 - **栏窗也是桌面带成员**（`_ensure_band` 里随面板一起 `pin_to_desktop`）：栏窗是独立顶层 Tool 窗，
@@ -628,10 +629,19 @@ HTTP 模式无加密，只面向可信局域网。组播失效时有 /24 子网�
 - `transfer.py` 纯标准库零 Qt，可独立测试：`DeviceInfo` / `Discovery` / `TransferServer` /
   `send_files` / `load_or_create_fingerprint`。防护全在服务端：会话状态机 + token 校验、
   sha256 校验、64KB 流式写盘、同名自动加 " (2)"、路径穿越净化、1MB JSON 上限、
-  会话 TTL 10 分钟（按最后活跃刷新）。
+  会话 TTL 10 分钟（按最后活跃刷新）。设备发现遵循 LocalSend 语义：announce 只在
+  启动时发一次（另有「刷新」触发），不做 TTL 过期剔除；「刷新」= 清空列表重新宣告，
+  组播宽限 3 秒内无设备才回退 /24 子网扫描（减少请求）。Android 端同语义。
 - `transfer_ui.py` 是面板第三个 tab「传输」：设备列表、文件多选 + 拖拽发送、传输记录、
   接收确认层（可选保存目录，默认 `%USERPROFILE%\Downloads\Zviber` 并记住，170 秒确认超时）。
-  **网络回调全走 pyqtSignal 回主线程**，不跨线程动 UI；53327 被占用时降级为空态，不影响日历/待办。
+  **网络回调全走 pyqtSignal 回主线程**，不跨线程动 UI。
+  **传输功能默认关闭**（`cfg['transfer_enabled']`，2026-10 改）：页面照常构建但盖一层高斯模糊
+  门禁层（`QGraphicsBlurEffect` 打在 `pane` 上，门禁层 `gate` 是 pane 的兄弟故不被模糊），
+  中央「启用传输」+「?」说明弹窗（`TransferInfoDialog`，与设置窗的「?」共用，含 LocalSend
+  致谢与 APK 下载链接）；点启用 / 设置窗勾选走 `set_enabled()`——成功才写配置并监听端口
+  （防火墙提示也在这一刻才弹），失败（53327 被占）切「传输服务不可用 + 确定」形态，
+  确定后回到未开启态。服务生命周期由 `TransferWidget` 自持（`enable_service` / `disable_service` /
+  `shutdown_service`），启用/停用即时生效不用重启；`enabled_changed` 信号供设置窗同步勾选。
   记录行交互（`_ClickRow` + `CustomContextMenu`）：**接收完成**（`direction='down'` 且
   `state='done'`）的行手型光标提示——单击打开文件（一次收了多个文件则 `explorer /select`
   定位第一个）；右键菜单「打开文件所在文件夹 / 删除这条记录」（`_remove_record` 只删记录
@@ -641,7 +651,7 @@ HTTP 模式无加密，只面向可信局域网。组播失效时有 /24 子网�
 - Android 端在 `android/`：独立 Gradle 工程（Kotlin + Compose + OkHttp + NanoHTTPD，minSdk 26），
   与 PC 代码完全分离；指纹/别名/保存目录存 SharedPreferences，SAF 落盘，仅前台传输
   （`onStop` 即停服务）。
-- `config.json` 新增键：`transfer_fingerprint` / `transfer_alias` / `transfer_dir`。
+- `config.json` 新增键：`transfer_fingerprint` / `transfer_alias` / `transfer_dir` / `transfer_enabled`（默认 false，老用户升级后同样默认关闭，需手动启用一次）。
 
 
 
@@ -649,9 +659,11 @@ HTTP 模式无加密，只面向可信局域网。组播失效时有 /24 子网�
 
 - `cfg.save()` 是整体回写，会抹掉 `load_or_create_fingerprint` 直写 config.json 的指纹——
   `main.pyw` 启动时已把指纹同步进 `cfg.data`，改启动流程时别丢掉这一步。
-- 未 `start()` 的 `TransferServer` 调 `stop()` 会死等，退出路径靠 `transfer_started` 标志守卫。
-- 改别名要重启才会重新广播（发现报文只在启动时发）。
-- Windows 防火墙首次监听 53327 会弹授权框，用户拒绝后传输静默不可用——排查先问这一步。
+- 未 `start()` 的 `TransferServer` 调 `stop()` 会死等：只有 `enable_service()` 成功才会置
+  `_service_started`，`disable_service()` / `shutdown_service()` 只在这个标志下 stop。
+- 改别名要到下次启动或点「刷新」才会重新广播（发现报文只在启动/刷新时发）。
+- Windows 防火墙首次监听 53327 会弹授权框（现在发生在用户点「启用传输」那一刻），
+  用户拒绝后传输静默不可用——排查先问这一步。
 
 ## Coding Style & Naming Conventions
 

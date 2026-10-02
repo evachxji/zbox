@@ -35,7 +35,6 @@ MULTICAST_GROUP = '224.0.0.168'          # UDP 组播地址（自定义，与官
 PORT = 53327                             # TCP HTTP 与 UDP 组播同端口
 API_PREFIX = '/api/localsend/v2/'
 CHUNK_SIZE = 65536                       # 流式读写块大小 64KB
-DEVICE_TTL = 30.0                        # 设备最后出现超过该秒数视为离线
 SCAN_TIMEOUT = 0.5                       # 子网扫描单 IP 超时
 SCAN_WORKERS = 64                        # 子网扫描并发数
 NET_TIMEOUT = 10.0                       # 普通网络请求超时上限
@@ -503,61 +502,60 @@ class Discovery(object):
     组播不可用（AP 隔离等）时不崩溃，降级为仅扫描。
     '''
 
-    def __init__(self, device_info, on_device_found=None, announce_interval=5.0):
+    def __init__(self, device_info, on_device_found=None):
         self.device_info = device_info
         self.on_device_found = on_device_found
-        self.announce_interval = announce_interval
         self.devices = {}            # {fingerprint: (DeviceInfo, ip, last_seen)}
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._threads = []
 
     def start(self):
-        for target in (self._announce_loop, self._listen_loop):
-            t = threading.Thread(target=target, name='discovery')
-            t.daemon = True
-            t.start()
-            self._threads.append(t)
+        t = threading.Thread(target=self._listen_loop, name='discovery')
+        t.daemon = True
+        t.start()
+        self._threads.append(t)
+        self.announce()              # LocalSend 语义：只在启动时宣告一次
 
     def stop(self):
         self._stop.set()
 
     def get_devices(self):
-        '''剔除 DEVICE_TTL 秒未见的设备，返回 {fingerprint: (DeviceInfo, ip)}。'''
-        now = time.time()
+        '''返回当前已知设备 {fingerprint: (DeviceInfo, ip)}。
+        LocalSend 语义：不做 TTL 过期剔除，离线设备靠「刷新=清空重建」清理。'''
         with self._lock:
-            stale = [fp for fp, (_, _, seen) in self.devices.items()
-                     if now - seen > DEVICE_TTL]
-            for fp in stale:
-                del self.devices[fp]
             return {fp: (info, ip) for fp, (info, ip, _) in self.devices.items()}
+
+    def clear_devices(self):
+        '''清空已知设备（刷新按钮的清空重建语义）。'''
+        with self._lock:
+            self.devices.clear()
 
     def _register_seen(self, info, ip):
         with self._lock:
             self.devices[info.fingerprint] = (info, ip, time.time())
 
-    def _announce_loop(self):
+    def announce(self):
+        '''向组播组发一次宣告（LocalSend 语义：不周期重发）。
+        逐网卡发送：多网卡 / VPN TUN 接管默认路由时，不显式指定出口，
+        组播报文会发进隧道而不是真实局域网（对端永远收不到 announce）。'''
         payload = self.device_info.to_dict()
         payload['announce'] = True
         data = json.dumps(payload).encode('utf-8')
-        while not self._stop.is_set():
-            # 逐网卡发送：多网卡 / VPN TUN 接管默认路由时，不显式指定出口，
-            # 组播报文会发进隧道而不是真实局域网（对端永远收不到 announce）
-            for iface in (_local_ipv4() or {None}):
+        for iface in (_local_ipv4() or {None}):
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM,
+                                     socket.IPPROTO_UDP)
                 try:
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM,
-                                         socket.IPPROTO_UDP)
-                    try:
-                        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
-                        if iface:
-                            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF,
-                                            socket.inet_aton(iface))
-                        sock.sendto(data, (MULTICAST_GROUP, PORT))
-                    finally:
-                        sock.close()
-                except socket.error:
-                    pass  # 组播发送失败不崩溃，降级为仅扫描
-            self._stop.wait(self.announce_interval)
+                    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+                    if iface:
+                        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF,
+                                        socket.inet_aton(iface))
+                    sock.sendto(data, (MULTICAST_GROUP, PORT))
+                finally:
+                    sock.close()
+            except socket.error:
+                pass  # 组播发送失败不崩溃，降级为仅扫描
 
     def _listen_loop(self):
         try:

@@ -165,7 +165,7 @@ object Sender {
             } catch (e: Exception) {
                 // 被取消时记录已由 cancel() 置为「已取消」
                 if (session.cancelled) return
-                files.forEach { fail(it.record, e.message ?: "连接失败") }
+                files.forEach { fail(it.record, friendlyNetError(e, "连接失败")) }
                 return
             }
 
@@ -274,7 +274,7 @@ object Sender {
             }
         } catch (e: Exception) {
             if (session.cancelled) return false
-            fail(file.record, e.message ?: "上传失败")
+            fail(file.record, friendlyNetError(e, "上传失败"))
             false
         }
     }

@@ -86,14 +86,14 @@ fun ReceiveDialogHost() {
                     onClick = { dirPicker.launch(defaultTreeUri()) },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    val label = pending.dirUri?.let { "保存到：" + dirName(it) } ?: "保存到：Download（系统默认，点我更改）"
+                    val label = pending.dirUri?.let { "保存到：" + dirName(it) } ?: "保存到：Download/Zviber（系统默认，点我更改）"
                     Text(text = label, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         },
         confirmButton = {
             TextButton(
-                // 未选目录也能直接接受：默认存到系统 Download（API 29+）
+                // 未选目录也能直接接受：默认存到系统 Download/Zviber（API 29+）
                 onClick = {
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     pending.onAccept(pending.dirUri)

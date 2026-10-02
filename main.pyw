@@ -261,24 +261,16 @@ def main():
     tstore = ui.TodoStore(os.path.join(data_dir, 'todos.json'))
 
     # 局域网传输：指纹持久化在 config.json（同步进 cfg.data，防 cfg.save() 回写时丢键）；
-    # 别名默认电脑名（传输页可改）。端口被占时注入 None，传输页降级为「不可用」空态
+    # 别名默认电脑名（传输页可改）。传输功能默认关闭（cfg['transfer_enabled']），
+    # 服务生命周期由传输页自持——用户在传输页点「启用传输」或设置窗勾选后才监听
+    # 端口（Windows 防火墙授权提示也在那一刻才弹），端口被占时传输页给「不可用」提示
     fingerprint = transfer.load_or_create_fingerprint(cfg.path)
     cfg.data['transfer_fingerprint'] = fingerprint
     alias = cfg.transfer_alias or platform.node() or 'Zviber'
     device_info = transfer.DeviceInfo.local(alias, fingerprint)
-    try:
-        transfer_server = transfer.TransferServer(device_info)
-    except Exception:
-        transfer_server = None   # 端口 53327 被占用
-    discovery = transfer.Discovery(device_info) if transfer_server is not None else None
-    panel = ui.FloatingPanel(cfg, hstore, tstore, transfer_server, discovery, device_info)
-
-    # 截图自检不起服务：避免网络发现/对端接入让截图不确定。
-    # 记住启动状态：未 start 过的 server 不能 stop（socketserver.shutdown() 会死等）
-    transfer_started = transfer_server is not None and not os.environ.get('ZVIBER_SHOT')
-    if transfer_started:
-        transfer_server.start()
-        discovery.start()
+    # 截图自检不起服务（避免网络发现/对端接入让截图不确定），传输页按功能态渲染
+    panel = ui.FloatingPanel(cfg, hstore, tstore, device_info,
+                             transfer_autostart=not os.environ.get('ZVIBER_SHOT'))
     # 桌面格子：截图自检模式不创建，避免格子入镜干扰面板截图
     boxmgr = None
     if not os.environ.get('ZVIBER_SHOT') and not os.environ.get('ZVIBER_GRABSCREEN'):
@@ -304,7 +296,7 @@ def main():
     qapp.aboutToQuit.connect(_quit_cleanup)
 
     # 无系统托盘，分支的托盘气泡通道整体不进：
-    # ① 传输服务起不来（端口被占）——传输页本身已降级为「不可用」空态，无需另提示；
+    # ① 传输服务起不来（端口被占）——传输页门禁层会给「不可用」提示，无需另提示；
     # ② 收到文件请求——唤起面板切到传输 tab（接收确认卡片就弹在那里，不唤起用户
     #   根本看不到，会拖到对端 180s 超时）；「传输完成」等纯通知在传输页记录区可见，不打扰
     def _transfer_notify(title, msg):
@@ -321,9 +313,7 @@ def main():
 
     def _stop_transfer():
         try:
-            if transfer_started:
-                discovery.stop()
-                transfer_server.stop()
+            panel.transfer.shutdown_service()   # 只停真正 start 过的服务
         except Exception:
             pass
     qapp.aboutToQuit.connect(_stop_transfer)
@@ -356,6 +346,8 @@ def main():
                                 boxmgr)
         settings_dlg[:] = [dlg]
         dlg.show()
+
+    panel.settingsRequested.connect(open_settings)
 
     # 桌面右键二级菜单的动作分发表
     actions = {b'toggle': panel.toggle_visible, b'quit': qapp.quit,
@@ -439,7 +431,7 @@ def _import_holidays(hstore, panel, on_download):
 
 
 def _self_shot(shot_dir, panel, cfg, tstore, qapp):
-    """验证用：注入示例待办，导出两主题 × 日历/待办/传输/双栏 截图后还原并退出。"""
+    """验证用：注入示例待办，导出两主题 × 日历/待办/传输 截图后还原并退出。"""
     os.makedirs(shot_dir, exist_ok=True)
     backup = list(tstore.items)
     today = date.today()
@@ -451,7 +443,6 @@ def _self_shot(shot_dir, panel, cfg, tstore, qapp):
         {'id': 5, 'text': '周报已提交', 'done': True},
     ]
     panel.todo.rebuild()
-    panel.set_dual(False, save=False)
     panel.set_tab(0, save=False)
     panel.show()
     jobs = []
@@ -459,7 +450,6 @@ def _self_shot(shot_dir, panel, cfg, tstore, qapp):
         jobs.append((key, 'cal'))
         jobs.append((key, 'todo'))
         jobs.append((key, 'transfer'))
-        jobs.append((key, 'dual'))
     state = {'i': 0}
 
     def finish():
@@ -473,11 +463,7 @@ def _self_shot(shot_dir, panel, cfg, tstore, qapp):
             return
         key, view = jobs[state['i']]
         panel.apply_theme(key, save=False)
-        if view == 'dual':
-            panel.set_dual(True, save=False)
-        else:
-            panel.set_dual(False, save=False)
-            panel.set_tab({'cal': 0, 'todo': 1, 'transfer': 2}[view], save=False)
+        panel.set_tab({'cal': 0, 'todo': 1, 'transfer': 2}[view], save=False)
         QApplication.processEvents()
         state['i'] += 1
         QTimer.singleShot(250, lambda: _grab(shot_dir, key, view, step))

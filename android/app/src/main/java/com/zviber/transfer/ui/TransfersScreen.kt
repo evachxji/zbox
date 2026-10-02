@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
+import android.webkit.MimeTypeMap
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateFloatAsState
@@ -186,8 +187,22 @@ private fun canOpen(record: TransferRecord): Boolean =
     if (record.outgoing) record.fileUri != null
     else record.status == TransferStatus.DONE && record.fileUri != null
 
-/** 点击记录跳转到文件所在目录（系统文件管理器 BROWSE）；拿不到目录时退化为打开文件本身 */
+/** 点击记录：媒体文件（图/视/音）直接打开文件交给相册/播放器；其余跳转到文件所在目录，拿不到目录时退化为打开文件本身 */
 private fun openRecordLocation(context: Context, record: TransferRecord) {
+    val fileUri = record.fileUri?.let { Uri.parse(it) }
+    if (fileUri != null) {
+        val mime = context.contentResolver.getType(fileUri) ?: mimeFromName(record.fileName)
+        if (mime.startsWith("image/") || mime.startsWith("video/") || mime.startsWith("audio/")) {
+            try {
+                context.startActivity(Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(fileUri, mime)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                })
+                return
+            } catch (_: Exception) {
+            }
+        }
+    }
     val ext = "com.android.externalstorage.documents"
     val dirDoc = when {
         // 接收且选了 SAF 目录：tree uri 转 document uri
@@ -195,8 +210,8 @@ private fun openRecordLocation(context: Context, record: TransferRecord) {
             val tree = Uri.parse(record.savedTreeUri)
             DocumentsContract.buildDocumentUri(tree.authority, DocumentsContract.getTreeDocumentId(tree))
         }
-        // 接收且走默认：系统 Download 根目录
-        !record.outgoing -> DocumentsContract.buildDocumentUri(ext, "primary:Download")
+        // 接收且走默认：系统 Download/Zviber
+        !record.outgoing -> DocumentsContract.buildDocumentUri(ext, "primary:Download/Zviber")
         // 发送：从源文件 uri 推导父目录（仅 externalstorage 文档可推导）
         else -> deriveParentDocUri(Uri.parse(record.fileUri ?: return))
     }
@@ -228,6 +243,15 @@ private fun deriveParentDocUri(uri: Uri): Uri? {
     val parent = docId.substringBeforeLast('/', "")
     if (parent.isEmpty() || parent == docId) return null
     return DocumentsContract.buildDocumentUri(uri.authority, parent)
+}
+
+/** 按文件名后缀推 MIME（contentResolver.getType 拿不到时兜底） */
+private fun mimeFromName(fileName: String): String {
+    val ext = MimeTypeMap.getFileExtensionFromUrl(fileName)
+    if (!ext.isNullOrEmpty()) {
+        MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext.lowercase())?.let { return it }
+    }
+    return "application/octet-stream"
 }
 
 /** 剩余秒数格式化 */

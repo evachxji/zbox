@@ -13,7 +13,7 @@ from PyQt5.QtCore import (Qt, QTimer, QSize, QPoint, QPointF, QRectF, QDate, QTi
 from PyQt5.QtGui import (QFont, QFontDatabase, QPainter, QColor, QPixmap, QIcon, QPainterPath,
                          QRegion, QPen, QLinearGradient, QCursor)
 from PyQt5.QtWidgets import (QWidget, QFrame, QLabel, QToolButton, QVBoxLayout, QHBoxLayout,
-                             QGridLayout, QStackedLayout, QListWidget,
+                             QGridLayout, QListWidget,
                              QListWidgetItem, QLineEdit, QMenu, QApplication, QDialog,
                              QFormLayout, QCheckBox, QRadioButton, QPushButton, QCalendarWidget,
                              QLayout)
@@ -25,7 +25,7 @@ from themes import THEMES, THEME_ORDER, THEME_CHOICES, AUTO, build_qss
 from version import APP_VERSION, GITHUB_URL
 
 SHADOW = 0  # 不透明窗口：无边距，圆角由 DWM/遮罩实现
-SINGLE_W, DUAL_W, PANEL_H = 344, 700, 428
+SINGLE_W, PANEL_H = 344, 428
 
 
 _UI_SCALE = None
@@ -183,8 +183,9 @@ def due_chip(due_str):
 class Config(object):
     def __init__(self, path):
         self.path = path
-        self.data = {'theme': THEME_ORDER[0], 'dual': False, 'tab': 0, 'pos': None,
-                     'off_noon': '12:00-13:00', 'off_evening': '18:00'}
+        self.data = {'theme': THEME_ORDER[0], 'tab': 0, 'pos': None,
+                     'off_noon': '12:00-13:00', 'off_evening': '18:00',
+                     'transfer_enabled': False}
         self.load()
 
     def load(self):
@@ -964,9 +965,6 @@ class TodoWidget(QWidget):
         root.addWidget(self.pane)
         self.rebuild()
 
-    def set_solo(self, solo):
-        """单栏模式下去掉双栏分隔样式。"""
-        self.pane.setStyleSheet('QFrame#todoPane { border: none; background: transparent; }' if solo else '')
 
     def set_theme(self, key):
         self.theme_key = key
@@ -1669,6 +1667,7 @@ class SettingsDialog(QDialog):
         # QDialog 默认 ApplicationModal，会连面板一起冻结；设置窗口开着时面板仍可拖拽 / 点日历
         self.setWindowModality(Qt.NonModal)
         self._drag = None
+        self._panel = panel
         cfg = panel.cfg
 
         root = QVBoxLayout(self)
@@ -1720,11 +1719,6 @@ class SettingsDialog(QDialog):
         theme_row.addStretch(1)
         form.addRow(row_label('主题'), theme_row)
 
-        # 双栏
-        dual = QCheckBox('日历 + 待办同屏显示')
-        dual.setChecked(panel._dual)
-        dual.toggled.connect(panel.set_dual)
-        form.addRow(row_label('双栏'), dual)
 
         # 下班倒计时（自由文本输入 + 时钟弹层）
         # 用 QLineEdit 而非 QTimeEdit：QTimeEdit 是按时/分分段校验的，全选后直接打字会被
@@ -1812,6 +1806,30 @@ class SettingsDialog(QDialog):
         auto.toggled.connect(lambda on: sysutil.autostart_set() if on else sysutil.autostart_remove())
         form.addRow(row_label('开机自启'), auto)
 
+        # 局域网传输：默认关闭（不监听端口）；开启失败（端口被占）时传输页会给提示，
+        # 这里把勾选弹回去。右侧「?」与传输页门禁层共用同一个说明弹窗
+        tr_row = QHBoxLayout()
+        tr_row.setSpacing(sc(6))
+        self.transfer_chk = QCheckBox('局域网内与其他设备互传文件')
+        self.transfer_chk.setChecked(panel.transfer.service_enabled())
+        tr_row.addWidget(self.transfer_chk)
+        tr_help = QToolButton()
+        tr_help.setObjectName('gateHelpBtn')
+        tr_help.setText('?')
+        tr_help.setFixedSize(sc(20), sc(20))
+        tr_help.setCursor(Qt.PointingHandCursor)
+        tr_help.setToolTip('什么是局域网传输')
+        tr_help.clicked.connect(lambda: transfer_ui.TransferInfoDialog(self).exec_())
+        tr_row.addWidget(tr_help)
+        tr_row.addStretch(1)
+        form.addRow(row_label('传输'), tr_row)
+
+        def commit_transfer(on):
+            if panel.transfer.set_enabled(bool(on)) != bool(on):
+                self._sync_transfer_chk()   # 开启失败（端口被占）：弹回勾选
+        self.transfer_chk.toggled.connect(commit_transfer)
+        panel.transfer.enabled_changed.connect(lambda _on: self._sync_transfer_chk())
+
         # 桌面格子
         sep_b = QFrame()
         sep_b.setObjectName('setSep')
@@ -1881,6 +1899,15 @@ class SettingsDialog(QDialog):
             self.btn_fetch.setText('联网更新')
         except RuntimeError:
             pass  # 设置窗已关，按钮随窗口销毁
+
+    def _sync_transfer_chk(self):
+        """传输页门禁层改动开关后，同步这里的勾选状态。"""
+        try:
+            self.transfer_chk.blockSignals(True)
+            self.transfer_chk.setChecked(self._panel.transfer.service_enabled())
+            self.transfer_chk.blockSignals(False)
+        except (RuntimeError, AttributeError):
+            pass  # 设置窗已销毁
 
     def _pick_time(self, te, anchor):
         """在时间输入框下方弹出时/分选择层，选中的时间写回输入框（textChanged 即落盘）。"""
@@ -2080,7 +2107,7 @@ class AboutDialog(QDialog):
 
 class _SlideStack(QWidget):
     """横向滑动切换的堆叠容器：换页时旧页滑出、新页滑入。
-    接口与 QStackedWidget 的子集兼容：addWidget / removeWidget / currentWidget / currentIndex。"""
+    接口：addWidget / slide_to。"""
 
     def __init__(self, parent=None):
         super(_SlideStack, self).__init__(parent)
@@ -2098,21 +2125,6 @@ class _SlideStack(QWidget):
         else:
             w.hide()
 
-    def removeWidget(self, w):
-        self._end_transition()
-        if w in self._pages:
-            self._pages.remove(w)
-        if self._current is w:
-            self._current = self._pages[0] if self._pages else None
-            if self._current is not None:
-                self._current.setGeometry(self.rect())
-                self._current.show()
-
-    def currentWidget(self):
-        return self._current
-
-    def currentIndex(self):
-        return self._pages.index(self._current) if self._current in self._pages else -1
 
     def slide_to(self, w):
         """动画切换到指定页面：前进向左推入，后退向右推入。"""
@@ -2166,8 +2178,9 @@ class _SlideStack(QWidget):
 
 class FloatingPanel(QWidget):
     toggled = pyqtSignal()
+    settingsRequested = pyqtSignal()   # 顶部栏齿轮按钮 → 入口 open_settings（非模态去重在那里）
 
-    def __init__(self, cfg, hstore, tstore, server=None, discovery=None, device_info=None):
+    def __init__(self, cfg, hstore, tstore, device_info=None, transfer_autostart=True):
         super(FloatingPanel, self).__init__()
         self.cfg = cfg
         self.cn_font, self.num_font = pick_fonts()
@@ -2226,6 +2239,14 @@ class FloatingPanel(QWidget):
             self.tabs.append(b)
         tb.addWidget(self.tab_box)
         tb.addStretch(1)
+        # 齿轮：弹设置窗口（信号发到入口 open_settings，与桌面右键「设置」同一条路径）
+        self.gear_btn = QToolButton()
+        self.gear_btn.setObjectName('gearBtn')
+        self.gear_btn.setText('⚙')
+        self.gear_btn.setFixedSize(sc(26), sc(22))
+        self.gear_btn.setToolTip('设置')
+        self.gear_btn.clicked.connect(self.settingsRequested)
+        tb.addWidget(self.gear_btn)
         # 最小化：收起整张卡片（与双击桌面/IPC 显隐同一条 close_panel 路径，
         # 顶部栏是独立小窗会跟着一起收；再显示：桌面右键 / 双击桌面 / 再跑一次 run.cmd）
         self.min_btn = QToolButton()
@@ -2242,46 +2263,34 @@ class FloatingPanel(QWidget):
         self._tb_anim.valueChanged.connect(self._set_tb_height)
         self._tb_anim.finished.connect(self._tb_anim_done)
 
-        # 内容：单栏（堆叠）/ 双栏（并排）
+        # 内容：单栏堆叠
         self.cal = CalendarWidget(hstore, cfg, resolve_theme(cfg.theme))
         self.todo = TodoWidget(tstore)
         self.todo.set_theme(resolve_theme(cfg.theme))
-        self.transfer = transfer_ui.TransferWidget(cfg, server, discovery, device_info)
+        self.transfer = transfer_ui.TransferWidget(cfg, device_info,
+                                                   auto_start=transfer_autostart)
         self.transfer.set_theme(resolve_theme(cfg.theme))
         # 顶部栏平时隐藏：日历左侧的时分秒 / 日期行充当窗口拖拽把手
         self.cal.clock_hm.installEventFilter(self)
         self.cal.sub.installEventFilter(self)
 
+        # 三页按 tab 顺序入栈：slide_to 按页面在列表里的先后判断左滑/右滑
         self.single_stack = _SlideStack()
-        self.single_stack.addWidget(self.transfer)   # 常驻；双栏切换只搬日历+待办
-        self.single_page = QWidget()
-        sl = QVBoxLayout(self.single_page)
-        sl.setContentsMargins(0, 0, 0, 0)
-        sl.addWidget(self.single_stack)
-        self.dual_page = QWidget()
-        self.dual_box = QHBoxLayout(self.dual_page)
-        self.dual_box.setContentsMargins(0, 0, 0, 0)
-        self.dual_box.setSpacing(0)
-
-        self.content = QStackedLayout()
-        pl.addLayout(self.content, 1)          # 先装进父控件再加页面：否则第一个页面成为当前页，
-        self.content.addWidget(self.single_page)   # 会被 QStackedLayout 立刻 show()，无父状态下
-        self.content.addWidget(self.dual_page)     # 闪出一个默认大小的白框（启动白闪的根因）
+        self.single_stack.addWidget(self.cal)
+        self.single_stack.addWidget(self.todo)
+        self.single_stack.addWidget(self.transfer)
+        pl.addWidget(self.single_stack, 1)
 
         self._today = date.today()
         self._midnight = QTimer(self)
         self._midnight.timeout.connect(self._check_date)
         self._midnight.start(30000)
 
-        self._dual = None  # None 而非 False：避免 set_dual 的“无变化短路”跳过首次布局/定尺寸
         self._theme = cfg.theme
         self._icon_dir = _indicator_icons()
         self.apply_theme(cfg.theme, save=False)
-        if cfg.dual:
-            self.set_dual(True, save=False)
-        else:
-            self.set_dual(False, save=False)
-            self.set_tab(int(cfg.tab or 0), save=False)
+        self.setFixedSize(sc(SINGLE_W), sc(PANEL_H))
+        self.set_tab(int(cfg.tab or 0), save=False)
 
         # 桌面层级：归属桌面带（Win+D 免疫）+ 看门狗维护 z-order 与挂接健康
         self._ensure_band()
@@ -2421,8 +2430,6 @@ class FloatingPanel(QWidget):
 
     # --- 布局模式 ---
     def set_tab(self, idx, save=True):
-        if self._dual:
-            self.set_dual(False, save=False)
         pages = (self.cal, self.todo, self.transfer)
         idx = idx if 0 <= idx < len(pages) else 0   # 持久化的 tab 越界时回退日历
         self.single_stack.slide_to(pages[idx])
@@ -2432,36 +2439,6 @@ class FloatingPanel(QWidget):
             b.style().polish(b)
         if save:
             self.cfg.set('tab', idx)
-
-    def set_dual(self, dual, save=True):
-        if dual == self._dual:
-            if save:
-                self.cfg.set('dual', dual)
-            return
-        self._dual = dual
-        if dual:
-            self.single_stack.removeWidget(self.cal)
-            self.single_stack.removeWidget(self.todo)
-            self.dual_box.addWidget(self.cal, 344)
-            self.dual_box.addWidget(self.todo, 356)
-            self.todo.set_solo(False)
-            self.cal.show()
-            self.todo.show()
-            self.content.setCurrentWidget(self.dual_page)
-        else:
-            self.dual_box.removeWidget(self.cal)
-            self.dual_box.removeWidget(self.todo)
-            self.single_stack.addWidget(self.cal)
-            self.single_stack.addWidget(self.todo)
-            self.todo.set_solo(True)
-            self.content.setCurrentWidget(self.single_page)
-            w = self.single_stack.currentWidget()
-            self.set_tab((self.cal, self.todo).index(w) if w in (self.cal, self.todo) else 0, save=False)
-        self.tab_box.setVisible(not dual)  # 双栏已同屏显示日历 + 待办，tab 栏没有意义
-        self.setFixedSize(sc(DUAL_W if dual else SINGLE_W), sc(PANEL_H))
-        self._clamp_to_screen()
-        if save:
-            self.cfg.set('dual', dual)
 
 
     # --- 主题 ---
@@ -2494,8 +2471,8 @@ class FloatingPanel(QWidget):
         self._round_corners()
 
     def _sync_bar(self):
-        """栏窗贴住面板顶边（底边探进一个圆角半径，藏在面板下面）：拖拽移动、
-        单双栏变宽时跟随；遮罩随尺寸重贴；z-order 重新压回面板之下。"""
+        """栏窗贴住面板顶边（底边探进一个圆角半径，藏在面板下面）：拖拽移动时跟随；
+        遮罩随尺寸重贴；z-order 重新压回面板之下。"""
         if self.titlebar.isVisible():
             ov = int(bar_corner_radius(self.titlebar))
             self.titlebar.setGeometry(self.x(), self.y() - self.titlebar.height() + ov,

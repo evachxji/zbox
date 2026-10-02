@@ -1,7 +1,9 @@
 ﻿package com.zviber.transfer
 
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
+import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
@@ -9,11 +11,15 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.ui.Modifier
+import androidx.core.content.IntentCompat
 import androidx.lifecycle.lifecycleScope
 import com.zviber.transfer.ui.HomeScreen
 import com.zviber.transfer.ui.ReceiveDialogHost
@@ -52,6 +58,11 @@ object Settings {
     )
 }
 
+/** 系统分享进来的待发送文件（主界面据此引导选设备，发完或取消即清空） */
+object ShareInbox {
+    var uris by mutableStateOf<List<Uri>>(emptyList())
+}
+
 class MainActivity : ComponentActivity() {
 
     private lateinit var receiver: Receiver
@@ -68,9 +79,35 @@ class MainActivity : ComponentActivity() {
         receiver = Receiver(applicationContext)
         discovery = Discovery(applicationContext, lifecycleScope)
 
+        // Compose 状态单例必须在组合前于主线程初始化：延迟到组合或 IO 协程里才创建 state，
+        // 读取时会抛 "state created after the snapshot was taken"（启动即闪退的根因）
+        DeviceStore.devices
+        TransferStore.records
+        ShareInbox.uris
+
         setContent {
             ZviberApp(discovery)
         }
+        handleShareIntent(intent)
+    }
+
+    /** 分享时复用运行中的实例（singleTask）走这里 */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleShareIntent(intent)
+    }
+
+    /** 系统分享进件：ACTION_SEND / ACTION_SEND_MULTIPLE 的 uri 放进 ShareInbox，交给主界面选设备 */
+    private fun handleShareIntent(intent: Intent?) {
+        intent ?: return
+        val uris: List<Uri>? = when (intent.action) {
+            Intent.ACTION_SEND ->
+                IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)?.let { listOf(it) }
+            Intent.ACTION_SEND_MULTIPLE ->
+                IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+            else -> null
+        }
+        if (!uris.isNullOrEmpty()) ShareInbox.uris = uris
     }
 
     /** 仅前台传输：回到前台才起 HTTP 服务与组播发现 */

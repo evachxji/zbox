@@ -71,7 +71,6 @@ data class PrepareResponse(
 data class PeerDevice(
     val info: DeviceInfo,
     val ip: String,
-    val lastSeen: Long,
 )
 
 /** 设备表 */
@@ -80,15 +79,13 @@ object DeviceStore {
 
     @Synchronized
     fun upsert(info: DeviceInfo, ip: String) {
-        val now = System.currentTimeMillis()
         val idx = devices.indexOfFirst { it.info.fingerprint == info.fingerprint }
-        if (idx >= 0) devices[idx] = PeerDevice(info, ip, now) else devices.add(PeerDevice(info, ip, now))
+        if (idx >= 0) devices[idx] = PeerDevice(info, ip) else devices.add(PeerDevice(info, ip))
     }
 
     @Synchronized
-    fun prune() {
-        val now = System.currentTimeMillis()
-        devices.removeAll { now - it.lastSeen > 30_000 }
+    fun clear() {
+        devices.clear()
     }
 }
 
@@ -146,5 +143,22 @@ object TransferStore {
     @Synchronized
     fun add(record: TransferRecord) {
         records.add(0, record)
+    }
+}
+
+/** 把底层英文异常信息翻译成用户可读的中文提示（记录页展示用） */
+fun friendlyNetError(e: Throwable, fallback: String): String = when (e) {
+    is java.net.ConnectException -> "无法连接对方设备（对方可能已退出或换了网络）"
+    is java.net.SocketTimeoutException -> "连接或传输超时，请重试"
+    is java.net.SocketException -> "连接被中断"
+    is java.net.UnknownHostException -> "找不到对方设备"
+    else -> {
+        val msg = e.message ?: ""
+        when {
+            msg.contains("ENOSPC") || msg.contains("No space left", true) -> "存储空间不足"
+            msg.contains("EACCES") || msg.contains("Permission denied", true) -> "没有存储权限"
+            msg == "cannot open input stream" -> "无法读取源文件"
+            else -> fallback
+        }
     }
 }

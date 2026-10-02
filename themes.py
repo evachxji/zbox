@@ -32,10 +32,10 @@ QToolButton#closeBtn {
     background: transparent; border: none; border-radius: 6px; color: #7d7a72; font: 12px "%CN%";
 }
 QToolButton#closeBtn:hover { background: #c42b1c; color: #fff; }
-QToolButton#minBtn {
+QToolButton#minBtn, QToolButton#gearBtn {
     background: transparent; border: none; border-radius: 6px; color: #7d7a72; font: 12px "%CN%";
 }
-QToolButton#minBtn:hover { background: rgba(255,255,255,16); color: #f0ede6; }
+QToolButton#minBtn:hover, QToolButton#gearBtn:hover { background: rgba(255,255,255,16); color: #f0ede6; }
 QToolButton#todayBtn {
     background: transparent; border: 1px solid rgba(232,163,61,110); border-radius: 6px;
     color: #e8a33d; font: 600 11px "%CN%"; padding: 0 10px;
@@ -65,7 +65,6 @@ QLabel#daySub[fest="true"] { color: #e8a33d; }
 #badge { font: 700 8px "%CN%"; padding: 0 1px; border-radius: 3px; }
 #badge[kind="off"] { color: #e05252; background: rgba(224,82,82,46); }
 #badge[kind="work"] { color: #9a9aa0; background: rgba(255,255,255,26); }
-QFrame#todoPane { border-left: 1px solid rgba(255,255,255,18); }
 QLabel#todoTitle { color: #f0ede6; font: 600 14px "%CN%"; }
 QLabel#todoCount { color: #e8a33d; font: 600 11px "%NUM%"; }
 QListWidget#todoList { background: transparent; border: none; outline: none; }
@@ -202,11 +201,28 @@ QWidget#transferBox { background: transparent; }
 QLabel#transferTitle { color: #f0ede6; font: 600 12.5px "%CN%"; background: transparent; }
 QLabel#transferLabel { color: #8d8a82; font: 12px "%CN%"; background: transparent; }
 QLabel#transferHint { color: #6d6a62; font: 11.5px "%CN%"; background: transparent; }
+QFrame#transferGate { background: rgba(14,15,19,110); }
+QToolButton#gateHelpBtn {
+    background: transparent; border: 1px solid rgba(255,255,255,50); border-radius: %R=20%px;
+    color: #8d8a82; font: 600 12px "%CN%";
+}
+QToolButton#gateHelpBtn:hover { border-color: #e8a33d; color: #e8a33d; }
+QLabel#infoText { color: #e8e6e1; font: 12px "%CN%"; background: transparent; }
 QLineEdit#aliasEdit {
     background: rgba(255,255,255,12); border: 1px solid rgba(255,255,255,28); border-radius: 7px;
     color: #f0ede6; font: 12px "%CN%"; padding: 4px 8px; selection-background-color: rgba(232,163,61,90);
 }
 QLineEdit#aliasEdit:focus { border-color: #e8a33d; }
+QToolButton#aliasOkBtn {
+    background: transparent; border: 1px solid rgba(255,255,255,30); border-radius: 6px;
+    padding: 3px 10px;
+}
+QToolButton#aliasOkBtn:hover { border-color: rgba(232,163,61,130); background: rgba(232,163,61,22); }
+QToolButton#aliasOkBtn:pressed { background: rgba(232,163,61,64); }
+QLabel#aliasToast {
+    background: rgba(30,26,18,235); border: 1px solid rgba(232,163,61,120); border-radius: 7px;
+    color: #e8a33d; font: 11.5px "%CN%"; padding: 4px 10px;
+}
 QScrollArea#transferScroll { background: transparent; border: none; }
 QFrame#deviceRow { background: transparent; border-radius: 8px; }
 QFrame#deviceRow:hover { background: rgba(255,255,255,12); }
@@ -277,10 +293,10 @@ QToolButton#closeBtn {
     background: transparent; border: none; border-radius: 6px; color: #5b5b60; font: 12px "%CN%";
 }
 QToolButton#closeBtn:hover { background: #c42b1c; color: #fff; }
-QToolButton#minBtn {
+QToolButton#minBtn, QToolButton#gearBtn {
     background: transparent; border: none; border-radius: 6px; color: #5b5b60; font: 12px "%CN%";
 }
-QToolButton#minBtn:hover { background: rgba(0,0,0,10); color: #1b1b1f; }
+QToolButton#minBtn:hover, QToolButton#gearBtn:hover { background: rgba(0,0,0,10); color: #1b1b1f; }
 QToolButton#todayBtn {
     background: transparent; border: none; border-radius: 6px; color: #0067c0;
     font: 600 11px "%CN%"; padding: 0 8px;
@@ -311,7 +327,6 @@ QLabel#daySub[fest="true"] { color: #0067c0; font-weight: 600; }
 #badge { font: 700 8.5px "%CN%"; padding: 0 1px; border-radius: 3px; }
 #badge[kind="off"] { color: #c42b1c; background: #fde7e6; }
 #badge[kind="work"] { color: #77777d; background: rgba(0,0,0,20); }
-QFrame#todoPane { border-left: 1px solid rgba(0,0,0,16); background: #f0f1f4; }
 QLabel#todoTitle { color: #1b1b1f; font: 600 14px "%CN%"; }
 QLabel#todoCount { color: #8a8a90; font: 11px "%CN%"; }
 QListWidget#todoList { background: transparent; border: none; outline: none; }
@@ -442,11 +457,28 @@ QWidget#transferBox { background: transparent; }
 QLabel#transferTitle { color: #1b1b1f; font: 600 12.5px "%CN%"; background: transparent; }
 QLabel#transferLabel { color: #8a8a90; font: 12px "%CN%"; background: transparent; }
 QLabel#transferHint { color: #8a8a90; font: 11.5px "%CN%"; background: transparent; }
+QFrame#transferGate { background: rgba(247,248,250,130); }
+QToolButton#gateHelpBtn {
+    background: transparent; border: 1px solid rgba(0,0,0,50); border-radius: %R=20%px;
+    color: #8a8a90; font: 600 12px "%CN%";
+}
+QToolButton#gateHelpBtn:hover { border-color: #0067c0; color: #0067c0; }
+QLabel#infoText { color: #1b1b1f; font: 12px "%CN%"; background: transparent; }
 QLineEdit#aliasEdit {
     background: #ffffff; border: 1px solid rgba(0,0,0,26); border-radius: 7px;
     color: #1b1b1f; font: 12px "%CN%"; padding: 4px 8px; selection-background-color: rgba(0,103,192,60);
 }
 QLineEdit#aliasEdit:focus { border-color: #0067c0; }
+QToolButton#aliasOkBtn {
+    background: #ffffff; border: 1px solid rgba(0,0,0,26); border-radius: 6px;
+    padding: 3px 10px;
+}
+QToolButton#aliasOkBtn:hover { border-color: #0067c0; background: rgba(0,103,192,13); }
+QToolButton#aliasOkBtn:pressed { background: rgba(0,103,192,44); }
+QLabel#aliasToast {
+    background: #ffffff; border: 1px solid rgba(0,103,192,90); border-radius: 7px;
+    color: #0067c0; font: 11.5px "%CN%"; padding: 4px 10px;
+}
 QScrollArea#transferScroll { background: transparent; border: none; }
 QFrame#deviceRow { background: transparent; border-radius: 8px; }
 QFrame#deviceRow:hover { background: rgba(0,0,0,11); }
@@ -515,6 +547,10 @@ def build_qss(key, cn_font, num_font, scale=1.0, icon_dir=''):
             import re
             _PX_RE = re.compile(r'(\d+(?:\.\d+)?)px')
         qss = _PX_RE.sub(lambda m: '%gpx' % (round(float(m.group(1)) * scale, 2)), qss)
+    # %R=N% = N 逻辑像素直径圆形按钮的半径占位符（build_qss 按 scale 现算整数）。
+    # Qt 的 border-radius 遇分数 px 或超过半宽会静默退化成方角，不能写固定 px 让 _PX_RE 缩放
+    import re
+    qss = re.sub(r'%R=(\d+)%', lambda m: '%d' % (int(round(int(m.group(1)) * scale)) // 2), qss)
     return qss
 
 

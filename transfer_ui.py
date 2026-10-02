@@ -13,15 +13,17 @@ import threading
 import time
 import uuid
 
-from PyQt5.QtCore import (Qt, QTimer, pyqtSignal, QPointF, QRect,
-                          QPropertyAnimation, QEasingCurve)
-from PyQt5.QtGui import QColor, QPainter, QPen, QPixmap
+from PyQt5.QtCore import (Qt, QTimer, pyqtSignal, QPointF, QRect, QRectF,
+                          QSize, QPropertyAnimation, QEasingCurve, QUrl)
+from PyQt5.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QDesktopServices
 from PyQt5.QtWidgets import (QWidget, QFrame, QLabel, QToolButton, QPushButton,
                              QVBoxLayout, QHBoxLayout, QLineEdit, QProgressBar,
-                             QScrollArea, QFileDialog, QSizePolicy, QMenu)
+                             QScrollArea, QFileDialog, QSizePolicy, QMenu,
+                             QGraphicsOpacityEffect, QGraphicsBlurEffect, QDialog)
 
 import app as ui            # 仅运行期用 ui.sc()，import 期无依赖（app 也 import 本模块）
-from transfer import send_files, DEVICE_TTL
+import transfer
+from transfer import send_files
 
 RECV_CONFIRM_TIMEOUT = 170   # 接收确认等待秒数：须小于协议端 prepare-upload 的 180s
 MAX_RECORDS = 50             # 传输记录条数上限，超出丢弃最旧
@@ -97,6 +99,76 @@ def _dir_chip(direction, theme):
     return pm
 
 
+_ALIAS_ICON_CACHE = {}
+
+
+def _alias_icon(kind, theme, angle=0):
+    '''别名按钮图标：kind='check' 勾选 / 'spin' 转圈（angle 为弧起始角），
+    accent 色 QPainter 矢量绘制，按主题/DPI/角度缓存。'''
+    key = (kind, theme, angle, ui.ui_scale())
+    pm = _ALIAS_ICON_CACHE.get(key)
+    if pm is not None:
+        return pm
+    s = ui.sc(15)
+    pm = QPixmap(s, s)
+    pm.fill(Qt.transparent)
+    accent = {'nocturne': '#e8a33d', 'mica': '#0067c0'}.get(theme, '#e8a33d')
+    w = max(1.8, ui.sc(2))
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.setPen(QPen(QColor(accent), w, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    p.setBrush(Qt.NoBrush)
+    if kind == 'check':
+        p.drawLine(QPointF(s * 0.24, s * 0.55), QPointF(s * 0.43, s * 0.72))
+        p.drawLine(QPointF(s * 0.43, s * 0.72), QPointF(s * 0.78, s * 0.28))
+    else:
+        rect = QRectF(w, w, s - 2 * w, s - 2 * w)
+        p.drawArc(rect, int(-angle * 16), int(270 * 16))   # 270° 弧，顺时针转
+    p.end()
+    _ALIAS_ICON_CACHE[key] = pm
+    return pm
+
+
+def _friendly_err(err):
+    '''传输失败的原始错误（协议码 / 系统异常串，中英文混杂）映射为简短友好的
+    中文提示；原始错误留在状态文字悬停提示里供排查。识别不了的一律「传输出错」。'''
+    s = (err or '').lower()
+    if not s:
+        return ''
+    if '对方未及时确认' in s:
+        return '对方长时间未确认'
+    if '10061' in s or 'connection refused' in s or '积极拒绝' in s:
+        return '对方设备不在线'
+    if '10054' in s or '10053' in s or 'reset' in s or 'aborted' in s or '强迫关闭' in s:
+        return '连接被中断'
+    if '10060' in s or 'timed out' in s or 'timeout' in s or '超时' in s:
+        return '连接超时'
+    if '10051' in s or 'unreachable' in s or '不可达' in s:
+        return '网络不可达'
+    if 'getaddrinfo' in s or '11001' in s or '11004' in s:
+        return '找不到对方设备'
+    if 'errno 28' in s or 'no space' in s:
+        return '磁盘空间不足'
+    if 'errno 13' in s or 'permission' in s:
+        return '没有文件访问权限'
+    if 'errno 2]' in s or 'no such file' in s:
+        return '文件不存在或已被移动'
+    if 'no sessionid' in s:
+        return '对方无法接收'
+    if 'http 4' in s:
+        return '对方拒绝接收'
+    if 'http 5' in s or 'internal error' in s:
+        return '对方设备出错'
+    return '传输出错'
+
+
+def _reveal_in_explorer(path):
+    '''资源管理器打开所在文件夹并选中该文件。
+    路径必须归一化并带引号：正斜杠或含空格时 /select 会退化成只打开文件夹不选中。
+    必须传整条字符串命令：列表形式会被 list2cmdline 再加一层引号，explorer 解析不了。'''
+    subprocess.Popen('explorer.exe /select,"%s"' % os.path.normpath(path))
+
+
 def _default_save_dir(cfg):
     '''接收保存目录：配置优先，缺省 ~/Downloads/Zviber。'''
     d = cfg.transfer_dir
@@ -115,10 +187,89 @@ class _ClickRow(QFrame):
         super(_ClickRow, self).mouseReleaseEvent(e)
 
 
+class TransferInfoDialog(QDialog):
+    '''传输页门禁层 / 设置窗的「?」共用的说明弹窗：解释局域网传输 + Android 版入口。
+    样式复用设置窗（#settingsDlg / #settingsPanel 区段）。'''
+
+    APK_URL = 'https://github.com/evachxji/zviber/releases'
+
+    def __init__(self, parent=None):
+        super(TransferInfoDialog, self).__init__(parent)
+        self.setObjectName('settingsDlg')
+        self.setWindowTitle('关于局域网传输')
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        card = QWidget()
+        card.setObjectName('settingsPanel')
+        root.addWidget(card)
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(ui.sc(16), ui.sc(6), ui.sc(16), ui.sc(14))
+        lay.setSpacing(ui.sc(8))
+
+        tb = QHBoxLayout()
+        tb.setContentsMargins(0, 0, 0, 0)
+        title = QLabel('关于「局域网传输」')
+        title.setObjectName('setTitle')
+        tb.addWidget(title)
+        tb.addStretch(1)
+        close = QToolButton()
+        close.setObjectName('closeBtn')
+        close.setText('✕')
+        close.setFixedSize(ui.sc(28), ui.sc(24))
+        close.setToolTip('关闭')
+        close.clicked.connect(self.reject)
+        tb.addWidget(close)
+        lay.addLayout(tb)
+
+        def para(text, name='infoText'):
+            lb = QLabel(text)
+            lb.setObjectName(name)
+            lb.setWordWrap(True)
+            lay.addWidget(lb)
+            return lb
+
+        para('在局域网内与其他设备（电脑、手机）互传文件，不经过任何服务器。\n'
+             '本功能参照开源项目 LocalSend（Apache License 2.0）的协议实现，'
+             '与官方 LocalSend 应用不互通。')
+        para('开启后会发生什么', 'transferTitle')
+        para('· 本机会监听固定端口 53327，用于被同网设备发现和接收文件；\n'
+             '· 首次开启时 Windows 可能弹出防火墙授权提示，选择「允许」后同网设备才能连进来。')
+        para('安全提示', 'transferTitle')
+        para('请只在自己家、公司等可信的局域网使用，公共 Wi-Fi 下建议保持关闭。')
+        para('手机端', 'transferTitle')
+        para('Android 手机安装 zviber 手机端，即可与电脑互传。')
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(ui.sc(8))
+        apk = QPushButton('下载 Android 版')
+        apk.setObjectName('setBtn')
+        apk.setCursor(Qt.PointingHandCursor)
+        apk.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self.APK_URL)))
+        btn_row.addWidget(apk)
+        btn_row.addStretch(1)
+        ok = QPushButton('我知道了')
+        ok.setObjectName('setSave')
+        ok.setCursor(Qt.PointingHandCursor)
+        ok.setDefault(True)
+        ok.clicked.connect(self.accept)
+        btn_row.addWidget(ok)
+        lay.addLayout(btn_row)
+
+        para('可随时在「设置 → 传输」中关闭此功能。', 'transferHint')
+
+        self.setFixedWidth(ui.sc(320))
+        self.adjustSize()
+
+
 class TransferWidget(QWidget):
-    '''传输 tab。server 为 None 时（端口被占）只显示「传输服务不可用」空态。'''
+    '''传输 tab。传输功能默认关闭：页面盖高斯模糊门禁层（「启用传输」+「?」说明），
+    开启后才开始监听端口；启用失败（端口被占）门禁层切「不可用」提示形态。
+    服务生命周期（TransferServer / Discovery 的创建与停止）由本类自持。'''
 
     notify = pyqtSignal(str, str)                       # 托盘气泡（标题, 内容）
+    enabled_changed = pyqtSignal(bool)                  # 开关状态变化（设置窗同步勾选用）
     sig_devices = pyqtSignal()                          # 设备列表需刷新
     sig_scan_done = pyqtSignal()                        # 子网扫描结束
     sig_progress = pyqtSignal(str, str, object, object)       # 接收进度 session_id, file_id, done, total
@@ -130,11 +281,12 @@ class TransferWidget(QWidget):
     sig_send_progress = pyqtSignal(str, object, object)       # 记录 key, done, total
     sig_send_done = pyqtSignal(str, bool, str)          # 记录 key, ok, err
 
-    def __init__(self, cfg, server, discovery, device_info, parent=None):
+    def __init__(self, cfg, device_info, parent=None, auto_start=True):
         super(TransferWidget, self).__init__(parent)
         self.cfg = cfg
-        self.server = server
-        self.discovery = discovery
+        self.server = None
+        self.discovery = None
+        self._service_started = False   # 未 start 过的 server 不能 stop（shutdown 会死等）
         self.device_info = device_info
         self.theme_key = 'nocturne'
         self._files = []             # 待发送的本地路径
@@ -160,15 +312,6 @@ class TransferWidget(QWidget):
         pl.setSpacing(ui.sc(6))
         root.addWidget(self.pane)
 
-        if server is None:
-            empty = QLabel('传输服务不可用\n（端口 53327 被占用？）')
-            empty.setObjectName('transferHint')
-            empty.setAlignment(Qt.AlignCenter)
-            pl.addStretch(1)
-            pl.addWidget(empty)
-            pl.addStretch(1)
-            return
-
         # ---- 本机别名 ----
         alias_row = QHBoxLayout()
         alias_row.setContentsMargins(ui.sc(10), 0, ui.sc(10), 0)
@@ -179,9 +322,33 @@ class TransferWidget(QWidget):
         self.alias_edit.setObjectName('aliasEdit')
         self.alias_edit.setMaxLength(32)
         self.alias_edit.editingFinished.connect(self._alias_commit)
+        self._alias_busy = False           # 打钩按钮转圈期间屏蔽重复点击
+        self._alias_angle = 0              # 转圈弧当前起始角
+        self._alias_timer = QTimer(self)
+        self._alias_timer.setInterval(50)
+        self._alias_timer.timeout.connect(self._alias_spin)
+        self.alias_ok_btn = QToolButton()
+        self.alias_ok_btn.setObjectName('aliasOkBtn')
+        self.alias_ok_btn.setIconSize(QSize(ui.sc(15), ui.sc(15)))
+        self.alias_ok_btn.setIcon(QIcon(_alias_icon('check', self.theme_key)))
+        self.alias_ok_btn.setToolTip('更新设备名称')
+        self.alias_ok_btn.clicked.connect(self._alias_btn_clicked)
         alias_row.addWidget(lab)
         alias_row.addWidget(self.alias_edit, 1)
+        alias_row.addWidget(self.alias_ok_btn)
         pl.addLayout(alias_row)
+
+        # 更新成功浮窗：pane 子控件绝对定位（按钮正上方坐标系），
+        # 不抢鼠标事件；_toast_seq 防止连续点击时旧的淡出定时器误杀新浮窗
+        self.alias_toast = QLabel('更新成功', self.pane)
+        self.alias_toast.setObjectName('aliasToast')
+        self.alias_toast.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.alias_toast.hide()
+        self._toast_opacity = QGraphicsOpacityEffect(self.alias_toast)
+        self._toast_opacity.setOpacity(0.0)
+        self.alias_toast.setGraphicsEffect(self._toast_opacity)
+        self._toast_anim = None
+        self._toast_seq = 0
 
         # ---- 设备列表 ----
         dev_head = QHBoxLayout()
@@ -331,20 +498,19 @@ class TransferWidget(QWidget):
         self.sig_send_progress.connect(self._on_send_progress)
         self.sig_send_done.connect(self._on_send_done)
 
-        # ---- 网络回调接线：后台线程里只发信号，不碰 UI ----
-        server.on_device_found = self._cb_device_found
-        server.on_receive_request = self._cb_receive_request
-        server.on_progress = self._cb_progress   # 经 100ms 节流的中间函数
-        server.on_file_done = self.sig_file_done.emit
-        server.on_session_done = self.sig_session_done.emit
-        server.on_cancelled = self.sig_cancelled.emit
-        if discovery is not None:
-            discovery.on_device_found = self._cb_device_found
+        # ---- 门禁层：未开启传输时盖住整页（内容高斯模糊）----
+        self._build_gate()
 
-        self._dev_timer = QTimer(self)
-        self._dev_timer.timeout.connect(self._refresh_devices)
-        self._dev_timer.start(5000)   # 5 秒刷一次：DEVICE_TTL 剔除离线设备
         self._refresh_devices()
+
+        # auto_start=False（截图自检）：不起服务也不盖门禁层，按功能态渲染
+        if not auto_start:
+            return
+        if bool(cfg.data.get('transfer_enabled')):
+            if not self.enable_service():
+                self._show_gate('occupied')   # 端口被占：提示，确定后回到未开启态
+        else:
+            self._show_gate('enable')
 
     # ---------------- 通用 ----------------
 
@@ -356,6 +522,162 @@ class TransferWidget(QWidget):
                 lab = rec.get('dir_lab')
                 if lab is not None:
                     lab.setPixmap(_dir_chip(rec['direction'], key))
+            if getattr(self, 'alias_ok_btn', None) is not None:
+                kind = 'spin' if self._alias_busy else 'check'
+                self.alias_ok_btn.setIcon(QIcon(_alias_icon(kind, key, self._alias_angle)))
+        except Exception:
+            pass
+
+    # ---------------- 服务生命周期 ----------------
+
+    def service_enabled(self):
+        return self.server is not None
+
+    def _wire_server(self, server, discovery):
+        '''网络回调接线：后台线程里只发信号，不碰 UI。'''
+        server.on_device_found = self._cb_device_found
+        server.on_receive_request = self._cb_receive_request
+        server.on_progress = self._cb_progress   # 经 100ms 节流的中间函数
+        server.on_file_done = self.sig_file_done.emit
+        server.on_session_done = self.sig_session_done.emit
+        server.on_cancelled = self.sig_cancelled.emit
+        discovery.on_device_found = self._cb_device_found
+
+    def enable_service(self):
+        '''启动端口监听 + 设备发现；端口被占返回 False（界面保持门禁层）。'''
+        if self.server is not None:
+            return True
+        try:
+            server = transfer.TransferServer(self.device_info)
+        except Exception:
+            return False
+        discovery = transfer.Discovery(self.device_info)
+        self._wire_server(server, discovery)
+        server.start()
+        discovery.start()
+        self.server = server
+        self.discovery = discovery
+        self._service_started = True
+        return True
+
+    def disable_service(self):
+        '''停止监听并释放端口，清空设备列表。'''
+        server, discovery = self.server, self.discovery
+        self.server = None
+        self.discovery = None
+        self._devices = {}
+        self._selected_fp = None
+        self._refresh_devices()
+        if server is None:
+            return
+        for attr in ('on_device_found', 'on_receive_request', 'on_progress',
+                     'on_file_done', 'on_session_done', 'on_cancelled'):
+            setattr(server, attr, None)
+        discovery.on_device_found = None
+        if self._service_started:
+            discovery.stop()
+            server.stop()
+            self._service_started = False
+
+    def set_enabled(self, on):
+        '''界面开关入口（传输页「启用传输」/ 设置窗勾选共用）。
+        开启失败（端口被占）→ 门禁层切「不可用」形态，返回 False。'''
+        try:
+            if on:
+                if self.enable_service():
+                    self.cfg.set('transfer_enabled', True)
+                    self._hide_gate()
+                    self.enabled_changed.emit(True)
+                    return True
+                self.cfg.set('transfer_enabled', False)
+                self._show_gate('occupied')
+                self.enabled_changed.emit(False)
+                return False
+            self.disable_service()
+            self.cfg.set('transfer_enabled', False)
+            self._show_gate('enable')
+            self.enabled_changed.emit(False)
+            return True
+        except Exception:
+            return False
+
+    def shutdown_service(self):
+        '''程序退出：只停真正 start 过的服务。'''
+        try:
+            if self._service_started and self.server is not None:
+                self.discovery.stop()
+                self.server.stop()
+                self._service_started = False
+        except Exception:
+            pass
+
+    # ---------------- 门禁层 ----------------
+
+    def _build_gate(self):
+        '''门禁层：与接收确认层同款的页内遮罩（pane 的兄弟，不随 pane 一起模糊）。'''
+        self._blur = None
+        self._gate_mode = 'enable'
+        self.gate = QFrame(self)
+        self.gate.setObjectName('transferGate')
+        gl = QVBoxLayout(self.gate)
+        gl.setContentsMargins(ui.sc(18), ui.sc(16), ui.sc(18), ui.sc(14))
+        gl.setSpacing(ui.sc(10))
+        gl.addStretch(1)
+        self.gate_msg = QLabel('传输服务不可用\n（端口 53327 被占用）')
+        self.gate_msg.setObjectName('transferHint')
+        self.gate_msg.setAlignment(Qt.AlignCenter)
+        gl.addWidget(self.gate_msg)
+        self.gate_ok = QPushButton('启用传输')
+        self.gate_ok.setObjectName('setSave')           # 复用设置窗主按钮样式
+        self.gate_ok.setCursor(Qt.PointingHandCursor)
+        self.gate_ok.clicked.connect(self._gate_ok_clicked)
+        gl.addWidget(self.gate_ok, 0, Qt.AlignCenter)
+        # 「?」圆形说明按钮：放在「启用传输」正下方居中
+        self.gate_help = QToolButton()
+        self.gate_help.setObjectName('gateHelpBtn')
+        self.gate_help.setText('?')
+        self.gate_help.setFixedSize(ui.sc(20), ui.sc(20))
+        self.gate_help.setCursor(Qt.PointingHandCursor)
+        self.gate_help.setToolTip('什么是局域网传输')
+        self.gate_help.clicked.connect(lambda: TransferInfoDialog(self).exec_())
+        gl.addWidget(self.gate_help, 0, Qt.AlignCenter)
+        gl.addStretch(1)
+        self.gate.hide()
+
+    def _show_gate(self, mode):
+        '''mode='enable'：启用按钮 + 「?」；mode='occupied'：端口被占提示 + 确定。'''
+        try:
+            self._gate_mode = mode
+            self.gate_msg.setVisible(mode == 'occupied')
+            self.gate_ok.setText('确定' if mode == 'occupied' else '启用传输')
+            self.gate_help.setVisible(mode != 'occupied')
+            if self._blur is None:
+                self._blur = QGraphicsBlurEffect(self)
+                self._blur.setBlurRadius(ui.sc(8))
+            self.pane.setGraphicsEffect(self._blur)
+            self.gate.setGeometry(self.rect())
+            self.gate.show()
+            self.gate.raise_()
+        except Exception:
+            pass
+
+    def _hide_gate(self):
+        try:
+            self.pane.setGraphicsEffect(None)
+            self._blur = None
+            self.gate.hide()
+        except Exception:
+            pass
+
+    def _gate_ok_clicked(self):
+        try:
+            if self._gate_mode == 'occupied':
+                # 「确定」：回到未开启态
+                self.cfg.set('transfer_enabled', False)
+                self._show_gate('enable')
+                self.enabled_changed.emit(False)
+            else:
+                self.set_enabled(True)
         except Exception:
             pass
 
@@ -364,6 +686,8 @@ class TransferWidget(QWidget):
         try:
             if hasattr(self, 'recv'):
                 self.recv.setGeometry(self.rect())
+            if hasattr(self, 'gate'):
+                self.gate.setGeometry(self.rect())
         except Exception:
             pass
 
@@ -409,6 +733,79 @@ class TransferWidget(QWidget):
         except Exception:
             pass
 
+    def _alias_btn_clicked(self):
+        '''打钩按钮：提交别名后图标转圈约 0.8s 再变回勾选，作为更新成功的反馈
+        （别名提交本身是同步即成的，转圈纯为可感知的确认动效）。'''
+        try:
+            if self._alias_busy:
+                return
+            alias = self.alias_edit.text().strip()
+            if not alias or self.device_info is None:
+                return
+            if alias != self.device_info.alias:
+                self.device_info.alias = alias
+                self.cfg.set('transfer_alias', alias)
+            self.alias_edit.clearFocus()
+            self._alias_busy = True
+            self._alias_angle = 0
+            self._alias_spin()
+            self._alias_timer.start()
+            QTimer.singleShot(800, self._alias_done)
+        except Exception:
+            pass
+
+    def _alias_spin(self):
+        self._alias_angle = (self._alias_angle + 30) % 360
+        self.alias_ok_btn.setIcon(QIcon(_alias_icon('spin', self.theme_key, self._alias_angle)))
+
+    def _alias_done(self):
+        try:
+            self._alias_timer.stop()
+            self._alias_busy = False
+            self.alias_ok_btn.setIcon(QIcon(_alias_icon('check', self.theme_key)))
+            self._show_alias_toast()
+        except Exception:
+            pass
+
+    def _show_alias_toast(self):
+        '''成功浮窗：淡入 -> 停留约 1s -> 淡出，定位在打钩按钮左侧。'''
+        try:
+            if self._toast_anim is not None:
+                self._toast_anim.stop()
+            t = self.alias_toast
+            t.adjustSize()
+            pos = self.alias_ok_btn.pos()          # 按钮父控件就是 pane
+            x = pos.x() - t.width() - ui.sc(8)
+            y = pos.y() + (self.alias_ok_btn.height() - t.height()) // 2
+            t.move(max(0, x), max(0, y))
+            t.raise_()
+            t.show()
+            self._toast_anim = QPropertyAnimation(self._toast_opacity, b'opacity', self)
+            self._toast_anim.setDuration(160)
+            self._toast_anim.setStartValue(self._toast_opacity.opacity())
+            self._toast_anim.setEndValue(1.0)
+            self._toast_anim.start()
+            self._toast_seq += 1
+            seq = self._toast_seq
+            QTimer.singleShot(1100, lambda s=seq: self._hide_alias_toast(s))
+        except Exception:
+            pass
+
+    def _hide_alias_toast(self, seq):
+        try:
+            if seq != self._toast_seq or not self.alias_toast.isVisible():
+                return
+            if self._toast_anim is not None:
+                self._toast_anim.stop()
+            self._toast_anim = QPropertyAnimation(self._toast_opacity, b'opacity', self)
+            self._toast_anim.setDuration(260)
+            self._toast_anim.setStartValue(self._toast_opacity.opacity())
+            self._toast_anim.setEndValue(0.0)
+            self._toast_anim.finished.connect(self.alias_toast.hide)
+            self._toast_anim.start()
+        except Exception:
+            pass
+
     # ---------------- 设备列表 ----------------
 
     def _cb_device_found(self, info, ip):
@@ -427,11 +824,8 @@ class TransferWidget(QWidget):
                 got = self.discovery.get_devices()
                 for info, ip in (got.values() if isinstance(got, dict) else got):
                     merged[info.fingerprint] = (info, ip)
-            now = time.time()
             for fp, (info, ip, seen) in list(self._devices.items()):
-                if now - seen > DEVICE_TTL:
-                    del self._devices[fp]
-                elif fp not in merged:
+                if fp not in merged:
                     merged[fp] = (info, ip)
             self._render_devices(merged)
         except Exception:
@@ -490,16 +884,35 @@ class TransferWidget(QWidget):
             pass
 
     def _refresh_clicked(self):
-        '''「刷新」：工作线程跑子网扫描（约数秒），结束后回主线程刷新列表。'''
+        '''「刷新」：LocalSend 语义——清空列表、重新宣告一次，只信本次应答；
+        组播宽限（3s）内一台设备都没有才回退 /24 子网扫描（减少请求）。'''
         try:
             if self.discovery is None or self._scanning:
                 return
             self._scanning = True
             self.refresh_btn.setEnabled(False)
+            self._devices = {}
+            self.discovery.clear_devices()
+            self._selected_fp = None
+            self._refresh_devices()
+            self.discovery.announce()
+            QTimer.singleShot(3000, self._refresh_grace_done)
+        except Exception:
+            pass
+
+    def _refresh_grace_done(self):
+        '''组播宽限结束：已有设备直接收尾；仍为空则起子网扫描兜底。'''
+        try:
+            known = bool(self._devices)
+            if not known and self.discovery is not None:
+                known = bool(self.discovery.get_devices())
+            if known or self.discovery is None:
+                self._scan_done()
+                return
             threading.Thread(target=self._scan_worker,
                              name='transfer-scan', daemon=True).start()
         except Exception:
-            pass
+            self._scan_done()
 
     def _scan_worker(self):
         try:
@@ -586,9 +999,8 @@ class TransferWidget(QWidget):
             got = self.discovery.get_devices()
             for info, ip in (got.values() if isinstance(got, dict) else got):
                 merged[info.fingerprint] = (info, ip)
-        now = time.time()
         for fp, (info, ip, seen) in list(self._devices.items()):
-            if now - seen <= DEVICE_TTL and fp not in merged:
+            if fp not in merged:
                 merged[fp] = (info, ip)
         return merged
 
@@ -980,25 +1392,25 @@ class TransferWidget(QWidget):
             if len(paths) == 1:
                 os.startfile(paths[0])
             else:
-                subprocess.Popen(['explorer.exe', '/select,%s' % paths[0]])
+                _reveal_in_explorer(paths[0])
         except Exception:
             pass
 
     def _record_menu(self, key, pos):
-        '''接收成功的记录右键：打开文件所在文件夹 / 删除这条记录（只删记录，不动文件）。'''
+        '''接收成功的记录右键：打开文件位置（选中该文件）/ 删除记录（不删除文件）。'''
         try:
             rec = self._records.get(key)
             if not rec or rec['direction'] != 'down' or rec['state'] != 'done':
                 return
             paths = [p for p in rec['saved'] if os.path.exists(p)]
             menu = QMenu(self)
-            act_reveal = menu.addAction('打开文件所在文件夹') if paths else None
-            act_del = menu.addAction('删除这条记录')
+            act_reveal = menu.addAction('打开文件位置') if paths else None
+            act_del = menu.addAction('删除记录（不删除文件）')
             act = menu.exec_(rec['row'].mapToGlobal(pos))
             if act is None:
                 return
             if act_reveal is not None and act is act_reveal:
-                subprocess.Popen(['explorer.exe', '/select,%s' % paths[0]])
+                _reveal_in_explorer(paths[0])
             elif act is act_del:
                 self._remove_record(key)
         except Exception:
@@ -1062,9 +1474,9 @@ class TransferWidget(QWidget):
         elif state == 'cancelling':
             text = '取消中…'
         else:
-            text = '失败'
-            if rec.get('err'):
-                text = '失败：%s' % rec['err'][:24]
+            friendly = _friendly_err(rec.get('err'))
+            text = '失败：%s' % friendly if friendly else '失败'
+            rec['state_lab'].setToolTip(rec.get('err') or '')   # 原始错误留悬停排查
         rec['state_lab'].setText(text)
         # 接收完成的记录可单击打开 / 右键管理，给个手型提示（其余状态无交互）
         rec['row'].setCursor(Qt.PointingHandCursor
