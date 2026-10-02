@@ -16,7 +16,7 @@ from PyQt5.QtWidgets import (QWidget, QFrame, QLabel, QToolButton, QVBoxLayout, 
                              QGridLayout, QListWidget,
                              QListWidgetItem, QLineEdit, QMenu, QApplication, QDialog,
                              QFormLayout, QCheckBox, QRadioButton, QPushButton, QCalendarWidget,
-                             QLayout)
+                             QLayout, QGraphicsOpacityEffect)
 
 import calendar_data as cd
 import sysutil
@@ -1611,14 +1611,14 @@ class HolidayImportDialog(QDialog):
         self.move(g.topLeft())
 
     def _download(self, on_download, name, edit, btn):
-        """点「下载并导入」：按钮 loading + 禁用，后台抓取结束后恢复（结果写调试日志）。"""
+        """点「下载并导入」：按钮 loading + 禁用，后台抓取结束后恢复（结果在本窗口中央 toast 反馈）。"""
         url = edit.text().strip()
         if not url:
             self.status.setText('URL 不能为空')
             return
         btn.setEnabled(False)
         btn.setText('下载中…')
-        if on_download(name, url, lambda: self._download_done(btn)):
+        if on_download(name, url, lambda: self._download_done(btn), self):
             self.status.setText('正在下载 %s…' % name)
         else:
             self.status.setText('上一次下载还没结束，本次随它一起完成')
@@ -1888,10 +1888,10 @@ class SettingsDialog(QDialog):
         self.move(g.topLeft())
 
     def _fetch_clicked(self):
-        """联网更新：点击即 loading + 禁用，后台抓取结束后恢复（无论成败，结果写调试日志）。"""
+        """联网更新：点击即 loading + 禁用，后台抓取结束后恢复（结果在本窗口中央 toast 反馈）。"""
         self.btn_fetch.setEnabled(False)
         self.btn_fetch.setText('更新中…')
-        self._on_fetch(self._fetch_done)
+        self._on_fetch(self._fetch_done, toast_win=self)
 
     def _fetch_done(self):
         try:
@@ -2174,6 +2174,63 @@ class _SlideStack(QWidget):
         for page in self._pages:
             if page.parent() is self:
                 page.resize(self.size())
+
+
+def show_toast_on(win, text, ok=True, hold_ms=1800):
+    """在指定窗口正中央弹结果 toast（托盘已移除的替代通道）：淡入 -> 停留 -> 淡出。
+    ok=False 用失败配色。toast 状态存放在 win 上，每个窗口各自独立互不影响。"""
+    try:
+        if not hasattr(win, '_toast'):
+            t = QLabel('', win)
+            t.setObjectName('panelToast')
+            t.setAttribute(Qt.WA_TransparentForMouseEvents)
+            t.setAlignment(Qt.AlignCenter)
+            op = QGraphicsOpacityEffect(t)
+            op.setOpacity(0.0)
+            t.setGraphicsEffect(op)
+            t.hide()
+            win._toast, win._toast_op = t, op
+            win._toast_anim = None
+            win._toast_seq = 0
+        if win._toast_anim is not None:
+            win._toast_anim.stop()
+        t = win._toast
+        t.setText(text)
+        want = 'true' if ok else 'false'
+        if t.property('ok') != want:
+            t.setProperty('ok', want)
+            t.style().unpolish(t)
+            t.style().polish(t)
+        t.adjustSize()
+        t.move(max(0, (win.width() - t.width()) // 2),
+               max(0, (win.height() - t.height()) // 2))
+        t.raise_()
+        t.show()
+        win._toast_anim = QPropertyAnimation(win._toast_op, b'opacity', win)
+        win._toast_anim.setDuration(160)
+        win._toast_anim.setStartValue(win._toast_op.opacity())
+        win._toast_anim.setEndValue(1.0)
+        win._toast_anim.start()
+        win._toast_seq += 1
+        QTimer.singleShot(hold_ms, lambda w=win, s=win._toast_seq: _hide_toast_on(w, s))
+    except Exception:
+        pass
+
+
+def _hide_toast_on(win, seq):
+    try:
+        if seq != win._toast_seq or not win._toast.isVisible():
+            return
+        if win._toast_anim is not None:
+            win._toast_anim.stop()
+        win._toast_anim = QPropertyAnimation(win._toast_op, b'opacity', win)
+        win._toast_anim.setDuration(280)
+        win._toast_anim.setStartValue(win._toast_op.opacity())
+        win._toast_anim.setEndValue(0.0)
+        win._toast_anim.finished.connect(win._toast.hide)
+        win._toast_anim.start()
+    except Exception:
+        pass
 
 
 class FloatingPanel(QWidget):

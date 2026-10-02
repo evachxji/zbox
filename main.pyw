@@ -108,11 +108,12 @@ def _auto_update_due(cfg):
 
 
 def start_holiday_update(hstore, cfg, panel, groups, manual=True, fallback_url=None,
-                         on_finish=None, save_dir=None):
-    """后台联网更新。manual=False 完全静默（自动更新用）；manual=True 把结果写进调试日志，
-    fallback_url 非空且全部失败时顺手用浏览器打开它兜底。
+                         on_finish=None, save_dir=None, toast_win=None):
+    """后台联网更新。manual=False 完全静默（自动更新用）；manual=True 结果经面板中央
+    toast 反馈（细节仍写调试日志），fallback_url 非空且全部失败时顺手用浏览器打开它兜底。
     on_finish 非空时在结束时（无论成败）回调一次，给按钮恢复用；已在跑则附到当前那次上。
-    save_dir 非空时把抓到的原始 JSON 存到该目录（导入窗「下载并导入」用）。"""
+    save_dir 非空时把抓到的原始 JSON 存到该目录（导入窗「下载并导入」用）。
+    toast_win 为手动结果的 toast 目标窗口（触发按钮所在窗口）；缺省或已关闭则回落面板。"""
     if _worker and _worker[0].isRunning():
         if on_finish:
             _worker[0].done.connect(lambda *_: on_finish())
@@ -128,6 +129,15 @@ def start_holiday_update(hstore, cfg, panel, groups, manual=True, fallback_url=N
             if on_finish:
                 on_finish()
 
+    def show(text, **kw):
+        win = toast_win
+        try:
+            if win is not None and not win.isVisible():
+                win = None
+        except RuntimeError:
+            win = None
+        ui.show_toast_on(win if win is not None else panel, text, **kw)
+
     def _merge_and_report(res):
         n = hstore.merge(res['off'], res['work']) if (res['off'] or res['work']) else 0
         if n:
@@ -136,12 +146,14 @@ def start_holiday_update(hstore, cfg, panel, groups, manual=True, fallback_url=N
             return
         if n:
             ui._dbg('节假日更新成功：%s 共 %d 条' % ('、'.join(res['hit']), n))
+            show('节假日更新成功，共 %d 条' % n)
         else:
-            msg = '联网更新失败：%s' % res['err'][:220]
+            ui._dbg('联网更新失败：%s' % res['err'][:220])
             if fallback_url:
                 QDesktopServices.openUrl(QUrl(fallback_url))
-                msg += '（已用浏览器打开，可另存为文件后用「选择文件导入」）'
-            ui._dbg(msg)
+                show('联网更新失败，已打开下载页，可另存后导入', ok=False, hold_ms=2600)
+            else:
+                show('联网更新失败，请检查网络后重试', ok=False, hold_ms=2200)
 
     w.done.connect(on_done)
     w.start()
@@ -319,12 +331,14 @@ def main():
     qapp.aboutToQuit.connect(_stop_transfer)
 
     # 节假日数据：设置窗「联网更新」与导入窗里各源的「下载并导入」都走同一条后台通道
-    def fetch_holidays(on_finish=None):
-        return start_holiday_update(hstore, cfg, panel, _holiday_groups(), on_finish=on_finish)
+    def fetch_holidays(on_finish=None, toast_win=None):
+        return start_holiday_update(hstore, cfg, panel, _holiday_groups(),
+                                    on_finish=on_finish, toast_win=toast_win)
 
-    def download_source(name, url, on_finish=None):
+    def download_source(name, url, on_finish=None, toast_win=None):
         return start_holiday_update(hstore, cfg, panel, [[(name, url)]], fallback_url=url,
-                                    on_finish=on_finish, save_dir=sysutil.download_dir())
+                                    on_finish=on_finish, save_dir=sysutil.download_dir(),
+                                    toast_win=toast_win)
 
     def auto_update():
         if _auto_update_due(cfg):
@@ -423,8 +437,19 @@ def _import_holidays(hstore, panel, on_download):
             n = hstore.import_file(path)
             panel.refresh_holidays()
             ui._dbg('节假日导入成功，共 %d 条' % n)
+            _pick_toast('节假日导入成功，共 %d 条' % n)
         except Exception as e:
             ui._dbg('节假日导入失败：%s' % e)
+            _pick_toast('节假日导入失败：文件格式无法识别', ok=False)
+
+    def _pick_toast(text, **kw):
+        win = None
+        try:
+            if _import_dlg and _import_dlg[0].isVisible():
+                win = _import_dlg[0]
+        except RuntimeError:
+            win = None
+        ui.show_toast_on(win if win is not None else panel, text, **kw)
 
     _import_dlg[:] = [ui.HolidayImportDialog(panel, on_download, pick)]
     _import_dlg[0].show()

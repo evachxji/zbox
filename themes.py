@@ -223,6 +223,11 @@ QLabel#aliasToast {
     background: rgba(30,26,18,235); border: 1px solid rgba(232,163,61,120); border-radius: 7px;
     color: #e8a33d; font: 11.5px "%CN%"; padding: 4px 10px;
 }
+QLabel#panelToast {
+    background: rgba(30,26,18,240); border: 1px solid rgba(232,163,61,120); border-radius: 9px;
+    color: #e8a33d; font: 12px "%CN%"; padding: 8px 16px;
+}
+QLabel#panelToast[ok="false"] { border-color: rgba(224,82,82,140); color: #e05252; }
 QScrollArea#transferScroll { background: transparent; border: none; }
 QFrame#deviceRow { background: transparent; border-radius: 8px; }
 QFrame#deviceRow:hover { background: rgba(255,255,255,12); }
@@ -479,6 +484,11 @@ QLabel#aliasToast {
     background: #ffffff; border: 1px solid rgba(0,103,192,90); border-radius: 7px;
     color: #0067c0; font: 11.5px "%CN%"; padding: 4px 10px;
 }
+QLabel#panelToast {
+    background: rgba(255,255,255,245); border: 1px solid rgba(0,103,192,90); border-radius: 9px;
+    color: #0067c0; font: 12px "%CN%"; padding: 8px 16px;
+}
+QLabel#panelToast[ok="false"] { border-color: rgba(196,43,28,120); color: #c42b1c; }
 QScrollArea#transferScroll { background: transparent; border: none; }
 QFrame#deviceRow { background: transparent; border-radius: 8px; }
 QFrame#deviceRow:hover { background: rgba(0,0,0,11); }
