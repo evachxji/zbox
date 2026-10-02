@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""系统集成：开机自启 + 桌面右键菜单 + 应用列表卸载项。
+"""系统集成：开机自启 + 桌面/文件夹右键菜单 + 应用列表卸载项。
 默认写 HKCU（免管理员，Win7/10/11 通用）；all_users=True 写 HKLM（exe 安装向导「此计算机」选项，需管理员）。"""
 import os
 import shutil
@@ -11,22 +11,28 @@ from version import APP_VERSION
 APP_NAME = 'zviber'
 MENU_TITLE = 'zviber桌面格子'
 
-# 桌面右键二级菜单项（与托盘右键完全一致）：(注册表子键名, 显示文字, exe 命令行参数)
-# 子键名的字母序就是菜单顺序：前缀字母用来对齐托盘顺序
+# 桌面右键二级菜单项：(注册表子键名, 显示文字, exe 命令行参数)
+# 子键名的字母序就是菜单顺序，故带 A_/B_… 前缀
 MENU_ITEMS = [
-    ('A_Toggle', '显示 / 隐藏', '--toggle'),
-    ('B_NewBox', '新建格子', '--new-box'),
-    ('C_NewFolderBox', '新建文件夹格子', '--pick-folder'),
-    ('D_ToggleBoxes', '显示 / 隐藏格子', '--toggle-boxes'),
-    ('E_Settings', '设置', '--settings'),
-    ('F_About', '关于', '--about'),
-    ('G_Quit', '退出', '--quit'),
+    ('A_NewBox', '新建格子', '--new-box'),
+    ('B_NewFolderBox', '新建文件夹格子', '--pick-folder'),
+    ('C_Toggle', '显示 / 隐藏卡片', '--toggle'),
+    ('D_Settings', '设置', '--settings'),
+    ('E_About', '关于', '--about'),
+    ('F_Quit', '退出', '--quit'),
 ]
+# 2026-10 改版前的一代子键名（当时七项、前缀不同）：整树删除时两代都要算，
+# 否则改名后旧键清不掉，右键菜单新旧并存
+MENU_SUBKEYS_OLD = ['A_Toggle', 'B_NewBox', 'C_NewFolderBox', 'D_ToggleBoxes',
+                    'E_Settings', 'F_About', 'G_Quit']
 IPC_KEY = 'zviber-panel-v2'   # 换名字时一并换版本号：旧版（-v1）与新版本互不串话
 RUN_KEY = r'Software\Microsoft\Windows\CurrentVersion\Run'
 # 右键菜单键相对 HKCR 的路径；ExtendedSubCommandsKey 要的就是这段（不带 Software\Classes\）
 SHELL_SUBKEY = r'Directory\Background\shell\zviber'
 SHELL_KEY = r'Software\Classes\\' + SHELL_SUBKEY
+# 文件夹（Directory）右键「添加到zviber桌面格子」静态动词：仅运行中注入，随面板启停写删
+FOLDER_MENU_TEXT = '添加到zviber桌面格子'
+FOLDER_SHELL_KEY = r'Software\Classes\Directory\shell\zviber'
 LEGACY_SHELL_KEY = r'Software\Classes\Directory\Background\shell\ZviberPanel'  # 旧名残留，安装/退出时清掉
 COMMANDSTORE_KEY = r'Software\Microsoft\Windows\CurrentVersion\Explorer\CommandStore\shell'  # 只为清理旧版残留
 UNINSTALL_KEY = r'Software\Microsoft\Windows\CurrentVersion\Uninstall\zviber'
@@ -160,7 +166,7 @@ def autostart_remove():
 def _shell_tree_subs():
     """SHELL_KEY 整棵子树的自底向上删除顺序（winreg 不能删带子键的键）。
     含三代旧结构：直链 command、子项误放父项 shell\\ 的级联版、CommandStore 短命版。"""
-    names = [n for n, _t, _a in MENU_ITEMS]
+    names = [n for n, _t, _a in MENU_ITEMS] + MENU_SUBKEYS_OLD
     subs = [SHELL_KEY + r'\shell\%s\command' % n for n in names]
     subs += [SHELL_KEY + r'\shell\%s' % n for n in names]
     subs += [SHELL_KEY + r'\shell', SHELL_KEY + r'\command', SHELL_KEY]
@@ -178,11 +184,22 @@ def _delete_shell_tree(root):
             winreg.DeleteKey(root, sub)
         except OSError:
             pass
+    _delete_folder_shell_tree(root)
+
+
+def _delete_folder_shell_tree(root):
+    """文件夹右键项（Directory\\shell\\zviber）：先删 command 再删键（winreg 不能删带子键的键）。
+    折进 _delete_shell_tree：它的全部调用点（安装/卸载/启停切换）语义都是「删干净」。"""
+    for sub in (FOLDER_SHELL_KEY + r'\command', FOLDER_SHELL_KEY):
+        try:
+            winreg.DeleteKey(root, sub)
+        except OSError:
+            pass
 
 
 def _delete_legacy_shell_tree(root):
     """旧名 SHELL_KEY（ZviberPanel）整棵子树的删除顺序。"""
-    names = [n for n, _t, _a in MENU_ITEMS]
+    names = [n for n, _t, _a in MENU_ITEMS] + MENU_SUBKEYS_OLD
     subs = [LEGACY_SHELL_KEY + r'\shell\%s\command' % n for n in names]
     subs += [LEGACY_SHELL_KEY + r'\shell\%s' % n for n in names]
     subs += [LEGACY_SHELL_KEY + r'\shell', LEGACY_SHELL_KEY + r'\command', LEGACY_SHELL_KEY]
@@ -251,27 +268,44 @@ def _write_cascade(root, exe, icon_path):
             winreg.SetValueEx(k, None, 0, winreg.REG_SZ, launcher_cmd(arg=arg, exe=exe))
 
 
+def _write_folder_item(root, exe, icon_path):
+    """文件夹（Directory）右键项「添加到zviber桌面格子」：静态动词，%1 = 选中的文件夹路径。
+    仅运行中存在（见 context_menu_set_running），点击经 --add-folder 由 IPC 转发给面板建格子。"""
+    with winreg.CreateKey(root, FOLDER_SHELL_KEY) as k:
+        winreg.SetValueEx(k, 'MUIVerb', 0, winreg.REG_SZ, FOLDER_MENU_TEXT)
+        icon = _menu_icon(exe, icon_path)
+        if icon:
+            winreg.SetValueEx(k, 'Icon', 0, winreg.REG_SZ, icon)
+    with winreg.CreateKey(root, FOLDER_SHELL_KEY + r'\command') as k:
+        winreg.SetValueEx(k, None, 0, winreg.REG_SZ,
+                          launcher_cmd(arg='--add-folder "%1"', exe=exe))
+
+
 def context_menu_install(icon_path=None, exe=None, all_users=False):
     """安装时写入「未运行」形态：直链菜单项，单击启动程序。
-    运行中形态（级联七项）由 context_menu_set_running 在面板启停时切换。"""
+    运行中形态（级联六项）由 context_menu_set_running 在面板启停时切换。"""
     root = _root(all_users)
     _delete_shell_tree(root)
     _write_flat(root, exe, icon_path)
 
 
 def context_menu_set_running(running, icon_path=None):
-    """面板启停时切换桌面右键菜单形态：运行中 = 级联七项（IPC 转发），未运行 = 直链单击启动。
+    """面板启停时切换桌面右键菜单形态：运行中 = 级联六项（IPC 转发），未运行 = 直链单击启动。
     icon_path 供源码运行传入运行时生成的 ico（frozen 不用传，直接用 exe 自带图标）。
     - HKCU 安装：原地改写，退出切回直链；
     - HKLM（此计算机）安装：无权改 HKLM，运行时往 HKCU 写覆盖层（HKCR 合并视图 HKCU 优先）、
       退出删掉覆盖层回落 HKLM 直链；
     - 源码运行（无安装记录）：启动时注入级联菜单、退出时整体删除，不留残留
       （崩溃残留由下次启动时 installer.sync_context_menu() 清掉）。
-    进程崩溃会让菜单停在级联态——此时点二级项会新起实例并本地执行动作，可接受的降级。"""
+    进程崩溃会让菜单停在级联态——此时点二级项会新起实例并本地执行动作，可接受的降级。
+    文件夹右键「添加到zviber桌面格子」（FOLDER_SHELL_KEY）与级联菜单同生共死：只随
+    running=True 注入，退出/卸载/覆盖安装时随 _delete_shell_tree 一并删除——未运行时不该
+    出现，崩溃残留被点到则静默退出（main.pyw 的 --add-folder 分支）。"""
     hkcu_installed = uninstall_reg_get('InstallLocation', False)
     _delete_shell_tree(winreg.HKEY_CURRENT_USER)
     if running:
         _write_cascade(winreg.HKEY_CURRENT_USER, None, icon_path)
+        _write_folder_item(winreg.HKEY_CURRENT_USER, None, icon_path)
     elif hkcu_installed and not uninstall_reg_get('InstallLocation', True):
         _write_flat(winreg.HKEY_CURRENT_USER, None, None)
     # 其余情况（HKLM 安装 / 源码运行）：删干净即可，分别回落 HKLM 直链 / 无菜单

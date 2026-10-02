@@ -149,10 +149,10 @@ set ZVIBER_SHOT=designs\verify && python main.pyw   :: 截图自检
 接收 `toggle` / `quit` → `context_menu_set_running(True)` 注入桌面右键级联菜单。
 
 - 单实例靠 `QLocalServer` 名称 `zviber-panel-v2`；消息由 `_on_ipc` 按 `actions` 字典分发，`quit` 消息供卸载程序请求退出。
-- 桌面右键是**级联菜单**：父项「zviber桌面格子」用 `MUIVerb` + `ExtendedSubCommandsKey` 自引用（子项放父项 `shell\` 子键下，子键名字母序即菜单顺序，故带 A_/B_… 前缀）。两个实测坑：① 别用 `SubCommands` 方案——它只按 **HKLM** 的 `Explorer\CommandStore` 解析，HKCU 的不认，免管理员安装没法用；② 父项绝不能有 `command` 子键，否则退化成直链不展开。7 个二级项：显示/隐藏、新建格子、新建文件夹格子、显示/隐藏格子、设置、关于、退出，各走 `--toggle`/`--new-box`/`--new-folder-box`/`--toggle-boxes`/`--settings`/`--about`/`--quit` 命令行参数，经 IPC（`IPC_ACTIONS`）转发给运行中的实例，不新起进程。**菜单形态跟随运行状态**：`context_menu_set_running()` 在面板启停时改写——运行中 = 级联七项，未运行 = 直链单项「单击启动」（安装时写入的就是直链形态）；HKLM 安装无权改写，运行时往 HKCU 写覆盖层、退出删掉回落；源码运行（无安装记录）启动时注入级联菜单、退出时整体删除（崩溃残留由下次启动时 `sync_context_menu` 清掉）。
+- 桌面右键是**级联菜单**：父项「zviber桌面格子」用 `MUIVerb` + `ExtendedSubCommandsKey` 自引用（子项放父项 `shell\` 子键下，子键名字母序即菜单顺序，故带 A_/B_… 前缀）。两个实测坑：① 别用 `SubCommands` 方案——它只按 **HKLM** 的 `Explorer\CommandStore` 解析，HKCU 的不认，免管理员安装没法用；② 父项绝不能有 `command` 子键，否则退化成直链不展开。6 个二级项：新建格子、新建文件夹格子、显示/隐藏卡片、设置、关于、退出，各走 `--new-box`/`--pick-folder`/`--toggle`/`--settings`/`--about`/`--quit` 命令行参数，经 IPC（`IPC_ACTIONS`）转发给运行中的实例，不新起进程。**菜单形态跟随运行状态**：`context_menu_set_running()` 在面板启停时改写——运行中 = 级联六项，未运行 = 直链单项「单击启动」（安装时写入的就是直链形态）；HKLM 安装无权改写，运行时往 HKCU 写覆盖层、退出删掉回落；源码运行（无安装记录）启动时注入级联菜单、退出时整体删除（崩溃残留由下次启动时 `sync_context_menu` 清掉）。
 - `installer.setup_main()`（setup exe 入口）里 `ZVIBER_AUTO_INSTALL` 是静默安装测试钩子。
 - **没有系统托盘图标**（已移除）：显隐/新建格子/设置/关于/退出等入口全在桌面右键级联菜单，
-  别再往回加托盘。设置窗口是**非模态**的（桌面右键「设置」或标题栏 ⚙），已开着就 `raise_()`，不会叠第二个。
+  别再往回加托盘。设置窗口是**非模态**的（桌面右键「设置」），已开着就 `raise_()`，不会叠第二个。
 
 ### 崩溃诊断与日志
 
@@ -298,6 +298,7 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
   **IPC 名 `zviber-panel-v1` → `zviber-panel-v2` 是有意的**：新旧版数据目录与注册表会互相覆盖，
   让它俩互不串话（各起一个实例）比新旧混用一个安全。
 - 涉及的键：`Run`（自启）、`Directory\Background\shell\zviber`（桌面右键菜单）、
+  `Directory\shell\zviber`（文件夹右键「添加到zviber桌面格子」，仅运行中注入，安装不写）、
   `Uninstall\zviber`（应用列表卸载项）。
 - **桌面右键菜单只属于 exe 安装**：只有 `installer.install()` 会写菜单，`install.py` 只写开机自启。
   每次启动 `installer.sync_context_menu()` 按 `Uninstall\zviber` 的 `InstallLocation` 判定——
@@ -312,6 +313,11 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
 桌面文件归类格子：`BoxManager` 总管（恢复/新建/解散/显隐），`BoxWindow` 单格，
 `BoxStore` 存 `%APPDATA%\zviber\boxes.json`（`visible` + 格子记录列表）。
 格子管理入口在桌面右键级联菜单（新建格子 / 新建文件夹格子 / 显示隐藏格子）；截图自检模式不创建格子。
+另有**资源管理器文件夹右键「添加到zviber桌面格子」**（`Directory\shell\zviber` 静态动词，
+`--add-folder "%1"` 传路径）：仅运行中注入（随 `context_menu_set_running` 与桌面级联菜单同生共死，
+退出/卸载/覆盖安装时随 `_delete_shell_tree` 一并删除，崩溃残留被点到静默退出），路径经 `b'folder:'`
+IPC 通道（与 `--pick-folder` 同一条）发回面板建格子；`new_folder` 按 normcase 去重——同一路径
+已有格子不新建，改为显示出来并 `flash()` 透明度闪烁提示（「新建文件夹格子」对话框路线同样去重）。
 
 - **层级策略（踩坑三轮后的终态）：挂桌面带（`pin_to_desktop`，免疫 Win+D）
   + 永不主动沉底 + 被桌面整理表层压住时由 WinEvent 钩子/看门狗抬回。**
@@ -323,8 +329,9 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
   会阻塞主线程——曾因每 500ms × 4 格子 × 6 点探测把界面打到转圈假死。
 - **空白格子只是桌面文件的收纳视图，不搬动文件**（2026-10 改，四个用户实测 bug 的根因）：
   拖入 = 把文件记进 `rec['items']` + 给它加「隐藏」属性把桌面图标藏起来（文件仍在桌面原路径，
-  右键属性的位置就是桌面）；关程序（`BoxManager.shutdown`）/ 解散格子 / 「显示隐藏格子」里
-  隐藏格子时用 `show_icons()` 还原属性，文件随即回到桌面。分组记录留在 `boxes.json`，
+  右键属性的位置就是桌面）；关程序（`BoxManager.shutdown`）/ 解散格子 / 显隐格子
+  （`set_boxes_visible`，双击桌面的 `toggle_all` 也走它）隐藏时用 `show_icons()` 还原属性，
+  文件随即回到桌面。分组记录留在 `boxes.json`，
   下次启动 `restore()` 再 `hide_icons()` 收起来——「程序开着=文件在格子里，程序关着=文件在桌面」。
   - 旧版是把文件真 `shutil.move` 进 `%APPDATA%\zviber\Boxes\<id>\`：用户实测「属性里
     路径变成 AppData」「关程序后文件被吞在里面」，故改成现在这样。`_upgrade_blank_boxes()`
@@ -585,7 +592,7 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
 
 ## Testing Guidelines
 
-没有单元测试框架。验证 = `ZVIBER_SHOT` 截图自检 + 手动检查桌面右键菜单形态切换（运行中级联 / 未运行直链）、开机自启。
+没有单元测试框架。验证 = `ZVIBER_SHOT` 截图自检 + 手动检查桌面右键菜单形态切换（运行中级联 / 未运行直链）、文件夹右键项随面板启停出现/消失、开机自启。
 改布局代码时要在 125% / 150% 缩放下确认。
 
 ## Commit & Pull Request Guidelines

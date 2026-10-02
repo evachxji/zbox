@@ -28,12 +28,6 @@ QToolButton#tab {
     color: #7d7a72; font: 600 13px "%CN%"; padding: 4px 2px 5px;
 }
 QToolButton#tab[active="true"] { color: #f0ede6; border-bottom: 2px solid #e8a33d; }
-QToolButton#iconBtn {
-    background: transparent; border: none; border-radius: 6px;
-    color: #7d7a72; font: 12px "%CN%";
-}
-QToolButton#iconBtn:hover { background: rgba(255,255,255,20); color: #e8e6e1; }
-QToolButton#iconBtn[on="true"] { color: #e8a33d; }
 QToolButton#closeBtn {
     background: transparent; border: none; border-radius: 6px; color: #7d7a72; font: 12px "%CN%";
 }
@@ -218,11 +212,6 @@ QToolButton#tab {
     color: #5b5b60; font: 600 12px "%CN%"; padding: 5px 16px;
 }
 QToolButton#tab[active="true"] { background: #ffffff; color: #1b1b1f; border: 1px solid rgba(0,0,0,10); }
-QToolButton#iconBtn {
-    background: transparent; border: none; border-radius: 6px; color: #5b5b60; font: 12px "%CN%";
-}
-QToolButton#iconBtn:hover { background: rgba(0,0,0,16); }
-QToolButton#iconBtn[on="true"] { color: #0067c0; }
 QToolButton#closeBtn {
     background: transparent; border: none; border-radius: 6px; color: #5b5b60; font: 12px "%CN%";
 }

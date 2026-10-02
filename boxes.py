@@ -765,6 +765,26 @@ class BoxWindow(QWidget):
             pm = self._icon_for(self.rec['path'], True).pixmap(ui.sc(16), ui.sc(16))
             self.icon.setPixmap(pm)
 
+    _FLASH_PHASES = (0.35, 1.0, 0.35, 1.0)
+
+    def flash(self):
+        """「这个文件夹已经有格子了」的提示：整体透明度闪两轮。
+        单 QTimer + 相位重置，连点不会叠出多条 timer 链互相打架。"""
+        self._flash_step = 0
+        if getattr(self, '_flash_timer', None) is None:
+            self._flash_timer = QTimer(self)   # 挂窗口 parent：格子解散随窗销毁，不回调野指针
+            self._flash_timer.setInterval(110)
+            self._flash_timer.timeout.connect(self._flash_tick)
+        self._flash_timer.start()
+
+    def _flash_tick(self):
+        if self._flash_step < len(self._FLASH_PHASES):
+            self.setWindowOpacity(self._FLASH_PHASES[self._flash_step])
+            self._flash_step += 1
+        else:
+            self._flash_timer.stop()
+            self.setWindowOpacity(1.0)   # 结束态精确回 1.0（含闪烁中被 hide/show 的路径）
+
     def _scan_dir(self, path):
         """映射格子的目录扫描（隐藏文件不显示）。"""
         entries = []
@@ -2216,7 +2236,9 @@ class BoxManager(object):
         self.store.save()
 
     def new_folder(self, path=None):
-        """新建文件夹映射格子；path 为空时弹目录选择框（原生资源管理器样式）。"""
+        """新建文件夹映射格子；path 为空时弹目录选择框（原生资源管理器样式）。
+        同一路径已有格子时不新建：显示出来并闪烁提示（文件夹右键「添加到zviber桌面格子」
+        与「新建文件夹格子」对话框都走这里）。"""
         if not path:
             # 静态方法原生框：模态只锁属主窗口，设置窗等其它顶层窗口照常可用。
             # 两个坑：① 必须用静态方法——QFileDialog 实例 + exec_() 在这套环境会开出
@@ -2225,8 +2247,21 @@ class BoxManager(object):
             path = QFileDialog.getExistingDirectory(self.panel, '选择要映射的文件夹')
         if not path:
             return
-        rec = self._new_rec('folder', os.path.basename(os.path.normpath(path)) or path,
-                            os.path.normpath(path))
+        path = os.path.normpath(path)
+        key = os.path.normcase(path)
+        for w in self.windows:
+            if w.rec.get('kind') == 'folder' and os.path.normcase(w.rec.get('path') or '') == key:
+                if not w.isVisible():
+                    if any(x.isVisible() for x in self.windows):
+                        w.show()                # 过渡态个别补显示，不动全局可见标志
+                    else:
+                        # 全隐藏态整批放出。不能调 toggle_all()：面板可见而格子全藏
+                        # （restore 按 visible=False 启动）时它会把面板也藏起来
+                        self.set_boxes_visible(True)
+                w.refresh()   # 路径曾被删又重建时自愈「解散格子」失效页
+                w.flash()
+                return
+        rec = self._new_rec('folder', os.path.basename(path) or path, path)
         self._spawn(rec)
 
     def _spawn(self, rec):
@@ -2262,6 +2297,18 @@ class BoxManager(object):
         elif not on and self.hook.isRunning():
             self.hook.stop()
 
+    def set_boxes_visible(self, show):
+        """只显隐格子（不动面板与桌面图标层）。空白格子的文件图标同步收放：
+        格子藏着时文件回桌面（show_icons），亮出时重新收进格子（hide_icons）——
+        否则文件既不在格子里也不在桌面上（AGENTS.md 记过的用户痛点）。
+        _hide_icon 对已隐藏的文件直接早退不重记属性，重复调用安全。"""
+        self.store.data['visible'] = show
+        self.store.save()
+        for w in self.windows:
+            w.setVisible(show)
+            if w.rec['kind'] == 'blank':
+                (w.hide_icons if show else w.show_icons)()
+
     def toggle_all(self):
         """双击桌面空白处：桌面图标 + 全部格子 + 面板一起显隐。
         任一还可见就算「显示中」，全部收起来；全收了再一起放出来。
@@ -2271,10 +2318,7 @@ class BoxManager(object):
                    or any(w.isVisible() for w in self.windows)
                    or bool(lv and ui._u32.IsWindowVisible(lv)))
         show = not showing
-        self.store.data['visible'] = show
-        self.store.save()
-        for w in self.windows:
-            w.setVisible(show)
+        self.set_boxes_visible(show)
         if show:   # 与 panel.toggle_visible 的显示分支一致
             self.panel.show()
             self.panel.raise_()
@@ -2283,17 +2327,6 @@ class BoxManager(object):
             self.panel.close_panel()   # 顶部栏是独立小窗，必须跟着收
         if lv:
             ui._u32.ShowWindow(lv, 5 if show else 0)   # SW_SHOW / SW_HIDE
-
-    def toggle_visible(self):
-        show = not any(w.isVisible() for w in self.windows)
-        self.store.data['visible'] = show
-        self.store.save()
-        for w in self.windows:
-            w.setVisible(show)
-            # 格子藏起来时文件就该回到桌面：否则文件既不在格子（格子藏着）、
-            # 也不在桌面（图标还被我们藏着），用户会觉得文件凭空没了。
-            if w.rec['kind'] == 'blank':
-                (w.hide_icons if show else w.show_icons)()
 
     def shutdown(self):
         self.hook.stop()

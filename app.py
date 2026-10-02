@@ -2165,7 +2165,6 @@ class _SlideStack(QWidget):
 
 class FloatingPanel(QWidget):
     toggled = pyqtSignal()
-    settingsRequested = pyqtSignal()
 
     def __init__(self, cfg, hstore, tstore):
         super(FloatingPanel, self).__init__()
@@ -2227,20 +2226,6 @@ class FloatingPanel(QWidget):
         tb.addWidget(self.tab_box)
         tb.addStretch(1)
 
-        self.btn_settings = QToolButton()
-        self.btn_settings.setObjectName('iconBtn')
-        self.btn_settings.setText('⚙')
-        self.btn_settings.setFixedSize(sc(30), sc(26))
-        self.btn_settings.setToolTip('设置')
-        self.btn_settings.clicked.connect(lambda: self.settingsRequested.emit())
-        self.btn_close = QToolButton()
-        self.btn_close.setObjectName('closeBtn')
-        self.btn_close.setText('✕')
-        self.btn_close.setFixedSize(sc(30), sc(26))
-        self.btn_close.setToolTip('关闭（桌面右键菜单可重新打开）')
-        self.btn_close.clicked.connect(self.close_panel)
-        tb.addWidget(self.btn_settings)
-        tb.addWidget(self.btn_close)
         self._tb_anim = QVariantAnimation(self)
         self._tb_anim.setDuration(160)
         self._tb_anim.setEasingCurve(QEasingCurve.OutCubic)

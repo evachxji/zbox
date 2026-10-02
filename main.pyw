@@ -2,9 +2,10 @@
 """Zviber 悬浮面板入口：单实例 + 桌面右键菜单 + 节假日联网更新/离线导入。
 用法：pythonw main.pyw        启动并显示
       pythonw main.pyw --toggle   已运行则切换显隐（供桌面右键菜单调用）
-      pythonw main.pyw --new-box / --toggle-boxes / --settings / --about / --quit
+      pythonw main.pyw --new-box / --settings / --about / --quit
                                   桌面右键二级菜单项：已运行则 IPC 转发，未运行则启动后本地执行（--quit 除外）
       pythonw main.pyw --pick-folder   「新建文件夹格子」：本进程弹原生目录框，路径经 IPC 发回面板
+      pythonw main.pyw --add-folder <路径>   文件夹右键「添加到zviber桌面格子」：路径经 IPC 发回面板建格子
 自检：设置环境变量 ZVIBER_SHOT=<目录> 启动，自动导出两主题截图后退出。
 """
 import faulthandler
@@ -144,12 +145,11 @@ def start_holiday_update(hstore, cfg, panel, groups, manual=True, fallback_url=N
     return True
 
 
-# 命令行参数 → IPC 消息（桌面右键二级菜单的七个项；--pick-folder 不查此表，
+# 命令行参数 → IPC 消息（桌面右键二级菜单的六个项；--pick-folder 不查此表，
 # 由独立进程弹完目录框后把路径包进 b'folder:' 消息发回）
 IPC_ACTIONS = {
     '--toggle': b'toggle',
     '--new-box': b'new-box',
-    '--toggle-boxes': b'toggle-boxes',
     '--settings': b'settings',
     '--about': b'about',
     '--quit': b'quit',
@@ -222,6 +222,21 @@ def main():
             notify_existing(b'folder:' + os.path.normpath(path).encode('utf-8'))
         return 0
 
+    if '--add-folder' in sys.argv:
+        # 文件夹右键「添加到zviber桌面格子」：资源管理器经 %1 传入路径，直接包成
+        # b'folder:' 消息发回面板（与 --pick-folder 同一条 IPC 通道，面板侧零改动）。
+        # 菜单只在运行中注入，无实例 = 崩溃残留被点到，静默退出。
+        # ⚠️ 必须在下方通用转发之前 return：--add-folder 不在 IPC_ACTIONS，
+        # 落过去会被当成 b'toggle' 把运行中的面板显隐翻转。
+        i = sys.argv.index('--add-folder')
+        path = sys.argv[i + 1] if i + 1 < len(sys.argv) else ''
+        path = path.rstrip('"')          # 防御 %1 尾部反斜杠吃掉闭合引号（"C:\" → C:"）
+        if len(path) == 2 and path[1] == ':':
+            path += '\\'                 # C:（C 盘当前目录，语义危险）→ C:\
+        if path and os.path.isdir(path):
+            notify_existing(b'folder:' + os.path.normpath(path).encode('utf-8'))
+        return 0
+
     cli_arg = next((a for a in sys.argv[1:] if a in IPC_ACTIONS), None)
     if notify_existing(IPC_ACTIONS.get(cli_arg, b'toggle')):
         return 0  # 已有实例在运行，转发动作后退出
@@ -290,8 +305,6 @@ def main():
         settings_dlg[:] = [dlg]
         dlg.show()
 
-    panel.settingsRequested.connect(open_settings)
-
     # 桌面右键二级菜单的动作分发表
     actions = {b'toggle': panel.toggle_visible, b'quit': qapp.quit,
                b'settings': open_settings,
@@ -299,7 +312,6 @@ def main():
     if boxmgr:
         actions[b'new-box'] = boxmgr.new_blank
         actions[b'folder:'] = boxmgr.new_folder
-        actions[b'toggle-boxes'] = boxmgr.toggle_visible
     server.newConnection.connect(lambda: _on_ipc(server, actions))
     if cli_arg and cli_arg != '--toggle':
         fn = actions.get(IPC_ACTIONS[cli_arg])
