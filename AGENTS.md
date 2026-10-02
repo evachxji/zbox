@@ -205,7 +205,11 @@ ClearType，文字发灰），圆角靠 Win11 DWM，Win7/10 降级为圆角遮�
 - **顶部栏默认收起**（`_slide_titlebar`）：栏窗高度 0↔`sc(42)` 做动画，靠 `_set_tb_height` 把它摆到
   面板顶边**上方**（`y = self.y() - h`）实现「向上滑出」，主窗口不动。进入面板（`enterEvent`）展开；
   离开后等 150ms 用 `_check_hover()` 看光标落点再决定收不收（光标从面板挪进展开栏会先触发面板的
-  `leave`，不等这一拍就会抖）。
+  `leave`，不等这一拍就会抖）。栏内布局 = tab 按钮组 + 最右「最小化」按钮（`min_btn`，'—'，
+  样式 `#minBtn` 两主题各一条）：点击走 `close_panel()` 收起整张卡片（栏窗随面板一起收），
+  再显示走既有通道（桌面右键 / 双击桌面 / 再跑一次 run.cmd 的 `--toggle`）。
+  注意 `#closeBtn` 不是面板顶部栏的旧残留——它是设置窗/关于窗/日期弹层等弹窗关闭按钮的
+  活样式（hover 变红），别当死代码删。
 - **栏窗也是桌面带成员**（`_ensure_band` 里随面板一起 `pin_to_desktop`）：栏窗是独立顶层 Tool 窗，
   不挂带时悬停弹出会盖住压在面板上的应用窗口。拖拽期间随面板一起临时脱带、松手挂回；
   `pin_to_desktop` 内部已处理可见窗口挂带丢 `WS_VISIBLE` 的坑（ShowWindow SW_SHOWNA）。
@@ -628,6 +632,10 @@ HTTP 模式无加密，只面向可信局域网。组播失效时有 /24 子网�
 - `transfer_ui.py` 是面板第三个 tab「传输」：设备列表、文件多选 + 拖拽发送、传输记录、
   接收确认层（可选保存目录，默认 `%USERPROFILE%\Downloads\Zviber` 并记住，170 秒确认超时）。
   **网络回调全走 pyqtSignal 回主线程**，不跨线程动 UI；53327 被占用时降级为空态，不影响日历/待办。
+  记录行交互（`_ClickRow` + `CustomContextMenu`）：**接收完成**（`direction='down'` 且
+  `state='done'`）的行手型光标提示——单击打开文件（一次收了多个文件则 `explorer /select`
+  定位第一个）；右键菜单「打开文件所在文件夹 / 删除这条记录」（`_remove_record` 只删记录
+  不动文件，删光后空态 `rec_empty` 重新显示）。其余状态（发送完成、等待中、失败等）一律无交互。
 - `transfer_selftest.py` 是自动化协议自检：`python transfer_selftest.py`，13 用例全过打印
   `SELFTEST OK`；用动态端口、不依赖组播与 Qt，**改 `transfer.py` 后必跑**。
 - Android 端在 `android/`：独立 Gradle 工程（Kotlin + Compose + OkHttp + NanoHTTPD，minSdk 26），

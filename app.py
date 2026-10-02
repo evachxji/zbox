@@ -2226,6 +2226,15 @@ class FloatingPanel(QWidget):
             self.tabs.append(b)
         tb.addWidget(self.tab_box)
         tb.addStretch(1)
+        # 最小化：收起整张卡片（与双击桌面/IPC 显隐同一条 close_panel 路径，
+        # 顶部栏是独立小窗会跟着一起收；再显示：桌面右键 / 双击桌面 / 再跑一次 run.cmd）
+        self.min_btn = QToolButton()
+        self.min_btn.setObjectName('minBtn')
+        self.min_btn.setText('—')
+        self.min_btn.setFixedSize(sc(26), sc(22))
+        self.min_btn.setToolTip('最小化')
+        self.min_btn.clicked.connect(self.close_panel)
+        tb.addWidget(self.min_btn)
 
         self._tb_anim = QVariantAnimation(self)
         self._tb_anim.setDuration(160)

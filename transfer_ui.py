@@ -8,6 +8,7 @@ abort，故所有槽函数 try/except 兜底）。on_receive_request 是 HTTP �
 '''
 
 import os
+import subprocess
 import threading
 import time
 import uuid
@@ -17,7 +18,7 @@ from PyQt5.QtCore import (Qt, QTimer, pyqtSignal, QPointF, QRect,
 from PyQt5.QtGui import QColor, QPainter, QPen, QPixmap
 from PyQt5.QtWidgets import (QWidget, QFrame, QLabel, QToolButton, QPushButton,
                              QVBoxLayout, QHBoxLayout, QLineEdit, QProgressBar,
-                             QScrollArea, QFileDialog, QSizePolicy)
+                             QScrollArea, QFileDialog, QSizePolicy, QMenu)
 
 import app as ui            # 仅运行期用 ui.sc()，import 期无依赖（app 也 import 本模块）
 from transfer import send_files, DEVICE_TTL
@@ -892,8 +893,13 @@ class TransferWidget(QWidget):
         '''新建一条记录并插到记录区顶部，返回 key。direction: 'up' 发 / 'down' 收。'''
         key = uuid.uuid4().hex
         display = names[0] if len(names) == 1 else '%d 个文件' % len(names)
-        row = QFrame()
+        row = _ClickRow()
         row.setObjectName('transferRow')
+        # 接收完成的记录才有交互（单击打开 / 右键菜单，见 _record_clicked/_record_menu）
+        row.clicked.connect(lambda k=key: self._record_clicked(k))
+        row.setContextMenuPolicy(Qt.CustomContextMenu)
+        row.customContextMenuRequested.connect(
+            lambda pos, k=key: self._record_menu(k, pos))
         lay = QVBoxLayout(row)
         lay.setContentsMargins(ui.sc(8), ui.sc(5), ui.sc(8), ui.sc(6))
         lay.setSpacing(ui.sc(3))
@@ -962,6 +968,53 @@ class TransferWidget(QWidget):
                 old_rec['row'].deleteLater()
         return key
 
+    def _record_clicked(self, key):
+        '''接收成功的记录：单击打开文件（一次收了多个文件则定位到所在文件夹）。'''
+        try:
+            rec = self._records.get(key)
+            if not rec or rec['direction'] != 'down' or rec['state'] != 'done':
+                return
+            paths = [p for p in rec['saved'] if os.path.exists(p)]
+            if not paths:
+                return
+            if len(paths) == 1:
+                os.startfile(paths[0])
+            else:
+                subprocess.Popen(['explorer.exe', '/select,%s' % paths[0]])
+        except Exception:
+            pass
+
+    def _record_menu(self, key, pos):
+        '''接收成功的记录右键：打开文件所在文件夹 / 删除这条记录（只删记录，不动文件）。'''
+        try:
+            rec = self._records.get(key)
+            if not rec or rec['direction'] != 'down' or rec['state'] != 'done':
+                return
+            paths = [p for p in rec['saved'] if os.path.exists(p)]
+            menu = QMenu(self)
+            act_reveal = menu.addAction('打开文件所在文件夹') if paths else None
+            act_del = menu.addAction('删除这条记录')
+            act = menu.exec_(rec['row'].mapToGlobal(pos))
+            if act is None:
+                return
+            if act_reveal is not None and act is act_reveal:
+                subprocess.Popen(['explorer.exe', '/select,%s' % paths[0]])
+            elif act is act_del:
+                self._remove_record(key)
+        except Exception:
+            pass
+
+    def _remove_record(self, key):
+        rec = self._records.pop(key, None)
+        if rec is None:
+            return
+        if key in self._rec_keys:
+            self._rec_keys.remove(key)
+        self.rec_lay.removeWidget(rec['row'])
+        rec['row'].deleteLater()
+        if not self._records:
+            self.rec_empty.show()
+
     def _animate_bar(self, rec, target):
         '''进度条平滑过渡（150ms 缓出），消除一跳一跳的阶梯感。'''
         bar = rec['bar']
@@ -1013,6 +1066,10 @@ class TransferWidget(QWidget):
             if rec.get('err'):
                 text = '失败：%s' % rec['err'][:24]
         rec['state_lab'].setText(text)
+        # 接收完成的记录可单击打开 / 右键管理，给个手型提示（其余状态无交互）
+        rec['row'].setCursor(Qt.PointingHandCursor
+                             if rec['direction'] == 'down' and state == 'done'
+                             else Qt.ArrowCursor)
         if rec['state_lab'].property('state') != state:
             rec['state_lab'].setProperty('state', state)
             rec['state_lab'].style().unpolish(rec['state_lab'])

@@ -32,6 +32,10 @@ QToolButton#closeBtn {
     background: transparent; border: none; border-radius: 6px; color: #7d7a72; font: 12px "%CN%";
 }
 QToolButton#closeBtn:hover { background: #c42b1c; color: #fff; }
+QToolButton#minBtn {
+    background: transparent; border: none; border-radius: 6px; color: #7d7a72; font: 12px "%CN%";
+}
+QToolButton#minBtn:hover { background: rgba(255,255,255,16); color: #f0ede6; }
 QToolButton#todayBtn {
     background: transparent; border: 1px solid rgba(232,163,61,110); border-radius: 6px;
     color: #e8a33d; font: 600 11px "%CN%"; padding: 0 10px;
@@ -273,6 +277,10 @@ QToolButton#closeBtn {
     background: transparent; border: none; border-radius: 6px; color: #5b5b60; font: 12px "%CN%";
 }
 QToolButton#closeBtn:hover { background: #c42b1c; color: #fff; }
+QToolButton#minBtn {
+    background: transparent; border: none; border-radius: 6px; color: #5b5b60; font: 12px "%CN%";
+}
+QToolButton#minBtn:hover { background: rgba(0,0,0,10); color: #1b1b1f; }
 QToolButton#todayBtn {
     background: transparent; border: none; border-radius: 6px; color: #0067c0;
     font: 600 11px "%CN%"; padding: 0 8px;
