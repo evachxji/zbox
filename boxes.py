@@ -63,6 +63,10 @@ _h32.ScreenToClient.restype = wintypes.BOOL
 _h32.ScreenToClient.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 _h32.SendMessageW.restype = ctypes.c_longlong
 _h32.SendMessageW.argtypes = [ctypes.c_void_p, wintypes.UINT, ctypes.c_size_t, ctypes.c_void_p]
+_h32.GetWindowLongW.restype = ctypes.c_long
+_h32.GetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int]
+_h32.GetClientRect.restype = wintypes.BOOL
+_h32.GetClientRect.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 _h32.AllowSetForegroundWindow.restype = wintypes.BOOL
 _h32.AllowSetForegroundWindow.argtypes = [wintypes.DWORD]
 _h32.CreatePopupMenu.restype = ctypes.c_void_p
@@ -110,6 +114,9 @@ _k32.VirtualFreeEx.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t
 _k32.WriteProcessMemory.restype = wintypes.BOOL
 _k32.WriteProcessMemory.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
                                     ctypes.c_size_t, ctypes.c_void_p]
+_k32.ReadProcessMemory.restype = wintypes.BOOL
+_k32.ReadProcessMemory.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+                                   ctypes.c_size_t, ctypes.c_void_p]
 _k32.CloseHandle.restype = wintypes.BOOL
 _k32.CloseHandle.argtypes = [ctypes.c_void_p]
 _k32.GetFileAttributesW.restype = wintypes.DWORD
@@ -124,6 +131,15 @@ _INVALID_ATTRS = 0xFFFFFFFF
 _SHCNE_UPDATEDIR = 0x00001000
 _SHCNF_PATHW = 0x0005
 _SHCNF_FLUSH = 0x1000
+
+# 桌面图标位置修正（_DesktopIconLayout）用的 ListView 消息与样式位
+_LVM_GETITEMCOUNT = 0x1004
+_LVM_SETITEMPOSITION = 0x100F
+_LVM_GETITEMPOSITION = 0x1010
+_LVM_GETITEMSPACING = 0x1033
+_LVM_GETITEMTEXTW = 0x1073
+_GWL_STYLE = -16
+_LVS_AUTOARRANGE = 0x0100
 
 # 拖出空白格子时的暂存目录名（桌面下的隐藏夹，见 BoxWindow.stage_for_drag）
 _STAGE_NAME = '.zviber'
@@ -858,10 +874,21 @@ class BoxWindow(QWidget):
         self.mgr.save_rec(self)
 
     def show_icons(self):
-        """放回桌面：还原我们隐藏过的图标（关程序 / 解散格子 / 隐藏格子时调）。"""
-        for p in list(self.rec.get('attrs') or {}):
+        """放回桌面：还原我们隐藏过的图标（关程序 / 解散格子 / 隐藏格子时调）。
+        重新出现的图标由 Explorer 自行摆位——落在第一列从上往下第一个空位
+        （用户眼里就是「跑到屏幕最左上角」，桌面满员时还会把原有图标挤下去且
+        不回弹）——所以释放前后各做一次快照/修正：新图标挪到桌面图标末尾行，
+        被挤的原有图标按快照摆回（_DesktopIconLayout，实测依据见其 docstring）。"""
+        paths = list(self.rec.get('attrs') or {})
+        lay = _DesktopIconLayout() if paths else None
+        before = lay.snapshot() if lay else None
+        for p in paths:
             self._show_icon(p)
         _shell_refresh(desktop_dir())
+        if lay:
+            if before:
+                lay.fixup([os.path.basename(p) for p in paths], before)
+            lay.close()
         self.mgr.save_rec(self)
 
     @staticmethod
@@ -1440,6 +1467,192 @@ def find_desktop_listview():
         lv = _lv_under(w)
         if lv:
             return lv
+
+
+class _LVITEMW(ctypes.Structure):
+    _fields_ = [('mask', wintypes.UINT), ('iItem', ctypes.c_int),
+                ('iSubItem', ctypes.c_int), ('state', wintypes.UINT),
+                ('stateMask', wintypes.UINT), ('pszText', ctypes.c_void_p),
+                ('cchTextMax', ctypes.c_int), ('iImage', ctypes.c_int),
+                ('lParam', ctypes.c_void_p), ('iIndent', ctypes.c_int),
+                ('iGroupId', ctypes.c_int), ('cColumns', wintypes.UINT),
+                ('puColumns', ctypes.c_void_p), ('piColFmt', ctypes.c_void_p),
+                ('iGroup', ctypes.c_int)]
+
+
+class _DesktopIconLayout(object):
+    """桌面图标位置的快照与修正：跨进程枚举 SysListView32 各项的显示名与坐标
+    （LVM_GETITEMTEXTW / LVM_GETITEMPOSITION，结构体开在 explorer 地址空间，
+    与 _desktop_icon_at 同一套做法），摆位用 LVM_SETITEMPOSITION
+    （lParam 直接打包坐标，不用跨进程内存）。
+
+    为什么需要它：空白格子释放文件（还原隐藏属性）后，重新出现的图标由 Explorer
+    自行摆位——落在第一列从上往下第一个空位，用户眼里就是「跑到屏幕最左上角」；
+    桌面满员（没有空位）时还会把原有图标挤下去，而被挤的图标不会回弹（位置记忆
+    当场被改写），再开程序也救不回来。所以释放时：先快照全部图标位置 → 还原属性
+    → 等新图标出现 → 把新图标挪到桌面末尾行（最后一行之下另起一行，全是空位
+    不挤人）→ 被挤的原有图标按快照摆回。
+    实测依据（Win11 自由摆放桌面）：新图标落点 = 第一列首个空位；SET 到已占用
+    位置 = 占用者被挤到下一空位；SET 到空位附近的坐标会被吸附到最近网格位——
+    所以目标位置只按网格估算即可，网格步长用 LVM_GETITEMSPACING 取。
+
+    自动排列（LVS_AUTOARRANGE）的桌面：位置完全由排序规则决定，SET 会被立刻
+    重排掉，干预无意义——检测到就不插手（ok=False，各方法早退）。"""
+
+    _TX = 512          # 文本缓冲（字符数）
+    _PT_OFF = 2048     # POINT 在远程缓冲里的偏移
+
+    def __init__(self):
+        self.ok = False
+        self.lv = self.hp = self.buf = None
+        self.rc = wintypes.RECT()
+        self.cx = self.cy = 0
+        lv = find_desktop_listview()
+        if not lv:
+            return
+        style = _h32.GetWindowLongW(lv, _GWL_STYLE) & 0xFFFFFFFF
+        if style & _LVS_AUTOARRANGE:
+            return
+        pid = wintypes.DWORD()
+        ui._u32.GetWindowThreadProcessId(lv, ctypes.byref(pid))
+        hp = _k32.OpenProcess(0x0008 | 0x0020 | 0x0010, False, pid.value)
+        if not hp:
+            return
+        buf = _k32.VirtualAllocEx(hp, None, 4096, 0x1000, 0x04)   # MEM_COMMIT | PAGE_READWRITE
+        if not buf:
+            _k32.CloseHandle(hp)
+            return
+        sp = _h32.SendMessageW(lv, _LVM_GETITEMSPACING, 0, 0)
+        self.cx, self.cy = sp & 0xFFFF, (sp >> 16) & 0xFFFF
+        _h32.GetClientRect(lv, ctypes.byref(self.rc))
+        self.lv, self.hp, self.buf = lv, hp, buf
+        self.ok = bool(self.cx and self.cy)
+
+    def close(self):
+        if self.buf:
+            _k32.VirtualFreeEx(self.hp, self.buf, 0, 0x8000)   # MEM_RELEASE
+        if self.hp:
+            _k32.CloseHandle(self.hp)
+        self.ok = False
+
+    def _write(self, off, data, size):
+        nw = ctypes.c_size_t()
+        return _k32.WriteProcessMemory(self.hp, self.buf + off, data, size,
+                                       ctypes.byref(nw))
+
+    def _read(self, off, data, size):
+        nr = ctypes.c_size_t()
+        return _k32.ReadProcessMemory(self.hp, self.buf + off, data, size,
+                                      ctypes.byref(nr))
+
+    def enum_icons(self):
+        """[(index, 显示名, x, y)]：x/y 是 ListView 客户区坐标。"""
+        out = []
+        if not self.ok:
+            return out
+        ss = ctypes.sizeof(_LVITEMW)
+        n = _h32.SendMessageW(self.lv, _LVM_GETITEMCOUNT, 0, 0)
+        for i in range(n):
+            item = _LVITEMW()
+            item.mask = 1                      # LVIF_TEXT
+            item.iItem = i
+            item.pszText = self.buf + ss
+            item.cchTextMax = self._TX
+            if not self._write(0, ctypes.byref(item), ss):
+                break
+            _h32.SendMessageW(self.lv, _LVM_GETITEMTEXTW, i, self.buf)
+            wbuf = (ctypes.c_wchar * self._TX)()
+            self._read(ss, wbuf, self._TX * 2)
+            pt = wintypes.POINT()
+            self._write(self._PT_OFF, ctypes.byref(pt), ctypes.sizeof(pt))
+            _h32.SendMessageW(self.lv, _LVM_GETITEMPOSITION, i, self.buf + self._PT_OFF)
+            self._read(self._PT_OFF, ctypes.byref(pt), ctypes.sizeof(pt))
+            out.append((i, wbuf.value, pt.x, pt.y))
+        return out
+
+    def snapshot(self):
+        """{小写显示名: (x, y)}；不可用（自动排列 / 找不到桌面层）返回 None。"""
+        if not self.ok:
+            return None
+        return {n.lower(): (x, y) for _, n, x, y in self.enum_icons()}
+
+    def _set_pos(self, idx, x, y):
+        _h32.SendMessageW(self.lv, _LVM_SETITEMPOSITION, idx,
+                          ((y & 0xFFFF) << 16) | (x & 0xFFFF))
+
+    @staticmethod
+    def _match(icons, before, basename):
+        """在枚举里找刚释放的那个文件：显示名匹配（全名优先，系统隐藏扩展名时
+        退到主名）；撞名（桌面原有同主名文件）时挑「位置不在快照里」的新项。"""
+        full, stem = basename.lower(), os.path.splitext(basename)[0].lower()
+        cands = [c for c in icons if c[1].lower() in (full, stem)]
+        cands.sort(key=lambda c: c[1].lower() != full)
+        if len(cands) <= 1:
+            return cands[0] if cands else None
+        for c in cands:
+            if before.get(c[1].lower()) != (c[2], c[3]):
+                return c
+        return None
+
+    def fixup(self, basenames, before, timeout=3.0):
+        """释放的图标出现后统一摆位：新图标挪到桌面末尾行，被挤的原有图标按
+        快照摆回。basenames = 释放文件的文件名列表，before = 释放前快照。"""
+        if not self.ok or not before:
+            return
+        # SHCNF_FLUSH 只是把通知投进 explorer 的队列，图标真正加进 ListView 有
+        # 延迟（实测 0~0.6s+），轮询等到全部出现；超时按已出现的修
+        t0 = time.time()
+        found = {}
+        while time.time() - t0 < timeout:
+            icons = self.enum_icons()
+            found = {}
+            for b in basenames:
+                m = self._match(icons, before, b)
+                if m:
+                    found[b] = m
+            if len(found) >= len(basenames):
+                break
+            time.sleep(0.1)
+        if not found:
+            return
+        # 末尾行 = 快照里最后一行之下另起一行（必是空行，SET 不挤人）；屏幕下沿
+        # 放不下就塞到最后一行最右图标之后（同样是空位）
+        xs = [x for x, _ in before.values()]
+        ys = [y for _, y in before.values()]
+        bx, by = min(xs), min(ys)
+        k_last = max(int(round((y - by) / float(self.cy))) for y in ys)
+        y0 = by + self.cy * (k_last + 1)
+        x0 = bx
+        if y0 + self.cy > self.rc.bottom:
+            y0 = by + self.cy * k_last
+            x0 = max(x for x, y in before.values()
+                     if int(round((y - by) / float(self.cy))) == k_last) + self.cx
+        released = set()
+        x, y = x0, y0
+        for b in basenames:
+            m = found.get(b)
+            if not m:
+                continue
+            if x + self.cx > self.rc.right:
+                x, y = x0, y + self.cy
+            if y + self.cy > self.rc.bottom:
+                continue   # 屏幕摆满：这个留在 Explorer 给的位置
+            self._set_pos(m[0], x, y)
+            released.add(m[0])
+            x += self.cx
+        # 原有图标按快照摆回：被挤的连锁两轮内收敛（每摆正一个就腾出一个空位）
+        for _ in range(2):
+            moved = []
+            for i, n, ix, iy in self.enum_icons():
+                if i in released:
+                    continue
+                pos = before.get(n.lower())
+                if pos and pos != (ix, iy):
+                    moved.append((i, pos))
+            if not moved:
+                break
+            for i, (px, py) in moved:
+                self._set_pos(i, px, py)
 
 
 _LVM_HITTEST = 0x1012
