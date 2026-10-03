@@ -133,12 +133,36 @@
      ============================================================ */
   var g3 = q("#g3");
   var deskMain = q("#desk-main");
-  var origin = "61% 45%";
-  (function () {
-    var r = g3.getBoundingClientRect(), d = deskMain.getBoundingClientRect();
-    origin = ((r.left + r.width / 2 - d.left) / d.width * 100).toFixed(1) + "% " +
-             ((r.top + r.height / 2 - d.top) / d.height * 100).toFixed(1) + "%";
-  })();
+
+  /* 第四幕「缩放它」的生长量基准（以宽 336px 的格子为基准，窄屏按比例缩小） */
+  var RESIZE_W = 84, RESIZE_H = 60, REF_W = 336;
+
+  /* 生长量随格子实际宽度缩放；函数式取值，ScrollTrigger 刷新（resize）时随布局重算 */
+  function deltas() {
+    var k = Math.min(1, g3.offsetWidth / REF_W);
+    return { rw: RESIZE_W * k, rh: RESIZE_H * k };
+  }
+
+  /* 「移动它」：把格子平移到桌面中心（预留缩放节拍一半的生长量）。
+     朝中心移动在任何窗口尺寸下都远离边界 —— 朝边缘移动会放大取景误差，中心永远安全 */
+  function moveTarget() {
+    var d = deltas();
+    return {
+      x: deskMain.clientWidth / 2 - d.rw / 2 - (g3.offsetLeft + g3.offsetWidth / 2),
+      y: deskMain.clientHeight / 2 - d.rh / 2 - (g3.offsetTop + g3.offsetHeight / 2)
+    };
+  }
+
+  /* 聚焦倍率：格子（含缩放生长量）加 15% 留白刚好放下。原点固定桌面中心，
+     格子移动到位后正好落在原点上 —— 可视窗口以它为中心，任何视口都完整可见 */
+  function miyScale() {
+    var d = deltas();
+    var s = Math.min(
+      deskMain.clientWidth / ((g3.offsetWidth + d.rw) * 1.15),
+      deskMain.clientHeight / ((g3.offsetHeight + d.rh) * 1.15)
+    );
+    return Math.max(1, Math.min(1.6, s));
+  }
 
   function toggleRename() {
     var t = q("#g3 .grid-title");
@@ -190,20 +214,33 @@
 
   /* —— 第四幕：Make It Yours —— */
   capIn(tl, "#cap-miy", 4.9);
-  tl.to("#desk-main", { scale: 1.85, transformOrigin: origin, duration: .7, ease: "power2.inOut" }, 5.15);
+  tl.to("#desk-main", {
+    scale: function () { return miyScale(); },
+    transformOrigin: "50% 50%",
+    duration: .7, ease: "power2.inOut"
+  }, 5.15);
   tl.to("#stage-main .grid:not(#g3)", { autoAlpha: .12, duration: .5 }, 5.15);
   capOut(tl, "#cap-miy", 5.75);
 
   capIn(tl, "#cap-move", 5.9);
-  tl.to("#g3", { x: 46, y: -26, duration: .5, ease: "power2.inOut" }, 5.95);
+  tl.to("#g3", {
+    x: function () { return moveTarget().x; },
+    y: function () { return moveTarget().y; },
+    duration: .55, ease: "power2.inOut"
+  }, 5.5);
   capOut(tl, "#cap-move", 6.55);
 
   capIn(tl, "#cap-resize", 6.65);
-  tl.to("#g3", { width: "+=84", height: "+=60", duration: .5, ease: "power2.inOut" }, 6.7);
+  tl.to("#g3", {
+    width: function () { return "+=" + Math.round(deltas().rw); },
+    height: function () { return "+=" + Math.round(deltas().rh); },
+    duration: .5, ease: "power2.inOut"
+  }, 6.7);
   capOut(tl, "#cap-resize", 7.3);
 
   capIn(tl, "#cap-collapse", 7.4);
-  tl.to("#g3 .grid-body", { height: 0, paddingTop: 0, paddingBottom: 0, duration: .45, ease: "power2.inOut" }, 7.45);
+  /* 收起来：整个格子收缩到只剩标题行，文件列表随 overflow 被裁掉 */
+  tl.to("#g3", { height: function () { return q("#g3 .grid-head").offsetHeight + 2; }, duration: .45, ease: "power2.inOut" }, 7.45);
   tl.to("#g3 .chev", { rotation: 180, duration: .4 }, 7.45);
   capOut(tl, "#cap-collapse", 8.0);
 

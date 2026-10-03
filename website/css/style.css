@@ -382,15 +382,15 @@ body.rm .cap, html:not(.js) .cap { transform: translateY(-50%); }
 .grid-tools .lock-ic { transition: color .25s ease; }
 
 .lock-chip {
-  position: absolute;
-  top: 40px;
-  right: 10px;
-  padding: 3px 10px;
+  flex: none;
+  padding: 2px 9px;
   border-radius: var(--r-chip);
   background: rgba(245, 165, 36, .14);
   border: 1px solid rgba(245, 165, 36, .45);
   color: var(--accent);
   font-size: 11px;
+  line-height: 1.5;
+  white-space: nowrap;
   opacity: 0;
   transform: translateY(-6px);
 }
@@ -1072,6 +1072,8 @@ body.rm .reveal, html:not(.js) .reveal { opacity: 1; }
   .grid-4 { left: 51%; top: 45%; }
   .frow { font-size: 11px; gap: 7px; padding: 4px 6px; }
   .grid-head { padding: 8px 10px; }
+  .grid-tools { gap: 8px; }
+  .lock-chip { padding: 2px 7px; }
 
   .panel { width: 250px; }
   .tpanel { width: 270px; }
