@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-'''传输页 UI：本机别名、附近设备列表、文件发送、传输记录与接收确认层。
+'''传输页 UI：本机别名、附近设备列表、文件发送、传输记录与接收确认弹窗。
 
 线程模型：TransferServer / Discovery / send_files 的回调全部发生在后台线程，
 本模块只经 pyqtSignal 把事件送回主线程再动 UI（PyQt5 槽里未捕获异常会让进程
@@ -7,6 +7,7 @@ abort，故所有槽函数 try/except 兜底）。on_receive_request 是 HTTP �
 阻塞调用：发信号给主线程弹确认层，结果经 threading.Event 回传，超时按拒绝。
 '''
 
+import math
 import os
 import subprocess
 import threading
@@ -59,43 +60,79 @@ def _fmt_eta(seconds):
     return '%d 小时 %d 分' % (seconds // 3600, seconds % 3600 // 60)
 
 
-_CHIP_CACHE = {}
+_FILE_ICON_CACHE = {}
 
 
-def _dir_chip(direction, theme):
-    '''记录行方向图标：accent 淡底圆角块 + 粗箭头（↑发 ↓收），按主题/DPI 缓存。'''
-    key = (direction, theme, ui.ui_scale())
-    pm = _CHIP_CACHE.get(key)
+def _file_icon(theme, size=22):
+    '''记录行/接收清单的文件图标：淡底圆角块 + 图片象形（相框+太阳+山），按主题/DPI 缓存。'''
+    key = (theme, size, ui.ui_scale())
+    pm = _FILE_ICON_CACHE.get(key)
     if pm is not None:
         return pm
-    s = ui.sc(22)
+    s = ui.sc(size)
     pm = QPixmap(s, s)
     pm.fill(Qt.transparent)
-    accents = {'nocturne': ('#e8a33d', '#7fb069'),
-               'mica': ('#0067c0', '#107c10')}
-    color = QColor(accents.get(theme, accents['nocturne'])[0 if direction == 'up' else 1])
+    color = QColor({'nocturne': '#7c93b8', 'mica': '#0067c0'}.get(theme, '#7c93b8'))
     p = QPainter(pm)
     p.setRenderHint(QPainter.Antialiasing)
     tint = QColor(color)
-    tint.setAlpha(38)
+    tint.setAlpha(36)
     p.setPen(Qt.NoPen)
     p.setBrush(tint)
     r = ui.sc(6)
     p.drawRoundedRect(0, 0, s, s, r, r)
-    pen = QPen(color, max(2.0, ui.sc(2)), Qt.SolidLine, Qt.RoundCap)
-    p.setPen(pen)
-    cx = s / 2.0
-    if direction == 'up':
-        y0, y1 = s * 0.74, s * 0.26   # 杆：下 -> 上
-    else:
-        y0, y1 = s * 0.26, s * 0.74   # 杆：上 -> 下
-    p.drawLine(QPointF(cx, y0), QPointF(cx, y1))
-    w = s * 0.20                     # 箭头两翼
-    off = w if direction == 'up' else -w
-    p.drawLine(QPointF(cx, y1), QPointF(cx - w, y1 + off))
-    p.drawLine(QPointF(cx, y1), QPointF(cx + w, y1 + off))
+    w = max(1.5, ui.sc(1.4))
+    p.setPen(QPen(color, w, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    p.setBrush(Qt.NoBrush)
+    x0, y0 = s * 0.22, s * 0.28          # 相框左上角
+    fw = s * 0.56
+    fh = s * 0.48
+    p.drawRoundedRect(QRectF(x0, y0, fw, fh), ui.sc(2), ui.sc(2))
+    p.drawEllipse(QPointF(x0 + fw * 0.33, y0 + fh * 0.36), fw * 0.11, fw * 0.11)   # 太阳
+    p.drawLine(QPointF(x0 + fw * 0.08, y0 + fh * 0.94), QPointF(x0 + fw * 0.40, y0 + fh * 0.52))
+    p.drawLine(QPointF(x0 + fw * 0.40, y0 + fh * 0.52), QPointF(x0 + fw * 0.60, y0 + fh * 0.78))
+    p.drawLine(QPointF(x0 + fw * 0.60, y0 + fh * 0.78), QPointF(x0 + fw * 0.94, y0 + fh * 0.42))
     p.end()
-    _CHIP_CACHE[key] = pm
+    _FILE_ICON_CACHE[key] = pm
+    return pm
+
+
+_REFRESH_ICON_CACHE = {}
+
+
+def _refresh_icon(theme, disabled=False):
+    '''「刷新」圆箭头图标：accent 色（禁用时灰色）QPainter 矢量绘制，按主题/DPI 缓存。'''
+    key = (theme, disabled, ui.ui_scale())
+    pm = _REFRESH_ICON_CACHE.get(key)
+    if pm is not None:
+        return pm
+    s = ui.sc(16)
+    pm = QPixmap(s, s)
+    pm.fill(Qt.transparent)
+    accents = {'nocturne': ('#e8a33d', '#55534d'),
+               'mica': ('#0067c0', '#b4b4ba')}
+    color = QColor(accents.get(theme, accents['nocturne'])[1 if disabled else 0])
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    w = max(1.8, ui.sc(2.0))
+    p.setPen(QPen(color, w, Qt.SolidLine, Qt.RoundCap))
+    p.setBrush(Qt.NoBrush)
+    pad = w + 1
+    # 缺口朝右、顺时针扫 300°；终点在右上，切向即箭头指向
+    p.drawArc(QRectF(pad, pad, s - 2 * pad, s - 2 * pad), 30 * 16, 300 * 16)
+    cx = cy = s / 2.0
+    rad = (s - 2 * pad) / 2.0
+    a = math.radians(330)
+    ex, ey = cx + rad * math.cos(a), cy + rad * math.sin(a)
+    tx, ty = -math.sin(a), math.cos(a)
+    hl = s * 0.42                          # 箭头两翼长
+    for deg in (150, -150):
+        ph = math.radians(deg)
+        ux = tx * math.cos(ph) - ty * math.sin(ph)
+        uy = tx * math.sin(ph) + ty * math.cos(ph)
+        p.drawLine(QPointF(ex, ey), QPointF(ex + hl * ux, ey + hl * uy))
+    p.end()
+    _REFRESH_ICON_CACHE[key] = pm
     return pm
 
 
@@ -175,6 +212,22 @@ def _default_save_dir(cfg):
     if isinstance(d, str) and d:
         return d
     return os.path.join(os.path.expanduser('~'), 'Downloads', 'Zviber')
+
+
+class _RecvDialog(QDialog):
+    '''接收确认小弹窗：无边框置顶 Tool；Esc / Alt+F4 等同点「拒绝」
+    （路由回 TransferWidget._recv_reject，保证阻塞中的 HTTP 线程被正常唤醒）。'''
+
+    def __init__(self, parent, on_reject):
+        super(_RecvDialog, self).__init__(
+            parent, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self._on_reject = on_reject
+
+    def reject(self):
+        try:
+            self._on_reject()
+        except Exception:
+            self.hide()
 
 
 class _ClickRow(QFrame):
@@ -357,7 +410,10 @@ class TransferWidget(QWidget):
         t.setObjectName('transferTitle')
         self.refresh_btn = QToolButton()
         self.refresh_btn.setObjectName('refreshBtn')
-        self.refresh_btn.setText('刷新')
+        self.refresh_btn.setIcon(QIcon(_refresh_icon(self.theme_key)))
+        self.refresh_btn.setIconSize(QSize(ui.sc(16), ui.sc(16)))
+        self.refresh_btn.setFixedSize(ui.sc(26), ui.sc(26))
+        self.refresh_btn.setToolTip('刷新')
         self.refresh_btn.clicked.connect(self._refresh_clicked)
         dev_head.addWidget(t)
         dev_head.addStretch(1)
@@ -379,23 +435,22 @@ class TransferWidget(QWidget):
         self.dev_scroll.setWidget(self.dev_box)
         pl.addWidget(self.dev_scroll)
 
-        # ---- 发送区 ----
+        # ---- 发送区：整段虚线拖放区（可点击选文件）+ 等高发送按钮 ----
         send_row = QHBoxLayout()
         send_row.setContentsMargins(ui.sc(10), 0, ui.sc(10), 0)
         send_row.setSpacing(ui.sc(8))
         self.pick_btn = QToolButton()
         self.pick_btn.setObjectName('pickBtn')
-        self.pick_btn.setText('选择文件发送')
+        self.pick_btn.setText('选择文件发送（可拖）')
+        self.pick_btn.setFixedHeight(ui.sc(40))
+        self.pick_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.pick_btn.clicked.connect(self._pick_files)
-        self.file_lab = QLabel('未选文件（可拖入）')
-        self.file_lab.setObjectName('transferHint')
-        self.file_lab.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.send_btn = QPushButton('发送')
         self.send_btn.setObjectName('sendBtn')
+        self.send_btn.setFixedHeight(ui.sc(40))
         self.send_btn.setEnabled(False)
         self.send_btn.clicked.connect(self._send_clicked)
-        send_row.addWidget(self.pick_btn)
-        send_row.addWidget(self.file_lab, 1)
+        send_row.addWidget(self.pick_btn, 1)
         send_row.addWidget(self.send_btn)
         pl.addLayout(send_row)
 
@@ -427,44 +482,34 @@ class TransferWidget(QWidget):
         self.rec_empty.setAlignment(Qt.AlignCenter)
         self.rec_lay.insertWidget(0, self.rec_empty)
 
-        # ---- 接收确认层：盖住整个传输页的面板内遮罩 ----
-        self.recv = QFrame(self)
+        # ---- 接收确认窗：独立小弹窗（宽度固定、高度按内容自适应）----
+        self.recv = _RecvDialog(self, self._recv_reject)
         self.recv.setObjectName('recvDialog')
+        self.recv.setFixedWidth(ui.sc(320))
         rl = QVBoxLayout(self.recv)
         rl.setContentsMargins(ui.sc(18), ui.sc(16), ui.sc(18), ui.sc(14))
         rl.setSpacing(ui.sc(10))
         title = QLabel('收到文件')
         title.setObjectName('transferTitle')
-        # 发送方卡片：别名（强调色）+ 文件数与总大小（弱化）
-        from_card = QFrame()
-        from_card.setObjectName('recvFromCard')
-        fc = QVBoxLayout(from_card)
-        fc.setContentsMargins(ui.sc(12), ui.sc(8), ui.sc(12), ui.sc(8))
-        fc.setSpacing(ui.sc(2))
+        # 来源行：来自 Pixel 6 · 1 个文件 · 共 2.4 MB
         self.recv_from = QLabel()
-        self.recv_from.setObjectName('recvFrom')
-        self.recv_meta = QLabel()
-        self.recv_meta.setObjectName('recvMeta')
-        fc.addWidget(self.recv_from)
-        fc.addWidget(self.recv_meta)
-        # 文件清单卡片：吸满中部空间，替代空荡的留白
+        self.recv_from.setObjectName('recvFromLine')
+        # 文件清单卡片（虚线框）：每行 图标 + 文件名，吸满中部空间
         file_card = QFrame()
         file_card.setObjectName('recvFileCard')
-        fl = QVBoxLayout(file_card)
-        fl.setContentsMargins(ui.sc(12), ui.sc(9), ui.sc(12), ui.sc(9))
-        self.recv_files = QLabel()
-        self.recv_files.setObjectName('recvFiles')
-        self.recv_files.setWordWrap(True)
-        self.recv_files.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        fl.addWidget(self.recv_files)
+        self.recv_files_lay = QVBoxLayout(file_card)
+        self.recv_files_lay.setContentsMargins(ui.sc(12), ui.sc(9), ui.sc(12), ui.sc(9))
+        self.recv_files_lay.setSpacing(ui.sc(6))
+        self._recv_icons = []                # 行图标：主题切换时要重绘
         dir_row = QHBoxLayout()
         dir_row.setSpacing(ui.sc(6))
         self.recv_dir = QLabel()
         self.recv_dir.setObjectName('recvDir')
         self.recv_dir.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         chg = QToolButton()
-        chg.setObjectName('refreshBtn')     # 复用次级按钮样式
+        chg.setObjectName('linkBtn')        # 无边框链接样式
         chg.setText('更改…')
+        chg.setCursor(Qt.PointingHandCursor)
         chg.clicked.connect(self._recv_change_dir)
         dir_row.addWidget(self.recv_dir, 1)
         dir_row.addWidget(chg)
@@ -480,8 +525,8 @@ class TransferWidget(QWidget):
         btn_row.addWidget(no)
         btn_row.addWidget(yes)
         rl.addWidget(title)
-        rl.addWidget(from_card)
-        rl.addWidget(file_card, 1)
+        rl.addWidget(self.recv_from)
+        rl.addWidget(file_card)
         rl.addLayout(dir_row)
         rl.addLayout(btn_row)
         self.recv.hide()
@@ -515,13 +560,18 @@ class TransferWidget(QWidget):
     # ---------------- 通用 ----------------
 
     def set_theme(self, key):
-        '''主题切换：颜色全走 QSS；方向图标是绘制的位图，这里按主题重刷。'''
+        '''主题切换：颜色全走 QSS；绘制的位图图标（记录/清单/刷新/别名）这里按主题重刷。'''
         self.theme_key = key
         try:
             for rec in getattr(self, '_records', {}).values():
-                lab = rec.get('dir_lab')
+                lab = rec.get('icon_lab')
                 if lab is not None:
-                    lab.setPixmap(_dir_chip(rec['direction'], key))
+                    lab.setPixmap(_file_icon(key))
+            for ic in getattr(self, '_recv_icons', []):
+                ic.setPixmap(_file_icon(key, 20))
+            if getattr(self, 'refresh_btn', None) is not None:
+                self.refresh_btn.setIcon(
+                    QIcon(_refresh_icon(key, not self.refresh_btn.isEnabled())))
             if getattr(self, 'alias_ok_btn', None) is not None:
                 kind = 'spin' if self._alias_busy else 'check'
                 self.alias_ok_btn.setIcon(QIcon(_alias_icon(kind, key, self._alias_angle)))
@@ -684,8 +734,6 @@ class TransferWidget(QWidget):
     def resizeEvent(self, e):
         super(TransferWidget, self).resizeEvent(e)
         try:
-            if hasattr(self, 'recv'):
-                self.recv.setGeometry(self.rect())
             if hasattr(self, 'gate'):
                 self.gate.setGeometry(self.rect())
         except Exception:
@@ -867,11 +915,12 @@ class TransferWidget(QWidget):
                 name = QLabel(info.alias or ip)
                 name.setObjectName('deviceAlias')
                 name.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-                addr = QLabel(ip)
-                addr.setObjectName('deviceIp')
+                online = QLabel('在线')
+                online.setObjectName('deviceOnline')
+                row.setToolTip(ip)
                 lay.addWidget(chip)
                 lay.addWidget(name, 1)
-                lay.addWidget(addr)
+                lay.addWidget(online)
                 row.clicked.connect(lambda fp=fp: self._select_device(fp))
                 self.dev_lay.insertWidget(self.dev_lay.count() - 1, row)
         self._sync_send_enabled()
@@ -891,6 +940,7 @@ class TransferWidget(QWidget):
                 return
             self._scanning = True
             self.refresh_btn.setEnabled(False)
+            self.refresh_btn.setIcon(QIcon(_refresh_icon(self.theme_key, True)))
             self._devices = {}
             self.discovery.clear_devices()
             self._selected_fp = None
@@ -925,6 +975,7 @@ class TransferWidget(QWidget):
         try:
             self._scanning = False
             self.refresh_btn.setEnabled(True)
+            self.refresh_btn.setIcon(QIcon(_refresh_icon(self.theme_key)))
             self._refresh_devices()
         except Exception:
             pass
@@ -950,11 +1001,11 @@ class TransferWidget(QWidget):
                         total += os.path.getsize(p)
                     except OSError:
                         pass
-                self.file_lab.setText('已选 %d 个文件（%s）' % (len(self._files), _fmt_size(total)))
-                self.file_lab.setToolTip('\n'.join(self._files))
+                self.pick_btn.setText('已选 %d 个文件（%s）' % (len(self._files), _fmt_size(total)))
+                self.pick_btn.setToolTip('\n'.join(self._files))
             else:
-                self.file_lab.setText('未选文件（可拖入）')
-                self.file_lab.setToolTip('')
+                self.pick_btn.setText('选择文件发送（可拖）')
+                self.pick_btn.setToolTip('')
             self._sync_send_enabled()
         except Exception:
             pass
@@ -983,7 +1034,7 @@ class TransferWidget(QWidget):
                     total += os.path.getsize(p)
                 except OSError:
                     pass
-            key = self._add_record('up', names, total)
+            key = self._add_record('up', names, total, info.alias or ip)
             cancel_event = self._records[key]['cancel_event']
             self._set_files([])
             threading.Thread(target=self._send_worker,
@@ -1131,32 +1182,34 @@ class TransferWidget(QWidget):
             if self._pending is not None:
                 event.set()   # result['dir'] 仍为 None → 协议端按拒绝
                 return
-            key = self._add_record('down', view['names'], view['total'])
+            key = self._add_record('down', view['names'], view['total'], view['alias'])
             rec = self._records.get(key)
             if rec is not None:
                 rec['session_id'] = view['session_id']
             self._pending = (view['session_id'], key, result, event)
             self._save_dir = _default_save_dir(self.cfg)
-            self.recv_from.setText(view['alias'])
-            self.recv_meta.setText('%d 个文件 · 共 %s' % (len(view['names']),
-                                                        _fmt_size(view['total'])))
-            shown = view['names'][:8]
-            text = '\n'.join(shown)
-            if len(view['names']) > len(shown):
-                text += '\n…等共 %d 个文件' % len(view['names'])
-            self.recv_files.setText(text)
-            self.recv_dir.setText('保存到：%s' % self._save_dir)
+            self.recv_from.setText('来自 %s · %d 个文件 · 共 %s'
+                                   % (view['alias'], len(view['names']),
+                                      _fmt_size(view['total'])))
+            self._fill_recv_files(view['names'])
+            self.recv_dir.setText(self._recv_dir_text(self._save_dir))
             self.recv_dir.setToolTip(self._save_dir)
-            rect = self.rect()
-            self.recv.setGeometry(QRect(0, rect.height() // 3, rect.width(), rect.height()))
+            # 按内容定高、居中于面板，向上滑入 180ms
+            self.recv.adjustSize()
+            g = self.window().frameGeometry()
+            w, h = self.recv.width(), self.recv.height()
+            x = g.x() + (g.width() - w) // 2
+            y = g.y() + (g.height() - h) // 2
+            self.recv.setGeometry(x, y + ui.sc(24), w, h)
             self.recv.show()
             self.recv.raise_()
-            # 上滑入场：从下三分之一处滑到铺满，180ms 缓出
+            self.recv.activateWindow()
+            ui.round_corners(self.recv)   # winId 已创建：Win11 DWM 圆角 / Win7/10 遮罩
             anim = QPropertyAnimation(self.recv, b'geometry', self)
             anim.setDuration(180)
             anim.setEasingCurve(QEasingCurve.OutCubic)
-            anim.setStartValue(QRect(0, rect.height() // 3, rect.width(), rect.height()))
-            anim.setEndValue(QRect(rect))
+            anim.setStartValue(QRect(x, y + ui.sc(24), w, h))
+            anim.setEndValue(QRect(x, y, w, h))
             anim.start(QPropertyAnimation.DeleteWhenStopped)
             self.notify.emit('收到文件', '%s 想发送 %d 个文件' % (view['alias'], len(view['names'])))
         except Exception:
@@ -1167,6 +1220,42 @@ class TransferWidget(QWidget):
             except Exception:
                 pass
             event.set()
+
+    def _recv_dir_text(self, d):
+        '''「保存到：<路径>」按弹窗可用宽度中段省略（尾部目录名始终可见，全路径在 tooltip）。'''
+        avail = ui.sc(320) - ui.sc(36) - ui.sc(56)   # 弹宽 - 左右边距 - 「更改…」按钮
+        return self.recv_dir.fontMetrics().elidedText('保存到：%s' % d, Qt.ElideMiddle, avail)
+
+    def _fill_recv_files(self, names):
+        '''重建接收确认层的文件清单行（图标 + 文件名，最多 8 行）。'''
+        while self.recv_files_lay.count():
+            item = self.recv_files_lay.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        self._recv_icons = []
+        shown = names[:8]
+        for nm in shown:
+            row = QWidget()
+            row.setObjectName('recvFileRow')
+            hl = QHBoxLayout(row)
+            hl.setContentsMargins(0, 0, 0, 0)
+            hl.setSpacing(ui.sc(8))
+            ic = QLabel()
+            ic.setObjectName('transferIcon')
+            ic.setFixedSize(ui.sc(20), ui.sc(20))
+            ic.setPixmap(_file_icon(self.theme_key, 20))
+            self._recv_icons.append(ic)
+            lb = QLabel(nm)
+            lb.setObjectName('recvFileName')
+            lb.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+            hl.addWidget(ic)
+            hl.addWidget(lb, 1)
+            self.recv_files_lay.addWidget(row)
+        if len(names) > len(shown):
+            more = QLabel('…等共 %d 个文件' % len(names))
+            more.setObjectName('recvFileMore')
+            self.recv_files_lay.addWidget(more)
 
     def _close_recv(self):
         '''关掉确认层并唤醒 HTTP 线程（无论接受/拒绝/超时都只走这里）。'''
@@ -1225,11 +1314,11 @@ class TransferWidget(QWidget):
 
     def _recv_change_dir(self):
         try:
-            d = QFileDialog.getExistingDirectory(self, '选择保存目录', self._save_dir)
+            d = QFileDialog.getExistingDirectory(self.recv, '选择保存目录', self._save_dir)
             if d:
                 self._save_dir = d
                 self.cfg.set('transfer_dir', d)
-                self.recv_dir.setText('保存到：%s' % d)
+                self.recv_dir.setText(self._recv_dir_text(d))
                 self.recv_dir.setToolTip(d)
         except Exception:
             pass
@@ -1301,10 +1390,13 @@ class TransferWidget(QWidget):
 
     # ---------------- 传输记录 ----------------
 
-    def _add_record(self, direction, names, total):
-        '''新建一条记录并插到记录区顶部，返回 key。direction: 'up' 发 / 'down' 收。'''
+    def _add_record(self, direction, names, total, peer=''):
+        '''新建一条记录并插到记录区顶部，返回 key。direction: 'up' 发 / 'down' 收。
+        peer 为对端别名：记录文字形如「Vacation.jpg · 发送至 Pixel 6」。'''
         key = uuid.uuid4().hex
         display = names[0] if len(names) == 1 else '%d 个文件' % len(names)
+        if peer:
+            display += (' · 发送至 ' if direction == 'up' else ' · 来自 ') + peer
         row = _ClickRow()
         row.setObjectName('transferRow')
         # 接收完成的记录才有交互（单击打开 / 右键菜单，见 _record_clicked/_record_menu）
@@ -1317,17 +1409,17 @@ class TransferWidget(QWidget):
         lay.setSpacing(ui.sc(3))
         top = QHBoxLayout()
         top.setSpacing(ui.sc(6))
-        arrow = QLabel()
-        arrow.setObjectName('transferDir')
-        arrow.setFixedSize(ui.sc(22), ui.sc(22))
-        arrow.setPixmap(_dir_chip(direction, getattr(self, 'theme_key', 'nocturne')))
+        icon = QLabel()
+        icon.setObjectName('transferIcon')
+        icon.setFixedSize(ui.sc(22), ui.sc(22))
+        icon.setPixmap(_file_icon(getattr(self, 'theme_key', 'nocturne')))
         name = QLabel(display)
         name.setObjectName('transferName')
         name.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         name.setToolTip('\n'.join(names))
         state = QLabel()
         state.setObjectName('transferState')
-        top.addWidget(arrow)
+        top.addWidget(icon)
         top.addWidget(name, 1)
         top.addWidget(state)
         cancel_btn = None
@@ -1367,7 +1459,7 @@ class TransferWidget(QWidget):
         rec = {'key': key, 'direction': direction, 'name': display, 'total': total,
                'done': 0, 'files': {}, 'saved': [], 'state': 'wait', 'err': '',
                'session_id': None, 'row': row, 'bar': bar, 'state_lab': state,
-               'dir_lab': arrow,
+               'icon_lab': icon,
                'cancel_btn': cancel_btn, 'cancel_event': cancel_event}
         self._records[key] = rec
         self._rec_keys.insert(0, key)
@@ -1486,6 +1578,7 @@ class TransferWidget(QWidget):
             rec['state_lab'].setProperty('state', state)
             rec['state_lab'].style().unpolish(rec['state_lab'])
             rec['state_lab'].style().polish(rec['state_lab'])
+        rec['bar'].setVisible(state in ('busy', 'cancelling'))
         target = 1000 if state == 'done' else (int(rec['done'] * 1000 / total) if total else 0)
         self._animate_bar(rec, target)
         btn = rec.get('cancel_btn')
