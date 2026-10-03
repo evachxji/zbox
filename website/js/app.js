@@ -6,8 +6,8 @@
   "use strict";
 
   /* ---------- 下载地址（单一配置点，可修改） ---------- */
-  var WINDOWS_DOWNLOAD_URL = "https://github.com/evachxji/zbox/releases/download/v0.3/zbox-Setup-v0.3-x64.exe";
-  var MOBILE_DOWNLOAD_URL = "https://github.com/evachxji/zbox/releases/download/v0.3/zbox-v0.3.apk";
+  var WINDOWS_DOWNLOAD_URL = "https://github.com/evachxji/zbox/releases/download/v0.3/zviber-Setup-v0.3-x64.exe";
+  var MOBILE_DOWNLOAD_URL = "https://github.com/evachxji/zbox/releases/download/v0.3/zviber-v0.3.apk";
   var GITHUB_URL = "https://github.com/evachxji/zbox";
 
   function wireLinks(key, url) {
