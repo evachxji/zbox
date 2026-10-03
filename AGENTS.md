@@ -104,6 +104,8 @@ Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyQ
 - `run.cmd` — 双击启动面板；已在运行则切换显隐
 - `stop.cmd` — 双击停止面板：先 `--quit` 经 IPC 礼貌退出（正常清理菜单注入），残留进程强制结束
 - `designs/` — 两套主题的设计稿（HTML，浏览器可直接打开）
+- `website/` — 产品介绍页（纯静态无构建），线上 https://zbox.wzyjc.cn（腾讯云 COS 静态托管）；
+  `deploy-cos.py` 一键上传部署 / `--bind-cert <ID>` 绑定续期证书，细节见 `.claude/skills/site-deploy/`
 - `android/` — Android 端独立 Gradle 工程（Kotlin + Compose，与 PC 代码完全分离）
 
 运行时数据在 `%APPDATA%\zbox\`（`config.json` / `todos.json` / `holidays.json` / `icons/`）——不要提交。
