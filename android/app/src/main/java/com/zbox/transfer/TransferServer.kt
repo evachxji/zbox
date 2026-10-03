@@ -1,4 +1,4 @@
-﻿package com.zviber.transfer
+﻿package com.zbox.transfer
 
 import fi.iki.elonen.NanoHTTPD
 import fi.iki.elonen.NanoHTTPD.Response.Status

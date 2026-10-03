@@ -1,4 +1,4 @@
-﻿package com.zviber.transfer
+﻿package com.zbox.transfer
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf

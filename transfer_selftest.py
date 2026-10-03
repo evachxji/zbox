@@ -133,7 +133,7 @@ def case_info(ctx):
 
 def case_transfer(ctx):
     # 用例 3：A->B 传 3 个文件（0 字节 / 10MB 随机 / 中文文件名），校验落盘 sha256
-    root = tempfile.mkdtemp(prefix='zviber_case3_')
+    root = tempfile.mkdtemp(prefix='zbox_case3_')
     try:
         src = os.path.join(root, 'src')
         recv = os.path.join(root, 'recv')
@@ -173,7 +173,7 @@ def case_transfer(ctx):
 
 def case_reject(ctx):
     # 用例 4：on_receive_request 返回 None 时客户端收到 rejected
-    root = tempfile.mkdtemp(prefix='zviber_case4_')
+    root = tempfile.mkdtemp(prefix='zbox_case4_')
     try:
         p = os.path.join(root, 'x.bin')
         with open(p, 'wb') as f:
@@ -189,7 +189,7 @@ def case_reject(ctx):
 
 def case_bad_token(ctx):
     # 用例 5：错误 token 的 upload 回 403
-    root = tempfile.mkdtemp(prefix='zviber_case5_')
+    root = tempfile.mkdtemp(prefix='zbox_case5_')
     try:
         recv = os.path.join(root, 'recv')
         os.makedirs(recv)
@@ -217,7 +217,7 @@ def case_bad_token(ctx):
 
 def case_cancel(ctx):
     # 用例 6：cancel 只删正在传输的半成品，已完整落盘的文件保留
-    root = tempfile.mkdtemp(prefix='zviber_case6_')
+    root = tempfile.mkdtemp(prefix='zbox_case6_')
     sock = None
     try:
         recv = os.path.join(root, 'recv')
@@ -281,7 +281,7 @@ def case_cancel(ctx):
 
 def case_conflict_rename(ctx):
     # 用例 7：同名文件二次接收自动加 " (2)" 后缀，不覆盖旧文件
-    root = tempfile.mkdtemp(prefix='zviber_case7_')
+    root = tempfile.mkdtemp(prefix='zbox_case7_')
     try:
         src = os.path.join(root, 'src')
         recv = os.path.join(root, 'recv')
@@ -314,7 +314,7 @@ def case_conflict_rename(ctx):
 
 def case_path_sanitize(ctx):
     # 用例 8：fileName 目录穿越净化为纯文件名，落盘不越出保存目录
-    root = tempfile.mkdtemp(prefix='zviber_case8_')
+    root = tempfile.mkdtemp(prefix='zbox_case8_')
     try:
         recv = os.path.join(root, 'recv')
         os.makedirs(recv)
@@ -369,7 +369,7 @@ def case_bad_port(ctx):
 
 def case_size_mismatch(ctx):
     # 用例 10：upload 的 Content-Length 与 prepare 声明的 size 不符 → 400
-    root = tempfile.mkdtemp(prefix='zviber_case10_')
+    root = tempfile.mkdtemp(prefix='zbox_case10_')
     try:
         recv = os.path.join(root, 'recv')
         os.makedirs(recv)
@@ -397,7 +397,7 @@ def case_size_mismatch(ctx):
 def case_ip_mismatch(ctx):
     # 用例 11：来源 IP 与 prepare 不一致的 upload → 403
     # 本机只有一个回环地址，直接篡改服务端登记的来源 IP 模拟异机抢传
-    root = tempfile.mkdtemp(prefix='zviber_case11_')
+    root = tempfile.mkdtemp(prefix='zbox_case11_')
     try:
         recv = os.path.join(root, 'recv')
         os.makedirs(recv)
@@ -443,7 +443,7 @@ def case_bad_size_meta(ctx):
             check(exc.code == 400,
                   '坏 size 应回 400，实际 %d（%r）' % (exc.code, files))
     # 合法 prepare 仍可用（校验没有误伤）
-    root = tempfile.mkdtemp(prefix='zviber_case12_')
+    root = tempfile.mkdtemp(prefix='zbox_case12_')
     try:
         ctx.box_b['dir'] = root
         meta = {'f1': {'id': 'f1', 'fileName': 'ok.bin', 'size': 0,
@@ -461,7 +461,7 @@ def case_bad_size_meta(ctx):
 def case_send_cancel(ctx):
     # 用例 13：发送方 cancel_event 中断 64MB 上传 → on_done(False, 'cancelled')、
     # 接收端半成品删除、on_cancelled 触发（发给 A，用其 on_cancelled 钩子）
-    root = tempfile.mkdtemp(prefix='zviber_case13_')
+    root = tempfile.mkdtemp(prefix='zbox_case13_')
     try:
         src_dir = os.path.join(root, 'src')
         recv = os.path.join(root, 'recv')

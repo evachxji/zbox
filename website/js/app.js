@@ -1,14 +1,14 @@
 /* ============================================================
-   Zviber 官网 — 滚动叙事
+   Zbox 官网 — 滚动叙事
    GSAP + ScrollTrigger scrub 驱动：下滚前进 / 上滚倒放 / 停则停
    ============================================================ */
 (function () {
   "use strict";
 
   /* ---------- 下载地址（单一配置点，可修改） ---------- */
-  var WINDOWS_DOWNLOAD_URL = "https://github.com/evachxji/zviber/releases/download/v0.3/zviber-Setup-v0.3-x64.exe";
-  var MOBILE_DOWNLOAD_URL = "https://github.com/evachxji/zviber/releases/download/v0.3/zviber-v0.3.apk";
-  var GITHUB_URL = "https://github.com/evachxji/zviber";
+  var WINDOWS_DOWNLOAD_URL = "https://github.com/evachxji/zbox/releases/download/v0.3/zbox-Setup-v0.3-x64.exe";
+  var MOBILE_DOWNLOAD_URL = "https://github.com/evachxji/zbox/releases/download/v0.3/zbox-v0.3.apk";
+  var GITHUB_URL = "https://github.com/evachxji/zbox";
 
   function wireLinks(key, url) {
     var nodes = document.querySelectorAll('[data-dl="' + key + '"]');

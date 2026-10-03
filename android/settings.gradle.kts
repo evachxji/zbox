@@ -16,5 +16,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "zviber-transfer"
+rootProject.name = "zbox-transfer"
 include(":app")

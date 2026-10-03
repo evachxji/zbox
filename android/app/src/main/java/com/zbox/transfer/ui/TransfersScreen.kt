@@ -1,4 +1,4 @@
-﻿package com.zviber.transfer.ui
+﻿package com.zbox.transfer.ui
 
 import android.content.Context
 import android.content.Intent
@@ -46,10 +46,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.zviber.transfer.Sender
-import com.zviber.transfer.TransferRecord
-import com.zviber.transfer.TransferStatus
-import com.zviber.transfer.TransferStore
+import com.zbox.transfer.Sender
+import com.zbox.transfer.TransferRecord
+import com.zbox.transfer.TransferStatus
+import com.zbox.transfer.TransferStore
 
 /** 记录区（嵌入主页底部）：方向、文件名、进度条、状态；占满剩余空间内部滚动 */
 @OptIn(ExperimentalFoundationApi::class)
@@ -210,8 +210,8 @@ private fun openRecordLocation(context: Context, record: TransferRecord) {
             val tree = Uri.parse(record.savedTreeUri)
             DocumentsContract.buildDocumentUri(tree.authority, DocumentsContract.getTreeDocumentId(tree))
         }
-        // 接收且走默认：系统 Download/Zviber
-        !record.outgoing -> DocumentsContract.buildDocumentUri(ext, "primary:Download/Zviber")
+        // 接收且走默认：系统 Download/Zbox
+        !record.outgoing -> DocumentsContract.buildDocumentUri(ext, "primary:Download/Zbox")
         // 发送：从源文件 uri 推导父目录（仅 externalstorage 文档可推导）
         else -> deriveParentDocUri(Uri.parse(record.fileUri ?: return))
     }

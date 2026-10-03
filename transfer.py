@@ -151,7 +151,7 @@ class _ApiHandler(BaseHTTPRequestHandler):
     '''TransferServer 的请求分发器，只认 API_PREFIX 下的五个路由。'''
 
     protocol_version = 'HTTP/1.1'
-    server_version = 'ZviberTransfer/1.0'
+    server_version = 'ZboxTransfer/1.0'
 
     def setup(self):
         BaseHTTPRequestHandler.setup(self)

@@ -1,4 +1,4 @@
-﻿package com.zviber.transfer.ui
+﻿package com.zbox.transfer.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -53,13 +53,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.zviber.transfer.DeviceStore
-import com.zviber.transfer.Discovery
-import com.zviber.transfer.PeerDevice
-import com.zviber.transfer.Sender
-import com.zviber.transfer.Settings
-import com.zviber.transfer.ShareInbox
-import com.zviber.transfer.TransferStore
+import com.zbox.transfer.DeviceStore
+import com.zbox.transfer.Discovery
+import com.zbox.transfer.PeerDevice
+import com.zbox.transfer.Sender
+import com.zbox.transfer.Settings
+import com.zbox.transfer.ShareInbox
+import com.zbox.transfer.TransferStore
 import kotlinx.coroutines.delay
 
 /** 主页（单页）：本机别名卡片 + 附近设备（最多 2.5 行、超出内部滚动）+ 底部传输记录 */

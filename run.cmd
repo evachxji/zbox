@@ -1,14 +1,14 @@
 @echo off
 chcp 936 >nul
 setlocal
-rem 调试日志：源码运行常开，写 %%TEMP%%\zviber_debug.log（app.py 的 _dbg 自带 2MB 轮转）。
+rem 调试日志：源码运行常开，写 %%TEMP%%\zbox_debug.log（app.py 的 _dbg 自带 2MB 轮转）。
 rem 生产 exe 由 build.py 打包，不经过本脚本，不受此开关影响。
-set ZVIBER_DEBUG=1
+set ZBOX_DEBUG=1
 cd /d "%~dp0"
-title Zviber 桌面日历面板
+title Zbox 桌面日历面板
 
 echo.
-echo   Zviber 桌面日历面板
+echo   Zbox 桌面日历面板
 echo   ---------------------------------------------
 echo.
 

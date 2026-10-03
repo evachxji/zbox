@@ -1,5 +1,5 @@
 /* ============================================================
-   Zviber 官网 — 样式系统
+   Zbox 官网 — 样式系统
    深空蓝黑画布 × 品牌橙 × 玻璃格子 × Apple 式克制叙事
    ============================================================ */
 
@@ -193,7 +193,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   font-weight: 750;
 }
 
-/* 版本号挂在标题右侧框外，不影响 Zviber 居中 */
+/* 版本号挂在标题右侧框外，不影响 Zbox 居中 */
 .hero-core h1 .hero-chip {
   position: absolute;
   left: 100%;
@@ -330,7 +330,7 @@ body.rm .cap.cap-final,
 html:not(.js) .cap.cap-final { opacity: 1; visibility: visible; }
 body.rm .cap, html:not(.js) .cap { transform: translateY(-50%); }
 
-/* ---------- Zviber 格子（DOM 重建） ---------- */
+/* ---------- Zbox 格子（DOM 重建） ---------- */
 .grid {
   position: absolute;
   width: 21%;

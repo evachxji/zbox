@@ -1,4 +1,4 @@
-﻿package com.zviber.transfer
+﻿package com.zbox.transfer
 
 import android.content.Context
 import android.net.wifi.WifiManager
@@ -58,7 +58,7 @@ class Discovery(private val context: Context, private val scope: CoroutineScope)
         running = true
         // Android 接收组播必须持 MulticastLock
         val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-        multicastLock = wifi.createMulticastLock("zviber-transfer").apply {
+        multicastLock = wifi.createMulticastLock("zbox-transfer").apply {
             setReferenceCounted(true)
             acquire()
         }

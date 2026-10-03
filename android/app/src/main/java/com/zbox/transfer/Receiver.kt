@@ -1,4 +1,4 @@
-﻿package com.zviber.transfer
+﻿package com.zbox.transfer
 
 import android.content.ContentValues
 import android.content.Context
@@ -324,7 +324,7 @@ class Receiver(private val context: Context) {
         return TransferServer.error(Status.INTERNAL_ERROR, message)
     }
 
-    /** 打开保存目标：用户选定的 SAF 目录；未选（null）时默认系统 Download/Zviber（MediaStore，API 29+ 免权限） */
+    /** 打开保存目标：用户选定的 SAF 目录；未选（null）时默认系统 Download/Zbox（MediaStore，API 29+ 免权限） */
     private fun openSaveTarget(dirUri: Uri?, fileName: String, mime: String?): SaveTarget? {
         if (dirUri != null) {
             val dir = DocumentFile.fromTreeUri(context, dirUri) ?: return null
@@ -334,7 +334,7 @@ class Receiver(private val context: Context) {
         return createDownloadFile(fileName, mime)
     }
 
-    /** 默认保存到系统 Download/Zviber（RELATIVE_PATH 子目录插入时自动创建）；API 26-28 无 MediaStore.Downloads 免权限写入，返回 null 走失败提示 */
+    /** 默认保存到系统 Download/Zbox（RELATIVE_PATH 子目录插入时自动创建）；API 26-28 无 MediaStore.Downloads 免权限写入，返回 null 走失败提示 */
     private fun createDownloadFile(fileName: String, mime: String?): SaveTarget? {
         if (Build.VERSION.SDK_INT < 29) return null
         val resolver = context.contentResolver
@@ -352,7 +352,7 @@ class Receiver(private val context: Context) {
         val values = ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, candidate)
             put(MediaStore.Downloads.MIME_TYPE, mime ?: "application/octet-stream")
-            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Zviber")
+            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Zbox")
             put(MediaStore.Downloads.IS_PENDING, 1)
         }
         val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
@@ -369,7 +369,7 @@ class Receiver(private val context: Context) {
             MediaStore.Downloads.EXTERNAL_CONTENT_URI,
             arrayOf(MediaStore.Downloads._ID),
             MediaStore.Downloads.DISPLAY_NAME + "=? AND " + MediaStore.Downloads.RELATIVE_PATH + "=?",
-            arrayOf(name, Environment.DIRECTORY_DOWNLOADS + "/Zviber/"),
+            arrayOf(name, Environment.DIRECTORY_DOWNLOADS + "/Zbox/"),
             null,
         ) ?: return false
         cursor.use { return it.count > 0 }

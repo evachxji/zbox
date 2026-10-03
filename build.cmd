@@ -2,10 +2,10 @@
 chcp 936 >nul
 setlocal
 cd /d "%~dp0"
-title Zviber 打包 exe 安装包
+title Zbox 打包 exe 安装包
 
 echo.
-echo   Zviber 一键打包 exe 安装包
+echo   Zbox 一键打包 exe 安装包
 echo   ---------------------------------------------
 echo.
 
@@ -43,7 +43,7 @@ if errorlevel 1 goto :build_failed
 
 echo.
 echo   [完成] 产物已生成：
-echo       %~dp0dist\zviber-Setup-v*-x64.exe
+echo       %~dp0dist\zbox-Setup-v*-x64.exe
 echo.
 echo   分发方式：把这个 exe 发给别人，双击即弹出安装向导，
 echo   对方无需安装 Python。安装后是 onedir 目录，启动更快。

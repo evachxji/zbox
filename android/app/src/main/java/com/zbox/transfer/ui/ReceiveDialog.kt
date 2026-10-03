@@ -1,4 +1,4 @@
-﻿package com.zviber.transfer.ui
+﻿package com.zbox.transfer.ui
 
 import android.content.Intent
 import android.net.Uri
@@ -25,8 +25,8 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.documentfile.provider.DocumentFile
-import com.zviber.transfer.IncomingState
-import com.zviber.transfer.Settings
+import com.zbox.transfer.IncomingState
+import com.zbox.transfer.Settings
 
 /** 接收确认对话框：来源别名、文件清单、总大小、选择保存位置、接受/拒绝 */
 @Composable
@@ -86,14 +86,14 @@ fun ReceiveDialogHost() {
                     onClick = { dirPicker.launch(defaultTreeUri()) },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    val label = pending.dirUri?.let { "保存到：" + dirName(it) } ?: "保存到：Download/Zviber（系统默认，点我更改）"
+                    val label = pending.dirUri?.let { "保存到：" + dirName(it) } ?: "保存到：Download/Zbox（系统默认，点我更改）"
                     Text(text = label, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         },
         confirmButton = {
             TextButton(
-                // 未选目录也能直接接受：默认存到系统 Download/Zviber（API 29+）
+                // 未选目录也能直接接受：默认存到系统 Download/Zbox（API 29+）
                 onClick = {
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     pending.onAccept(pending.dirUri)
@@ -113,13 +113,13 @@ fun ReceiveDialogHost() {
     )
 }
 
-/** 首次引导到 Download/Zviber；已记住目录则回到该目录 */
+/** 首次引导到 Download/Zbox；已记住目录则回到该目录 */
 private fun defaultTreeUri(): Uri {
     val saved = Settings.saveTreeUri
     if (saved != null) return Uri.parse(saved)
     return android.provider.DocumentsContract.buildTreeDocumentUri(
         "com.android.externalstorage.documents",
-        "primary:Download/Zviber",
+        "primary:Download/Zbox",
     )
 }
 

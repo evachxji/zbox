@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Zviber 悬浮面板入口：单实例 + 桌面右键菜单 + 节假日联网更新/离线导入。
+"""Zbox 悬浮面板入口：单实例 + 桌面右键菜单 + 节假日联网更新/离线导入。
 用法：pythonw main.pyw        启动并显示
       pythonw main.pyw --toggle   已运行则切换显隐（供桌面右键菜单调用）
       pythonw main.pyw --new-box / --settings / --about / --quit
                                   桌面右键二级菜单项：已运行则 IPC 转发，未运行则启动后本地执行（--quit 除外）
       pythonw main.pyw --pick-folder   「新建文件夹格子」：本进程弹原生目录框，路径经 IPC 发回面板
-      pythonw main.pyw --add-folder <路径>   文件夹右键「添加到zviber桌面格子」：路径经 IPC 发回面板建格子
-自检：设置环境变量 ZVIBER_SHOT=<目录> 启动，自动导出两主题截图后退出。
+      pythonw main.pyw --add-folder <路径>   文件夹右键「添加到zbox桌面格子」：路径经 IPC 发回面板建格子
+自检：设置环境变量 ZBOX_SHOT=<目录> 启动，自动导出两主题截图后退出。
 """
 import ctypes
 import faulthandler
@@ -225,7 +225,7 @@ def main():
     # 通知归属独立应用身份：Windows 按进程/AUMID 缓存气泡图标，
     # 旧版「黄底日期」图标就是这么残留在通知里的；独立 AUMID 绕开旧缓存
     try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('Zviber')
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('Zbox')
     except Exception:
         pass
 
@@ -243,7 +243,7 @@ def main():
         return 0
 
     if '--add-folder' in sys.argv:
-        # 文件夹右键「添加到zviber桌面格子」：资源管理器经 %1 传入路径，直接包成
+        # 文件夹右键「添加到zbox桌面格子」：资源管理器经 %1 传入路径，直接包成
         # b'folder:' 消息发回面板（与 --pick-folder 同一条 IPC 通道，面板侧零改动）。
         # 菜单只在运行中注入，无实例 = 崩溃残留被点到，静默退出。
         # ⚠️ 必须在下方通用转发之前 return：--add-folder 不在 IPC_ACTIONS，
@@ -278,14 +278,14 @@ def main():
     # 端口（Windows 防火墙授权提示也在那一刻才弹），端口被占时传输页给「不可用」提示
     fingerprint = transfer.load_or_create_fingerprint(cfg.path)
     cfg.data['transfer_fingerprint'] = fingerprint
-    alias = cfg.transfer_alias or platform.node() or 'Zviber'
+    alias = cfg.transfer_alias or platform.node() or 'Zbox'
     device_info = transfer.DeviceInfo.local(alias, fingerprint)
     # 截图自检不起服务（避免网络发现/对端接入让截图不确定），传输页按功能态渲染
     panel = ui.FloatingPanel(cfg, hstore, tstore, device_info,
-                             transfer_autostart=not os.environ.get('ZVIBER_SHOT'))
+                             transfer_autostart=not os.environ.get('ZBOX_SHOT'))
     # 桌面格子：截图自检模式不创建，避免格子入镜干扰面板截图
     boxmgr = None
-    if not os.environ.get('ZVIBER_SHOT') and not os.environ.get('ZVIBER_GRABSCREEN'):
+    if not os.environ.get('ZBOX_SHOT') and not os.environ.get('ZBOX_GRABSCREEN'):
         boxmgr = bx.BoxManager(data_dir, panel)
         icon = None  # 源码运行的右键菜单图标；frozen 用 exe 自带图标，不用生成
         if not getattr(sys, 'frozen', False):
@@ -376,12 +376,12 @@ def main():
         if fn:  # 无运行实例时本地执行（截图自检没有格子，--new-box 等静默跳过）
             QTimer.singleShot(0, fn)
 
-    if os.environ.get('ZVIBER_GRABSCREEN'):
+    if os.environ.get('ZBOX_GRABSCREEN'):
         panel.place_initial()
         panel.show()
         QTimer.singleShot(1500, lambda: _grab_screen(panel, qapp))
         return qapp.exec_()
-    shot_dir = os.environ.get('ZVIBER_SHOT')
+    shot_dir = os.environ.get('ZBOX_SHOT')
     if shot_dir:
         QTimer.singleShot(600, lambda: _self_shot(shot_dir, panel, cfg, tstore, qapp))
     else:
@@ -402,7 +402,7 @@ def _grab_screen(panel, qapp):
     g = panel.frameGeometry()
     pm = QApplication.primaryScreen().grabWindow(0, g.x() - 20, g.y() - 20,
                                                  g.width() + 40, g.height() + 40)
-    pm.save(os.environ.get('ZVIBER_GRABSCREEN'))
+    pm.save(os.environ.get('ZBOX_GRABSCREEN'))
     qapp.quit()
 
 def _on_ipc(server, actions):

@@ -19,9 +19,9 @@ from PyQt5.QtWidgets import (QApplication, QDialog, QWidget, QVBoxLayout, QHBoxL
 
 import sysutil
 
-APP_EXE = 'zviber.exe'
-LEGACY_APP_EXE = 'ZviberPanel.exe'   # 旧名程序本体：覆盖重装时用来识别旧安装
-APP_TITLE = 'Zviber 桌面日历'
+APP_EXE = 'zbox.exe'
+LEGACY_APP_EXE = 'zviber.exe'   # 旧名程序本体：覆盖重装时用来识别旧安装
+APP_TITLE = 'Zbox 桌面日历'
 
 # 向导补充样式：沿用 NOCTURNE 深色配色（#e8a33d 强调色，#e05252 危险色），%CN%/%NUM% 运行时替换
 _EXTRA_QSS = """
@@ -49,8 +49,8 @@ QPushButton#dangerBtn:pressed { background: #b93a3a; }
 
 
 def install_dir(all_users=False):
-    """默认安装目录：当前用户 → %LOCALAPPDATA%\\Programs\\zviber；此计算机 → Program Files\\zviber。
-    旧版目录名是 ZviberPanel（大写），升级时由 _take_over_legacy 接管。"""
+    """默认安装目录：当前用户 → %LOCALAPPDATA%\\Programs\\zbox；此计算机 → Program Files\\zbox。
+    旧版目录名是 zviber，升级时由 _take_over_legacy 接管。"""
     if all_users:
         base = os.environ.get('ProgramFiles') or r'C:\Program Files'
     else:
@@ -80,7 +80,7 @@ def _bundle_dir():
 
 def _payload_dir():
     """安装包内嵌的 onedir 程序目录：frozen 时在 _MEIPASS\\payload；
-    源码调试安装向导时回退到构建中间产物 dist\\build\\app\\zviber。"""
+    源码调试安装向导时回退到构建中间产物 dist\\build\\app\\zbox。"""
     mp = getattr(sys, '_MEIPASS', None)
     if mp:
         return os.path.join(mp, 'payload')
@@ -117,7 +117,7 @@ def is_installed():
 
 def registered_install_dir():
     """已注册的安装目录（HKCU 优先，HKLM 兜底）；没有安装记录返回 None。
-    旧名（ZviberPanel）的安装记录也算，供升级时接管。"""
+    旧名（zviber）的安装记录也算，供升级时接管。"""
     for all_users in (False, True):
         loc = sysutil.uninstall_reg_get('InstallLocation', all_users)
         if loc:
@@ -130,9 +130,9 @@ def registered_install_dir():
 
 
 def _take_over_legacy():
-    """接管旧名版本：清掉 ZviberPanel 留下的注册表残留，并删掉旧安装目录。
+    """接管旧名版本：清掉 zviber 留下的注册表残留，并删掉旧安装目录。
     旧目录里只有程序文件（安装向导只允许空目录/旧安装目录），删掉不会碰到用户数据；
-    用户数据是 %APPDATA%\\ZviberPanel，由 sysutil.appdata_dir() 改名搬到新目录，不在这里动。"""
+    用户数据是 %APPDATA%\\zviber，由 sysutil.appdata_dir() 改名搬到新目录，不在这里动。"""
     old_dir = None
     for all_users in (False, True):
         loc = sysutil.legacy_uninstall_reg_get('InstallLocation', all_users)
@@ -194,7 +194,7 @@ def _copy_tree_with_progress(src_root, dst_root, cb):
 
 def install(path_dir, all_users=False, autostart=True, shortcut=True, progress=None):
     """把安装包内嵌的 onedir 程序目录整体复制到指定目录并注册系统集成，返回安装后的 exe 路径。
-    目标目录里已有旧安装（含 zviber.exe，或旧名的 ZviberPanel.exe，_check_dir 保证无用户文件）
+    目标目录里已有旧安装（含 zbox.exe，或旧名的 zviber.exe，_check_dir 保证无用户文件）
     时先清空再复制；旧名的安装记录/右键菜单/旧目录由 _take_over_legacy 接管清理。
     progress(pct, text) 回报进度。"""
     def report(pct, text):
@@ -231,7 +231,7 @@ def install(path_dir, all_users=False, autostart=True, shortcut=True, progress=N
 
 def uninstall(remove_user_data=False, progress=None):
     """清除全部注册表集成（HKCU/HKLM 均尝试）、桌面快捷方式，并延迟删除安装目录（exe 运行中无法删除自身）。
-    remove_user_data=True 时连同 %APPDATA%\\zviber（待办、格子、配置）一起删除；默认保留，重装不丢。
+    remove_user_data=True 时连同 %APPDATA%\\zbox（待办、格子、配置）一起删除；默认保留，重装不丢。
     progress(pct, text) 回报进度。"""
     def report(pct, text):
         if progress:
@@ -320,7 +320,7 @@ def setup_main():
             autostart='--no-autostart' not in sys.argv))
         wiz.exec_()
         return 0
-    if os.environ.get('ZVIBER_AUTO_INSTALL'):
+    if os.environ.get('ZBOX_AUTO_INSTALL'):
         # 测试钩子：跳过向导按默认项静默安装
         _relaunch(install(install_dir()))
         return 0
@@ -594,7 +594,7 @@ class InstallWizard(_WizardBase):
             self._update_space_info()
 
     def _check_dir(self, path):
-        """只允许空目录/新目录/覆盖重装（目录里有 zviber.exe，或旧名的 ZviberPanel.exe，
+        """只允许空目录/新目录/覆盖重装（目录里有 zbox.exe，或旧名的 zviber.exe，
         视为旧安装），避免卸载时误删用户文件。"""
         if not path.strip():
             return '请输入安装路径'

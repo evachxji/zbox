@@ -13,9 +13,9 @@
     <application
         android:usesCleartextTraffic="true"
         android:icon="@mipmap/ic_launcher"
-        android:label="Zviber 传输"
+        android:label="Zbox 传输"
         android:supportsRtl="true"
-        android:theme="@style/Theme.ZviberTransfer">
+        android:theme="@style/Theme.ZboxTransfer">
         <activity
             android:name=".MainActivity"
             android:launchMode="singleTask"

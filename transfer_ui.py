@@ -207,11 +207,11 @@ def _reveal_in_explorer(path):
 
 
 def _default_save_dir(cfg):
-    '''接收保存目录：配置优先，缺省 ~/Downloads/Zviber。'''
+    '''接收保存目录：配置优先，缺省 ~/Downloads/Zbox。'''
     d = cfg.transfer_dir
     if isinstance(d, str) and d:
         return d
-    return os.path.join(os.path.expanduser('~'), 'Downloads', 'Zviber')
+    return os.path.join(os.path.expanduser('~'), 'Downloads', 'Zbox')
 
 
 class _RecvDialog(QDialog):
@@ -244,7 +244,7 @@ class TransferInfoDialog(QDialog):
     '''传输页门禁层 / 设置窗的「?」共用的说明弹窗：解释局域网传输 + Android 版入口。
     样式复用设置窗（#settingsDlg / #settingsPanel 区段）。'''
 
-    APK_URL = 'https://github.com/evachxji/zviber/releases'
+    APK_URL = 'https://github.com/evachxji/zbox/releases'
 
     def __init__(self, parent=None):
         super(TransferInfoDialog, self).__init__(parent)
@@ -292,7 +292,7 @@ class TransferInfoDialog(QDialog):
         para('安全提示', 'transferTitle')
         para('请只在自己家、公司等可信的局域网使用，公共 Wi-Fi 下建议保持关闭。')
         para('手机端', 'transferTitle')
-        para('Android 手机安装 zviber 手机端，即可与电脑互传。')
+        para('Android 手机安装 zbox 手机端，即可与电脑互传。')
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(ui.sc(8))
@@ -1285,7 +1285,7 @@ class TransferWidget(QWidget):
                 os.makedirs(d, exist_ok=True)
             except OSError:
                 try:
-                    d = os.path.join(os.path.expanduser('~'), 'Downloads', 'Zviber')
+                    d = os.path.join(os.path.expanduser('~'), 'Downloads', 'Zbox')
                     os.makedirs(d, exist_ok=True)
                 except OSError:
                     d = None   # 目录不可用：result 保持 None，协议端按拒绝

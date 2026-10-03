@@ -1,4 +1,4 @@
-﻿package com.zviber.transfer
+﻿package com.zbox.transfer
 
 import android.content.Context
 import android.content.Intent
@@ -21,8 +21,8 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.ui.Modifier
 import androidx.core.content.IntentCompat
 import androidx.lifecycle.lifecycleScope
-import com.zviber.transfer.ui.HomeScreen
-import com.zviber.transfer.ui.ReceiveDialogHost
+import com.zbox.transfer.ui.HomeScreen
+import com.zbox.transfer.ui.ReceiveDialogHost
 import fi.iki.elonen.NanoHTTPD
 import java.security.SecureRandom
 
@@ -31,7 +31,7 @@ object Settings {
     private lateinit var prefs: SharedPreferences
 
     fun init(context: Context) {
-        prefs = context.getSharedPreferences("zviber_transfer", Context.MODE_PRIVATE)
+        prefs = context.getSharedPreferences("zbox_transfer", Context.MODE_PRIVATE)
         if (prefs.getString("fingerprint", null) == null) {
             val bytes = ByteArray(16)
             SecureRandom().nextBytes(bytes)
@@ -86,7 +86,7 @@ class MainActivity : ComponentActivity() {
         ShareInbox.uris
 
         setContent {
-            ZviberApp(discovery)
+            ZboxApp(discovery)
         }
         handleShareIntent(intent)
     }
@@ -138,7 +138,7 @@ class MainActivity : ComponentActivity() {
             if (wifiLock?.isHeld != true) {
                 val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
                 @Suppress("DEPRECATION")
-                wifiLock = wifi.createWifiLock(WifiManager.WIFI_MODE_FULL, "zviber-transfer")
+                wifiLock = wifi.createWifiLock(WifiManager.WIFI_MODE_FULL, "zbox-transfer")
                 wifiLock?.acquire()
             }
             super.onStop()
@@ -152,7 +152,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @androidx.compose.runtime.Composable
-fun ZviberApp(discovery: Discovery) {
+fun ZboxApp(discovery: Discovery) {
     // 单页布局：设备 + 记录同屏，不再需要底部 tab
     MaterialTheme(colorScheme = darkColorScheme()) {
         Scaffold { padding ->

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Zviber 桌面悬浮面板：日历 + 待办。PyQt5，兼容 Win7/10/11、Python 3.8+。"""
+"""Zbox 桌面悬浮面板：日历 + 待办。PyQt5，兼容 Win7/10/11、Python 3.8+。"""
 import ctypes
 from ctypes import wintypes
 import json
@@ -1292,11 +1292,11 @@ _SWP_Z_ONLY = 0x1 | 0x2 | 0x10   # SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE：�
 
 
 def _dbg(msg):
-    """ZVIBER_DEBUG 环境变量开启的调试日志。run.cmd 常开，故带 2MB 轮转（留尾部 1MB）。"""
-    if not os.environ.get('ZVIBER_DEBUG'):
+    """ZBOX_DEBUG 环境变量开启的调试日志。run.cmd 常开，故带 2MB 轮转（留尾部 1MB）。"""
+    if not os.environ.get('ZBOX_DEBUG'):
         return
     try:
-        path = os.path.join(os.environ.get('TEMP', '.'), 'zviber_debug.log')
+        path = os.path.join(os.environ.get('TEMP', '.'), 'zbox_debug.log')
         if os.path.exists(path) and os.path.getsize(path) > 2 * 1024 * 1024:
             with open(path, 'rb') as f:
                 f.seek(-1024 * 1024, os.SEEK_END)
@@ -2020,7 +2020,7 @@ class AboutDialog(QDialog):
         head.addWidget(icon)
         info = QVBoxLayout()
         info.setSpacing(sc(4))
-        name = QLabel('Zviber 桌面日历')
+        name = QLabel('Zbox 桌面日历')
         name.setObjectName('setTitle')
         info.addWidget(name)
         ver = QLabel('版本 v%s' % APP_VERSION)

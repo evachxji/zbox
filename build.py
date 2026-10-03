@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """构建 exe 安装包：两次 PyInstaller——
-1) main.pyw → onedir 程序本体（dist\\build\\app\\zviber\\，安装后就是这个目录：一堆小文件、启动快）；
+1) main.pyw → onedir 程序本体（dist\\build\\app\\zbox\\，安装后就是这个目录：一堆小文件、启动快）；
 2) setup.pyw → onefile 安装包，把 onedir 目录整体内嵌为 payload（--add-data），
-   产物 dist\\zviber-Setup-v<版本>-<架构>.exe——用户只拿到这一个 exe，双击弹安装向导。
+   产物 dist\\zbox-Setup-v<版本>-<架构>.exe——用户只拿到这一个 exe，双击弹安装向导。
 中间文件（图标、DPI 清单、spec、PyInstaller 工作目录、onedir 本体）一律收在 dist\\build\\ 下，
 根目录保持干净；dist 整个目录已在 .gitignore 里。
 用法：python build.py
@@ -26,7 +26,7 @@ ARCH = {'AMD64': 'x64', 'x86': 'x86', 'ARM64': 'arm64'}.get(
     platform.machine(), platform.machine().lower())
 
 # 程序本体名（全小写）：onedir 目录名、exe 名、安装包名前缀都用它，与 sysutil.APP_NAME 一致
-APP_NAME = 'zviber'
+APP_NAME = 'zbox'
 
 # DPI 感知清单：PyInstaller 默认 exe 无 DPI 感知声明，进程按 unaware 虚拟化，
 # ui_scale() 读到 96 DPI 导致界面不放大（源码由 Qt 运行时设置感知，无此问题）。
@@ -69,13 +69,13 @@ def run_pyinstaller(entry, name, mode, dist_dir, work_dir, extra=()):
 def main():
     os.makedirs(WORK, exist_ok=True)     # 图标与清单要写进去，得先有目录
     # 旧形态残留：onefile app、onedir 直发目录、zip 分发包，顺手清掉避免误发
-    # （含改名之前的 ZviberPanel 产物）
-    for name in (APP_NAME, 'ZviberPanel'):
+    # （含改名之前的 zviber 产物）
+    for name in (APP_NAME, 'zviber'):
         if os.path.isfile(os.path.join(DIST, name + '.exe')):
             os.remove(os.path.join(DIST, name + '.exe'))
         if os.path.isdir(os.path.join(DIST, name)):
             shutil.rmtree(os.path.join(DIST, name))
-    for pat in ('%s-v*.zip' % APP_NAME, 'ZviberPanel-v*.zip'):
+    for pat in ('%s-v*.zip' % APP_NAME, 'zviber-v*.zip'):
         for z in glob.glob(os.path.join(DIST, pat)):
             os.remove(z)
     if not gen_icon():

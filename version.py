@@ -4,4 +4,4 @@
 关于弹窗、安装向导标题栏、卸载注册表项（DisplayVersion）都从这里取值。
 """
 APP_VERSION = '0.3'
-GITHUB_URL = 'https://github.com/evachxji/zviber'
+GITHUB_URL = 'https://github.com/evachxji/zbox'

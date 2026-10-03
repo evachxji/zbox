@@ -6,11 +6,11 @@
 }
 
 android {
-    namespace = "com.zviber.transfer"
+    namespace = "com.zbox.transfer"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.zviber.transfer"
+        applicationId = "com.zbox.transfer"
         minSdk = 26
         targetSdk = 36
         versionCode = 3

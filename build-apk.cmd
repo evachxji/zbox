@@ -2,10 +2,10 @@
 chcp 936 >nul
 setlocal
 cd /d "%~dp0"
-title Zviber 打包 Android APK
+title Zbox 打包 Android APK
 
 echo.
-echo   Zviber 一键打包 Android 传输 APK
+echo   Zbox 一键打包 Android 传输 APK
 echo   ---------------------------------------------
 echo.
 

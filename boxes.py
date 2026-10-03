@@ -2,7 +2,7 @@
 """桌面格子：桌面文件归类格子功能。
 
 - 空白格子：**只是桌面文件的收纳视图，不搬动文件**（2026-10 改；旧版是把文件真搬进
-  %APPDATA%\\zviber\\Boxes\\<id>\\，用户实测「属性里路径变成 AppData」「关程序后
+  %APPDATA%\\zbox\\Boxes\\<id>\\，用户实测「属性里路径变成 AppData」「关程序后
   文件被吞掉」，故改成现在这样）。收进格子的文件留在桌面原路径（右键属性的位置就是桌面），
   只是给文件加「隐藏」属性把桌面图标藏起来；关程序/解散格子/隐藏格子时把属性还原，
   文件随即回到桌面。分组记录（rec['items'] + 隐藏属性账本 rec['attrs']）存在 boxes.json，
@@ -142,7 +142,7 @@ _GWL_STYLE = -16
 _LVS_AUTOARRANGE = 0x0100
 
 # 拖出空白格子时的暂存目录名（桌面下的隐藏夹，见 BoxWindow.stage_for_drag）
-_STAGE_NAME = '.zviber'
+_STAGE_NAME = '.zbox'
 
 SORT_CHOICES = [('name', '按名称'), ('type', '按类型'), ('mtime', '按修改时间')]
 
@@ -2394,10 +2394,10 @@ class BoxManager(object):
     def _upgrade_blank_boxes(self):
         """启动时把空白格子的文件弄回桌面，两种情况：
 
-        ① 旧版把文件真搬进了 %APPDATA%\\zviber\\Boxes\\<id>\\（用户实测关程序后这些
+        ① 旧版把文件真搬进了 %APPDATA%\\zbox\\Boxes\\<id>\\（用户实测关程序后这些
            文件「被吞在里面」）—— 搬回桌面并转成 items，rec['path'] 随之作废；
         ② 新版那些目录只当「拖出暂存」用（见 `BoxWindow.stage_for_drag`），另一种暂存是
-           桌面下的隐藏夹 `.zviber`：拖拽途中进程被强杀会留下残留 —— 一并搬回桌面并补进
+           桌面下的隐藏夹 `.zbox`：拖拽途中进程被强杀会留下残留 —— 一并搬回桌面并补进
            记账，否则文件就留在隐藏夹里看不见了。"""
         desk = os.path.normpath(desktop_dir())
         stage = os.path.join(desk, _STAGE_NAME)
@@ -2460,7 +2460,7 @@ class BoxManager(object):
 
     def new_folder(self, path=None):
         """新建文件夹映射格子；path 为空时弹目录选择框（原生资源管理器样式）。
-        同一路径已有格子时不新建：显示出来并闪烁提示（文件夹右键「添加到zviber桌面格子」
+        同一路径已有格子时不新建：显示出来并闪烁提示（文件夹右键「添加到zbox桌面格子」
         与「新建文件夹格子」对话框都走这里）。"""
         if not path:
             # 静态方法原生框：模态只锁属主窗口，设置窗等其它顶层窗口照常可用。

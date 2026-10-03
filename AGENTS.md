@@ -81,7 +81,7 @@ LLM 经常默默选择一种解释然后执行。这个原则强制明确推理�
 
 ## Project Structure & Module Organization
 
-Zviber 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyQt5，Python 3.8+，Win7 / Win10 / Win11 通用。
+Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyQt5，Python 3.8+，Win7 / Win10 / Win11 通用。
 平铺布局，一个模块一个职责：
 
 - `main.pyw` — 入口：单实例 IPC（`QLocalServer`）、节假日后台更新、局域网传输服务启动、（frozen 时）`--uninstall` 卸载向导入口
@@ -97,7 +97,7 @@ Zviber 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），P
 - `installer.py` — 安装向导（选项/进度/完成页）与卸载向导（可选删除个人数据）；供 setup exe（安装）与程序本体 `--uninstall`（卸载）共用
 - `install.py` — 源码方式的系统集成（只装开机自启）
 - `setup.pyw` — 安装包入口：build.py 把它打成 onefile exe，内嵌 onedir 本体为 payload，双击弹安装向导
-- `build.py` / `build.cmd` — 生成图标与 DPI 清单，两段式 PyInstaller：main.pyw 打 onedir 本体（`dist\build\app\`），setup.pyw 内嵌本体打成单个安装包 `dist\zviber-Setup-v<版本>-<架构>.exe`（架构标识跟随打包用的 Python：x64 / x86 / arm64）
+- `build.py` / `build.cmd` — 生成图标与 DPI 清单，两段式 PyInstaller：main.pyw 打 onedir 本体（`dist\build\app\`），setup.pyw 内嵌本体打成单个安装包 `dist\zbox-Setup-v<版本>-<架构>.exe`（架构标识跟随打包用的 Python：x64 / x86 / arm64）
 - `native/` — 外壳菜单宿主：`zshell.cpp`（C++ 源码，契约见下方「格子文件右键」）
   + `build_native.cmd`（cl /MT 静态 CRT 编译出 `zshell_host.exe`，需 MSVC Build Tools）；
   exe 随仓库提交，改源码后需重新编译并一起提交
@@ -106,8 +106,8 @@ Zviber 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），P
 - `designs/` — 两套主题的设计稿（HTML，浏览器可直接打开）
 - `android/` — Android 端独立 Gradle 工程（Kotlin + Compose，与 PC 代码完全分离）
 
-运行时数据在 `%APPDATA%\zviber\`（`config.json` / `todos.json` / `holidays.json` / `icons/`）——不要提交。
-**目录名 2026-10 由 `ZviberPanel` 改成 `zviber`**：`sysutil.appdata_dir()` 首次调用时自动把旧目录搬过来
+运行时数据在 `%APPDATA%\zbox\`（`config.json` / `todos.json` / `holidays.json` / `icons/`）——不要提交。
+**目录名 2026-10 由 `zviber` 改成 `zbox`**：`sysutil.appdata_dir()` 首次调用时自动把旧目录搬过来
 （`_migrate_appdata`：整目录 rename → 逐文件 `_merge_tree`；同名文件以新目录为准，被占用的下次启动再搬），
 老用户的待办 / 格子 / 配置不丢。
 
@@ -122,7 +122,7 @@ python install.py            :: 源码方式开启开机自启
 python install.py --remove   :: 移除自启并清理旧的右键菜单
 python transfer_selftest.py  :: 传输协议自检（全过打印 SELFTEST OK）
 cd android && gradlew.bat assembleDebug   :: 构建 Android debug APK
-set ZVIBER_SHOT=designs\verify && python main.pyw   :: 截图自检
+set ZBOX_SHOT=designs\verify && python main.pyw   :: 截图自检
 ```
 
 自检导出两主题 × 日历/待办/传输共 6 张截图后自动退出，改 UI / 主题 / 布局后必跑。
@@ -130,7 +130,7 @@ set ZVIBER_SHOT=designs\verify && python main.pyw   :: 截图自检
 （用户的面板被显隐一次），本进程直接退出，一张图都不会导出，而且没有任何报错。
 截图目录与设计稿渲染图已 gitignore，不要提交。
 
-- 另有 `ZVIBER_GRABSCREEN=<路径>`：抓取真实屏幕上面板所在区域（含系统合成效果）后退出。
+- 另有 `ZBOX_GRABSCREEN=<路径>`：抓取真实屏幕上面板所在区域（含系统合成效果）后退出。
 - `run.cmd` / `build.cmd` / `stop.cmd` 是给最终用户双击的入口，**以 GBK 保存并自带 `chcp 936`，同时保持
   CRLF 行尾**，改完绝不能另存为 UTF-8，否则双击后中文提示乱码。
 - `build.py` 除生成图标外还写 DPI 感知清单（`--manifest`）交给 PyInstaller：**PyInstaller 默认
@@ -146,24 +146,24 @@ set ZVIBER_SHOT=designs\verify && python main.pyw   :: 截图自检
 ### 数据流与进程模型（`main.pyw` + `sysutil` + `installer`）
 
 数据流：`main.pyw`（入口）→ 构造 `Config` / `HolidayStore` / `TodoStore` → 注入 `FloatingPanel`，
-面板只通过 store 读写，所有持久化落在 `%APPDATA%\zviber\`（`config.json`、`todos.json`、
+面板只通过 store 读写，所有持久化落在 `%APPDATA%\zbox\`（`config.json`、`todos.json`、
 `holidays.json`、运行时生成的 `icons/`）——**绝不提交这些数据**。
 
 `main()` 的顺序是有意的，改动前先读懂：设置 excepthook → `installer.maybe_install()`
 （仅 frozen exe 生效，只处理 `--uninstall` 卸载向导，返回 True 直接退出）→ 单实例 IPC 探测
 （`QLocalSocket` 连 `sysutil.IPC_KEY`，已运行则发 `toggle` 后退出）→ 建面板
 （传输服务由面板自持：`cfg['transfer_enabled']` 为真才创建并 start `TransferServer` + `Discovery`，
-端口 53327 被占则传输页显示「不可用」门禁层；`ZVIBER_SHOT` 下不起服务也不盖门禁层）→ 起 `QLocalServer`
+端口 53327 被占则传输页显示「不可用」门禁层；`ZBOX_SHOT` 下不起服务也不盖门禁层）→ 起 `QLocalServer`
 接收 `toggle` / `quit` → `context_menu_set_running(True)` 注入桌面右键级联菜单。
 
-- 单实例靠 `QLocalServer` 名称 `zviber-panel-v2`；消息由 `_on_ipc` 按 `actions` 字典分发，`quit` 消息供卸载程序请求退出。
-- 桌面右键是**级联菜单**：父项「zviber桌面格子」用 `MUIVerb` + `ExtendedSubCommandsKey` 自引用（子项放父项 `shell\` 子键下，子键名字母序即菜单顺序，故带 A_/B_… 前缀）。两个实测坑：① 别用 `SubCommands` 方案——它只按 **HKLM** 的 `Explorer\CommandStore` 解析，HKCU 的不认，免管理员安装没法用；② 父项绝不能有 `command` 子键，否则退化成直链不展开。6 个二级项：新建格子、新建文件夹格子、显示/隐藏卡片、设置、关于、退出，各走 `--new-box`/`--pick-folder`/`--toggle`/`--settings`/`--about`/`--quit` 命令行参数，经 IPC（`IPC_ACTIONS`）转发给运行中的实例，不新起进程。**菜单形态跟随运行状态**：`context_menu_set_running()` 在面板启停时改写——运行中 = 级联六项，未运行 = 直链单项「单击启动」（安装时写入的就是直链形态）；HKLM 安装无权改写，运行时往 HKCU 写覆盖层、退出删掉回落；源码运行（无安装记录）启动时注入级联菜单、退出时整体删除（崩溃残留由下次启动时 `sync_context_menu` 清掉）。
-- `installer.setup_main()`（setup exe 入口）里 `ZVIBER_AUTO_INSTALL` 是静默安装测试钩子。
+- 单实例靠 `QLocalServer` 名称 `zbox-panel-v1`；消息由 `_on_ipc` 按 `actions` 字典分发，`quit` 消息供卸载程序请求退出。
+- 桌面右键是**级联菜单**：父项「zbox桌面格子」用 `MUIVerb` + `ExtendedSubCommandsKey` 自引用（子项放父项 `shell\` 子键下，子键名字母序即菜单顺序，故带 A_/B_… 前缀）。两个实测坑：① 别用 `SubCommands` 方案——它只按 **HKLM** 的 `Explorer\CommandStore` 解析，HKCU 的不认，免管理员安装没法用；② 父项绝不能有 `command` 子键，否则退化成直链不展开。6 个二级项：新建格子、新建文件夹格子、显示/隐藏卡片、设置、关于、退出，各走 `--new-box`/`--pick-folder`/`--toggle`/`--settings`/`--about`/`--quit` 命令行参数，经 IPC（`IPC_ACTIONS`）转发给运行中的实例，不新起进程。**菜单形态跟随运行状态**：`context_menu_set_running()` 在面板启停时改写——运行中 = 级联六项，未运行 = 直链单项「单击启动」（安装时写入的就是直链形态）；HKLM 安装无权改写，运行时往 HKCU 写覆盖层、退出删掉回落；源码运行（无安装记录）启动时注入级联菜单、退出时整体删除（崩溃残留由下次启动时 `sync_context_menu` 清掉）。
+- `installer.setup_main()`（setup exe 入口）里 `ZBOX_AUTO_INSTALL` 是静默安装测试钩子。
 - **没有系统托盘图标**（已移除）：显隐/新建格子/设置/关于/退出等入口全在桌面右键级联菜单，
   别再往回加托盘。设置窗口是**非模态**的（桌面右键「设置」），已开着就 `raise_()`，不会叠第二个。
   传输分支的托盘气泡通知通道因此整体不合并：传输服务起不来（端口被占）靠传输页门禁层的「不可用」提示呈现；
   收到文件请求时 `_transfer_notify` 改为唤起面板并切到传输 tab（接收确认是独立置顶小弹窗 `_RecvDialog`，记录同时进传输页记录区），
-  「传输完成」等纯通知在传输页记录区可见。需要 Windows toast 通知的话另行加（AUMID 已设 `Zviber`）。
+  「传输完成」等纯通知在传输页记录区可见。需要 Windows toast 通知的话另行加（AUMID 已设 `Zbox`）。
 
 ### 崩溃诊断与日志
 
@@ -175,13 +175,13 @@ excepthook 时 exit 127、连输出都没有。`main()` 里那句 `sys.excepthoo
 
 日志与诊断手段一览：
 
-- `debug_due.log`（`%APPDATA%\zviber\`）：Python 层未捕获异常，excepthook 始终落盘。
+- `debug_due.log`（`%APPDATA%\zbox\`）：Python 层未捕获异常，excepthook 始终落盘。
   **ctypes 回调（如 WH_MOUSE_LL 的 `proc`）里的异常不走 excepthook**——被 ctypes 吞掉打印到
   pythonw 不可见的 stderr，还会向系统返回垃圾值；所以 `boxes.py` 的 `proc` 自带 try/except
   落盘同一文件（带 `--- DesktopClickHook ---` 标记）。
 - `crash_native.log`（同目录）：`main()` 里 `faulthandler.enable()` 落盘 Qt/C++ 层原生崩溃
   （访问冲突直接杀进程时，Python 堆栈的唯一痕迹）。
-- `zviber_debug.log`（`%TEMP%\`）：`ZVIBER_DEBUG=1` 时 `_dbg()` 埋点日志（run.cmd 常开，
+- `zbox_debug.log`（`%TEMP%\`）：`ZBOX_DEBUG=1` 时 `_dbg()` 埋点日志（run.cmd 常开，
   自带 2MB 轮转），只记滑动/悬停/tick 等埋点，不含崩溃堆栈。
 - **进程冻结但没崩**：`py-spy dump --pid <pid> --native` 直接抓所有线程的 Python + Qt 混合栈
   （2026-09 靠它实锤了钩子线程 winId 死锁，见下方格子章节）。
@@ -308,32 +308,32 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
 
 - 注册表写入默认走 HKCU（**免管理员**，Win7/10/11 通用）；`all_users=True` 才写 HKLM
   （exe 安装向导的「此计算机」选项，需管理员）。清理函数对两个根都尝试、无权限时静默跳过。
-- **命名统一为全小写 `zviber`（2026-10 从 `ZviberPanel` 改名）**：程序本体 `zviber.exe`、
-  安装目录（`%LOCALAPPDATA%\Programs\zviber` / `Program Files\zviber`）、安装包
-  `zviber-Setup-v<版本>-<架构>.exe`、注册表键、单实例 IPC 名都跟着换。**改名前的兼容代码别当冗余删**：
+- **命名统一为全小写 `zbox`（2026-10 从 `zviber` 改名）**：程序本体 `zbox.exe`、
+  安装目录（`%LOCALAPPDATA%\Programs\zbox` / `Program Files\zbox`）、安装包
+  `zbox-Setup-v<版本>-<架构>.exe`、注册表键、单实例 IPC 名都跟着换。**改名前的兼容代码别当冗余删**：
   `installer.LEGACY_APP_EXE`（`_check_dir` 与覆盖重装要认旧 exe）、`sysutil.LEGACY_SHELL_KEY` /
   `LEGACY_UNINSTALL_KEY` / `legacy_integration_remove()` / `legacy_uninstall_reg_get()`
   （旧右键菜单与旧卸载项要清掉，否则「设置→应用」里会同时躺两个卸载项）、`autostart_remove()`
   顺带删旧名 Run 值、`installer._take_over_legacy()`（安装时接管并删掉旧安装目录）。
-  **IPC 名 `zviber-panel-v1` → `zviber-panel-v2` 是有意的**：新旧版数据目录与注册表会互相覆盖，
+  **IPC 名重新起为 `zbox-panel-v1`**（旧版 zviber 用 `zviber-panel-v2`）：新旧版数据目录与注册表会互相覆盖，
   让它俩互不串话（各起一个实例）比新旧混用一个安全。
-- 涉及的键：`Run`（自启）、`Directory\Background\shell\zviber`（桌面右键菜单）、
-  `Directory\shell\zviber`（文件夹右键「添加到zviber桌面格子」，仅运行中注入，安装不写）、
-  `Uninstall\zviber`（应用列表卸载项）。
+- 涉及的键：`Run`（自启）、`Directory\Background\shell\zbox`（桌面右键菜单）、
+  `Directory\shell\zbox`（文件夹右键「添加到zbox桌面格子」，仅运行中注入，安装不写）、
+  `Uninstall\zbox`（应用列表卸载项）。
 - **桌面右键菜单只属于 exe 安装**：只有 `installer.install()` 会写菜单，`install.py` 只写开机自启。
-  每次启动 `installer.sync_context_menu()` 按 `Uninstall\zviber` 的 `InstallLocation` 判定——
+  每次启动 `installer.sync_context_menu()` 按 `Uninstall\zbox` 的 `InstallLocation` 判定——
   没有任何安装记录就清掉菜单残留（旧版 install.py 的源码安装、向导取消、半卸载）。**调用时机必须在 IPC 转发之后**——源码模式没有安装记录，转发进程（`--new-box` 等）若先跑这步会把运行中面板刚注入的级联菜单当残留删掉（真实 bug）。`context_menu_remove` 要自底向上清三层子键（winreg 不能删带子键的键），含旧版直链菜单的 `command` 残留。
 - `sysutil.launcher_cmd()` 区分 frozen（直接启自身）与源码（优先 `pythonw.exe` 实现无窗口静默）。
 - `installer.py` 的向导**只在 frozen 时生效**；源码运行走 `install.py`。
-- 安装 = 把安装包内嵌的 payload（onefile 运行时解压到 `_MEIPASS\payload` 的 onedir 本体：exe + `_internal\`）**整体复制**到目标位置，按字节回报进度；目标目录已有旧安装（含 `zviber.exe`）时先整体清空再复制——`_check_dir` 只放行空目录/新目录/含 `zviber.exe` 的旧安装目录，别放宽这个签名判断，否则覆盖重装与卸载会误删用户文件。
-- 卸载走与安装同风格的**卸载向导**（确认页 → 进度页 → 完成页）：确认页 checkbox「同时删除个人数据」勾选后连同 `%APPDATA%\zviber`（待办、格子、配置）一起 rmtree，默认保留；程序目录用延迟 `rmdir` 删除（exe 运行中删不掉自己）。
+- 安装 = 把安装包内嵌的 payload（onefile 运行时解压到 `_MEIPASS\payload` 的 onedir 本体：exe + `_internal\`）**整体复制**到目标位置，按字节回报进度；目标目录已有旧安装（含 `zbox.exe`）时先整体清空再复制——`_check_dir` 只放行空目录/新目录/含 `zbox.exe` 的旧安装目录，别放宽这个签名判断，否则覆盖重装与卸载会误删用户文件。
+- 卸载走与安装同风格的**卸载向导**（确认页 → 进度页 → 完成页）：确认页 checkbox「同时删除个人数据」勾选后连同 `%APPDATA%\zbox`（待办、格子、配置）一起 rmtree，默认保留；程序目录用延迟 `rmdir` 删除（exe 运行中删不掉自己）。
 
 ### 桌面格子（`boxes.py`）
 
 桌面文件归类格子：`BoxManager` 总管（恢复/新建/解散/显隐），`BoxWindow` 单格，
-`BoxStore` 存 `%APPDATA%\zviber\boxes.json`（`visible` + 格子记录列表）。
+`BoxStore` 存 `%APPDATA%\zbox\boxes.json`（`visible` + 格子记录列表）。
 格子管理入口在桌面右键级联菜单（新建格子 / 新建文件夹格子 / 显示隐藏格子）；截图自检模式不创建格子。
-另有**资源管理器文件夹右键「添加到zviber桌面格子」**（`Directory\shell\zviber` 静态动词，
+另有**资源管理器文件夹右键「添加到zbox桌面格子」**（`Directory\shell\zbox` 静态动词，
 `--add-folder "%1"` 传路径）：仅运行中注入（随 `context_menu_set_running` 与桌面级联菜单同生共死，
 退出/卸载/覆盖安装时随 `_delete_shell_tree` 一并删除，崩溃残留被点到静默退出），路径经 `b'folder:'`
 IPC 通道（与 `--pick-folder` 同一条）发回面板建格子；`new_folder` 按 normcase 去重——同一路径
@@ -353,7 +353,7 @@ IPC 通道（与 `--pick-folder` 同一条）发回面板建格子；`new_folder
   （`set_boxes_visible`，双击桌面的 `toggle_all` 也走它）隐藏时用 `show_icons()` 还原属性，
   文件随即回到桌面。分组记录留在 `boxes.json`，
   下次启动 `restore()` 再 `hide_icons()` 收起来——「程序开着=文件在格子里，程序关着=文件在桌面」。
-  - 旧版是把文件真 `shutil.move` 进 `%APPDATA%\zviber\Boxes\<id>\`：用户实测「属性里
+  - 旧版是把文件真 `shutil.move` 进 `%APPDATA%\zbox\Boxes\<id>\`：用户实测「属性里
     路径变成 AppData」「关程序后文件被吞在里面」，故改成现在这样。`_upgrade_blank_boxes()`
     在启动时把旧存储目录里的文件搬回桌面并转成 `items`（搬空才删目录）。
   - 不在桌面的文件拖进来会先搬到桌面（「格子里的文件都在桌面」是这套模型的前提）。
@@ -384,7 +384,7 @@ IPC 通道（与 `--pick-folder` 同一条）发回面板建格子；`new_folder
     优先、主名兜底，撞名（同主名不同扩展名）挑「位置不在快照里」的新项；③ shutdown 时
     多个空白格子各跑一次快照+修正，后跑的快照含先跑已挪好的图标（SET 回原位=无操作），
     幂等不用改。
-  - **拖出 = 先把文件挪进桌面下的隐藏暂存夹 `桌面\.zviber\`（`stage_for_drag`）**：
+  - **拖出 = 先把文件挪进桌面下的隐藏暂存夹 `桌面\.zbox\`（`stage_for_drag`）**：
     格子里的文件本来就在桌面上，直接拖到桌面就是把文件移动到它自己所在的目录 ——
     资源管理器会弹「源文件名和目标文件名相同」（用户实测）。挪进同盘的隐藏子目录后，
     拖到桌面 = 一次真实的跨目录移动（文件回到原路径），拖到资源管理器文件夹/别的格子
@@ -585,7 +585,7 @@ IPC 通道（与 `--pick-folder` 同一条）发回面板建格子；`new_folder
   可恢复的前台）。面板侧授权只给宿主 pid（`AllowSetForegroundWindow(self.proc.pid)`），
   **绝不用 ASFW_ANY**。
   宿主诊断：`ZSHELL_LOG=1` 落盘 %TEMP%\zshell_host.log（每请求的 `wait_rbutton_up=` /
-  `pre-tpm recheck waited=` / `tpm cmd=… elapsed=… btnR=…`）；面板 `ZVIBER_DEBUG=1` 记
+  `pre-tpm recheck waited=` / `tpm cmd=… elapsed=… btnR=…`）；面板 `ZBOX_DEBUG=1` 记
   `ctxmenu: R=… 用时=…s 在途=…`（按每个请求自己的发出时刻算；有请求没应答=宿主不健康）。
   排查「误激活」时 `tpm cmd≠0` 就是「有项被执行了」的判据（cmd=0 既可能是用户取消、
   也可能是正常关闭），`elapsed` 是菜单存活时长——空放很久的菜单突然返回 cmd，八成是键盘。
@@ -639,7 +639,7 @@ HTTP 模式无加密，只面向可信局域网。组播失效时有 /24 子网�
 - `transfer_ui.py` 是面板第三个 tab「传输」：设备列表、文件多选 + 拖拽发送、传输记录、
   接收确认弹窗（独立无边框置顶 Tool 窗，宽 sc(320)、高按内容自适应，居中于面板上滑入场；
   Esc/Alt+F4 路由到「拒绝」保证 HTTP 线程被唤醒；可选保存目录，
-  默认 `%USERPROFILE%\Downloads\Zviber` 并记住，170 秒确认超时）。
+  默认 `%USERPROFILE%\Downloads\Zbox` 并记住，170 秒确认超时）。
   **网络回调全走 pyqtSignal 回主线程**，不跨线程动 UI。
   **传输功能默认关闭**（`cfg['transfer_enabled']`，2026-10 改）：页面照常构建但盖一层高斯模糊
   门禁层（`QGraphicsBlurEffect` 打在 `pane` 上，门禁层 `gate` 是 pane 的兄弟故不被模糊），
@@ -681,12 +681,12 @@ HTTP 模式无加密，只面向可信局域网。组播失效时有 /24 子网�
 
 ## Testing Guidelines
 
-没有单元测试框架。验证 = `ZVIBER_SHOT` 截图自检 + 手动检查桌面右键菜单形态切换（运行中级联 / 未运行直链）、文件夹右键项随面板启停出现/消失、开机自启。
+没有单元测试框架。验证 = `ZBOX_SHOT` 截图自检 + 手动检查桌面右键菜单形态切换（运行中级联 / 未运行直链）、文件夹右键项随面板启停出现/消失、开机自启。
 改布局代码时要在 125% / 150% 缩放下确认。
 
 ## Commit & Pull Request Guidelines
 
-仓库 [github.com/evachxji/zviber](https://github.com/evachxji/zviber)（public，MIT）。
+仓库 [github.com/evachxji/zbox](https://github.com/evachxji/zbox)（public，MIT）。
 提交用 `feat:` / `fix:` / `refactor:` / `docs:` 前缀 + 简短中英文摘要。
 PR 需说明改了什么与为什么；视觉改动附自检截图；注明验证过的 Windows / Python 版本。
 

@@ -434,7 +434,7 @@ static int show_menu_once(HWND hwnd, int pathc, wchar_t **pathv) {
             WNDCLASSW wc = {};
             wc.lpfnWndProc = MenuWndProc;
             wc.hInstance = GetModuleHandleW(NULL);
-            wc.lpszClassName = L"ZviberShellMenu";
+            wc.lpszClassName = L"ZboxShellMenu";
             cls = RegisterClassW(&wc);
         }
         hhidden = CreateWindowExW(0, (LPCWSTR)cls, L"", WS_POPUP,
