@@ -1,0 +1,661 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Zviber — 你的桌面，井然有条</title>
+  <meta name="description" content="Zviber：把堆在桌面的文件拖进格子即归类，附带日历、待办与局域网多端文件传输的个人工作空间。免费开源，Windows 与 Android。" />
+  <link rel="icon" href="assets/brand/icon.png" type="image/png" />
+  <link rel="preload" as="image" href="assets/desktop/desktop-grids-overview.png" />
+  <script>document.documentElement.classList.add("js");</script>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+  <!-- ============ 图标库（单族 SVG，stroke 统一） ============ -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/>
+      </symbol>
+      <symbol id="i-img" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m5 18 4.5-4.5a1.5 1.5 0 0 1 2 0L17 19"/><path d="m14 15 1.8-1.8a1.5 1.5 0 0 1 2 0L21 16.5"/>
+      </symbol>
+      <symbol id="i-pdf" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 2h8l4 4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z"/><path d="M14 2v4h4"/><path d="M8.5 15.5c1.5-3.5 4-6.5 7-7.5M8.5 15.5c2 .8 4.5.8 6.5-.5M8.5 15.5c-.8 1.6-1.8 2.6-3 3"/>
+      </symbol>
+      <symbol id="i-doc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 2h8l4 4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z"/><path d="M14 2v4h4"/><path d="M8 12h8M8 16h8M8 8h3"/>
+      </symbol>
+      <symbol id="i-xls" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M4 15h16M10 3v18"/>
+      </symbol>
+      <symbol id="i-zip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 2h8l4 4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z"/><path d="M14 2v4h4"/><path d="M11 6h1M12 8h-1M11 10h1M12 12h-1v3a1 1 0 0 0 1 1h0a1 1 0 0 0 1-1v-1"/>
+      </symbol>
+      <symbol id="i-mp4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9.5 5 2.5-5 2.5v-5Z" fill="currentColor" stroke="none"/>
+      </symbol>
+      <symbol id="i-txt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 2h8l4 4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z"/><path d="M14 2v4h4"/><path d="M8 12h8M8 16h5"/>
+      </symbol>
+      <symbol id="i-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m6 14 6-6 6 6"/>
+      </symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+      </symbol>
+      <symbol id="i-menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M4 7h16M4 12h16M4 17h16"/>
+      </symbol>
+      <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.2 2.2M16.9 16.9l2.2 2.2M2 12h3M19 12h3M4.9 19.1l2.2-2.2M16.9 7.1l2.2-2.2"/>
+      </symbol>
+      <symbol id="i-minus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M5 12h14"/>
+      </symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 11A8 8 0 0 0 5.6 6.6L4 8M4 3v5h5M4 13a8 8 0 0 0 14.4 4.4L20 16M20 21v-5h-5"/>
+      </symbol>
+      <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m4.5 12.5 5 5 10-11"/>
+      </symbol>
+      <symbol id="i-phone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="7" y="2" width="10" height="20" rx="2.5"/><path d="M11 18.5h2"/>
+      </symbol>
+      <symbol id="i-pc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>
+      </symbol>
+      <symbol id="i-swap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 8h13l-3.5-3.5M20 16H7l3.5 3.5"/>
+      </symbol>
+      <symbol id="i-dl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3v12M7 10.5 12 15.5l5-5M4 20h16"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 .8a11.3 11.3 0 0 0-3.6 22c.6.1.8-.2.8-.5v-2c-3.1.7-3.8-1.3-3.8-1.3-.5-1.3-1.2-1.7-1.2-1.7-1-.7.1-.7.1-.7 1.1.1 1.7 1.1 1.7 1.1 1 1.7 2.6 1.2 3.2 1 .1-.8.4-1.3.7-1.6-2.5-.3-5.1-1.2-5.1-5.5 0-1.2.4-2.2 1.1-3-.1-.3-.5-1.4.1-3 0 0 .9-.3 3.1 1.2a10.7 10.7 0 0 1 5.6 0c2.1-1.5 3-1.2 3-1.2.6 1.6.2 2.7.1 3 .7.8 1.1 1.8 1.1 3 0 4.3-2.6 5.2-5.1 5.5.4.3.8 1 .8 2.1v3.1c0 .3.2.6.8.5A11.3 11.3 0 0 0 12 .8Z"/>
+      </symbol>
+      <symbol id="i-windows" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M3 5.2 10.9 4v7.4H3V5.2ZM12.1 3.8 21 2.6v8.8h-8.9V3.8ZM3 12.6h7.9V20L3 18.8v-6.2Zm9.1 0H21v8.8l-8.9-1.2v-7.6Z"/>
+      </symbol>
+      <symbol id="i-android" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M7 9.5h10v8a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-8Z"/><path d="M8.5 9.5a3.5 3.5 0 0 1 7 0M9 6.5 7.5 4.5M15 6.5l1.5-2"/><circle cx="10" cy="12.5" r=".6" fill="currentColor"/><circle cx="14" cy="12.5" r=".6" fill="currentColor"/><path d="M4.5 11v5M19.5 11v5"/>
+      </symbol>
+    </defs>
+  </svg>
+
+  <!-- ============ 导航 ============ -->
+  <header class="nav">
+    <div class="nav-inner">
+      <a class="brand" href="#hero" aria-label="Zviber 首页">
+        <img src="assets/brand/icon.png" width="256" height="256" alt="Zviber 标志" />
+        <span>Zviber</span>
+      </a>
+      <ul class="nav-links">
+        <li><a href="#pin-main">功能</a></li>
+        <li><a href="#pin-map">工作原理</a></li>
+        <li><a href="#pin-transfer">多端互传</a></li>
+      </ul>
+      <a class="nav-gh" data-dl="github" href="https://github.com/evachxji/zviber" aria-label="在 GitHub 上查看 Zviber 仓库" title="GitHub">
+        <svg width="18" height="18" aria-hidden="true"><use href="#i-github"/></svg>
+      </a>
+      <a class="btn-nav" href="#download"><svg width="14" height="14" aria-hidden="true"><use href="#i-dl"/></svg>下载</a>
+    </div>
+  </header>
+
+  <main>
+    <!-- ============ Hero ============ -->
+    <section class="hero" id="hero">
+      <div class="hero-media" aria-hidden="true"></div>
+      <div class="hero-veil" aria-hidden="true"></div>
+      <div class="hero-core">
+        <img class="logo" src="assets/brand/icon.png" width="256" height="256" alt="Zviber 标志" />
+        <h1>Zviber<span class="hero-chip">v0.3</span></h1>
+        <p class="tagline">你的桌面，井然有条。</p>
+        <p class="hero-cta"><a class="btn-primary" data-dl="windows" href="https://github.com/evachxji/zviber/releases/download/v0.3/zviber-Setup-v0.3-x64.exe"><svg aria-hidden="true"><use href="#i-dl"/></svg>下载 Windows 版</a></p>
+        <p class="hero-meta">Windows 7 / 10 / 11 · x64</p>
+      </div>
+      <div class="hero-hint" aria-hidden="true">
+        <span>向下滚动</span>
+        <span class="line"></span>
+      </div>
+    </section>
+
+    <!-- ============ 第一至四幕：混乱 → 格子 → 整理 → Make It Yours ============ -->
+    <div id="pin-main">
+      <section class="stage" id="stage-main" aria-label="Zviber 桌面整理演示">
+        <div class="desk" id="desk-main">
+          <div class="wall wall-clean" aria-hidden="true"></div>
+          <div class="wall wall-messy" id="wall-messy" aria-hidden="true"></div>
+
+          <div class="grid grid-1" id="g1">
+            <div class="grid-head">
+              <span class="grid-title">图片</span>
+              <span class="grid-tools">
+                <svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg>
+                <svg class="lock-ic" aria-hidden="true"><use href="#i-lock"/></svg>
+                <svg aria-hidden="true"><use href="#i-menu"/></svg>
+              </span>
+            </div>
+            <div class="grid-body">
+              <div class="frow"><svg class="fi t-img" aria-hidden="true"><use href="#i-img"/></svg><span class="nm">IMG_2048.jpg</span></div>
+              <div class="frow story" id="trow-vac"><svg class="fi t-img" aria-hidden="true"><use href="#i-img"/></svg><span class="nm">Vacation.jpg</span></div>
+              <div class="frow"><svg class="fi t-img" aria-hidden="true"><use href="#i-img"/></svg><span class="nm">截图_1032.png</span></div>
+              <div class="frow"><svg class="fi t-img" aria-hidden="true"><use href="#i-img"/></svg><span class="nm">界面截图.png</span></div>
+            </div>
+          </div>
+
+          <div class="grid grid-2" id="g2">
+            <div class="grid-head">
+              <span class="grid-title">文档</span>
+              <span class="grid-tools">
+                <svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg>
+                <svg class="lock-ic" aria-hidden="true"><use href="#i-lock"/></svg>
+                <svg aria-hidden="true"><use href="#i-menu"/></svg>
+              </span>
+            </div>
+            <div class="grid-body">
+              <div class="frow story" id="trow-report"><svg class="fi t-pdf" aria-hidden="true"><use href="#i-pdf"/></svg><span class="nm">Report.pdf</span></div>
+              <div class="frow"><svg class="fi t-doc" aria-hidden="true"><use href="#i-doc"/></svg><span class="nm">会议纪要.docx</span></div>
+              <div class="frow"><svg class="fi t-doc" aria-hidden="true"><use href="#i-doc"/></svg><span class="nm">季度报告.docx</span></div>
+              <div class="frow"><svg class="fi t-xls" aria-hidden="true"><use href="#i-xls"/></svg><span class="nm">排期表.xlsx</span></div>
+              <div class="frow"><svg class="fi t-pdf" aria-hidden="true"><use href="#i-pdf"/></svg><span class="nm">设计规范.pdf</span></div>
+              <div class="frow"><svg class="fi t-xls" aria-hidden="true"><use href="#i-xls"/></svg><span class="nm">通讯录.xlsx</span></div>
+            </div>
+          </div>
+
+          <div class="grid grid-3" id="g3">
+            <div class="grid-head">
+              <span class="grid-title">项目</span>
+              <span class="grid-tools">
+                <svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg>
+                <svg class="lock-ic" aria-hidden="true"><use href="#i-lock"/></svg>
+                <svg aria-hidden="true"><use href="#i-menu"/></svg>
+              </span>
+            </div>
+            <span class="lock-chip">已锁定</span>
+            <div class="grid-body">
+              <div class="frow"><svg class="fi t-folder" aria-hidden="true"><use href="#i-folder"/></svg><span class="nm">参考链接</span></div>
+              <div class="frow"><svg class="fi t-folder" aria-hidden="true"><use href="#i-folder"/></svg><span class="nm">设计稿</span></div>
+              <div class="frow"><svg class="fi t-folder" aria-hidden="true"><use href="#i-folder"/></svg><span class="nm">项目资料</span></div>
+              <div class="frow story" id="trow-proj"><svg class="fi t-zip" aria-hidden="true"><use href="#i-zip"/></svg><span class="nm">Project.zip</span></div>
+              <div class="frow"><svg class="fi t-doc" aria-hidden="true"><use href="#i-doc"/></svg><span class="nm">产品演示.pptx</span></div>
+              <div class="frow"><svg class="fi t-doc" aria-hidden="true"><use href="#i-doc"/></svg><span class="nm">培训材料.pptx</span></div>
+            </div>
+          </div>
+
+          <div class="grid grid-4" id="g4">
+            <div class="grid-head">
+              <span class="grid-title">下载</span>
+              <span class="grid-tools">
+                <svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg>
+                <svg class="lock-ic" aria-hidden="true"><use href="#i-lock"/></svg>
+                <svg aria-hidden="true"><use href="#i-menu"/></svg>
+              </span>
+            </div>
+            <div class="grid-body">
+              <div class="frow"><svg class="fi t-mp4" aria-hidden="true"><use href="#i-mp4"/></svg><span class="nm">产品宣传片.mp4</span></div>
+              <div class="frow"><svg class="fi t-zip" aria-hidden="true"><use href="#i-zip"/></svg><span class="nm">图标素材.zip</span></div>
+              <div class="frow"><svg class="fi t-zip" aria-hidden="true"><use href="#i-zip"/></svg><span class="nm">备份_0928.zip</span></div>
+              <div class="frow"><svg class="fi t-zip" aria-hidden="true"><use href="#i-zip"/></svg><span class="nm">备份文件.zip</span></div>
+              <div class="frow"><svg class="fi t-txt" aria-hidden="true"><use href="#i-txt"/></svg><span class="nm">安装说明.txt</span></div>
+              <div class="frow"><svg class="fi t-txt" aria-hidden="true"><use href="#i-txt"/></svg><span class="nm">待办清单.txt</span></div>
+            </div>
+          </div>
+
+          <div class="fly" id="fly-vac" style="left:13.5%;top:25.5%" data-x1="13.5" data-y1="25.5" data-x2="5.5" data-y2="20" data-target="#trow-vac">
+            <svg class="fi t-img" aria-hidden="true"><use href="#i-img"/></svg><span>Vacation.jpg</span>
+          </div>
+          <div class="fly" id="fly-report" style="left:88%;top:46%" data-x1="88" data-y1="46" data-x2="28.5" data-y2="20" data-target="#trow-report">
+            <svg class="fi t-pdf" aria-hidden="true"><use href="#i-pdf"/></svg><span>Report.pdf</span>
+          </div>
+          <div class="fly" id="fly-proj" style="left:43.5%;top:65.5%" data-x1="43.5" data-y1="65.5" data-x2="51.5" data-y2="20" data-target="#trow-proj">
+            <svg class="fi t-zip" aria-hidden="true"><use href="#i-zip"/></svg><span>Project.zip</span>
+          </div>
+        </div>
+
+        <div class="cap" id="cap-messy">
+          <h2>桌面，不该是这样的。</h2>
+          <p>文件越堆越多，找东西全靠运气。</p>
+        </div>
+        <div class="cap" id="cap-grids">
+          <h2>给文件，几个格子。</h2>
+        </div>
+        <div class="cap" id="cap-organize">
+          <h2>拖进去，就整理好了。</h2>
+          <p>文件留在桌面原路径，只是收进了该在的地方。</p>
+        </div>
+        <div class="cap" id="cap-miy">
+          <h2>一个格子，随你摆布。</h2>
+        </div>
+        <div class="cap" id="cap-move"><h2>移动它。</h2></div>
+        <div class="cap" id="cap-resize"><h2>缩放它。</h2></div>
+        <div class="cap" id="cap-collapse"><h2>收起来。</h2></div>
+        <div class="cap" id="cap-lock"><h2>锁上它。</h2></div>
+        <div class="cap" id="cap-rename"><h2>改个名字。</h2></div>
+        <div class="cap cap-final" id="cap-yours">
+          <h2>让桌面，成为你的。</h2>
+        </div>
+      </section>
+    </div>
+
+    <!-- ============ 主题条 ============ -->
+    <section class="sec" id="sec-theme">
+      <div class="sec-inner center reveal">
+        <span class="kick">主题</span>
+        <h2 class="h2">深色、浅色，或跟随系统。</h2>
+        <p class="sub">设置里一键切换，自动记忆你的选择。</p>
+        <div class="theme-grid">
+          <figure>
+            <div class="shot"><img src="assets/desktop/theme-light-overview.png" width="1920" height="1080" loading="lazy" decoding="async" alt="浅色主题下的 Zviber 桌面格子全景" /></div>
+            <figcaption class="shot-cap">浅色主题 · 同一桌面</figcaption>
+          </figure>
+          <figure>
+            <div class="shot"><img src="assets/desktop/settings-window.png" width="370" height="396" loading="lazy" decoding="async" alt="Zviber 设置窗口：深色、浅色、跟随系统三档与传输开关" /></div>
+            <figcaption class="shot-cap">设置 · 一键切换</figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 第五幕：文件夹映射 ============ -->
+    <div id="pin-map">
+      <section class="stage" id="stage-map" aria-label="文件夹映射演示">
+        <div class="map-win">
+          <div class="win">
+            <div class="win-bar">
+              <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span>文件资源管理器</span>
+            </div>
+            <div class="win-addr"><svg class="fi t-folder" width="14" height="14" aria-hidden="true"><use href="#i-folder"/></svg>此电脑 &gt; 桌面 &gt; 项目资料</div>
+            <div class="win-list">
+              <div class="frow"><svg class="fi t-folder" aria-hidden="true"><use href="#i-folder"/></svg><span class="nm">设计稿</span></div>
+              <div class="frow"><svg class="fi t-folder" aria-hidden="true"><use href="#i-folder"/></svg><span class="nm">参考链接</span></div>
+              <div class="frow"><svg class="fi t-zip" aria-hidden="true"><use href="#i-zip"/></svg><span class="nm">Project.zip</span></div>
+              <div class="frow"><svg class="fi t-doc" aria-hidden="true"><use href="#i-doc"/></svg><span class="nm">产品演示.pptx</span></div>
+              <div class="frow"><svg class="fi t-doc" aria-hidden="true"><use href="#i-doc"/></svg><span class="nm">培训材料.pptx</span></div>
+              <div class="frow new-file"><svg class="fi t-doc" aria-hidden="true"><use href="#i-doc"/></svg><span class="nm">季度复盘.docx</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="map-link" aria-hidden="true"></div>
+        <div class="map-pulse" aria-hidden="true"></div>
+
+        <div class="map-grid">
+          <div class="grid">
+            <div class="grid-head">
+              <span class="grid-title">项目资料 · 映射</span>
+              <span class="grid-tools">
+                <svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg>
+                <svg class="lock-ic" aria-hidden="true"><use href="#i-lock"/></svg>
+                <svg aria-hidden="true"><use href="#i-menu"/></svg>
+              </span>
+            </div>
+            <div class="grid-body">
+              <div class="frow"><svg class="fi t-folder" aria-hidden="true"><use href="#i-folder"/></svg><span class="nm">设计稿</span></div>
+              <div class="frow"><svg class="fi t-folder" aria-hidden="true"><use href="#i-folder"/></svg><span class="nm">参考链接</span></div>
+              <div class="frow"><svg class="fi t-zip" aria-hidden="true"><use href="#i-zip"/></svg><span class="nm">Project.zip</span></div>
+              <div class="frow"><svg class="fi t-doc" aria-hidden="true"><use href="#i-doc"/></svg><span class="nm">产品演示.pptx</span></div>
+              <div class="frow"><svg class="fi t-doc" aria-hidden="true"><use href="#i-doc"/></svg><span class="nm">培训材料.pptx</span></div>
+              <div class="frow new-file"><svg class="fi t-doc" aria-hidden="true"><use href="#i-doc"/></svg><span class="nm">季度复盘.docx</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="cap" id="cap-map-1">
+          <h2>让真正的文件夹，直接出现在桌面上。</h2>
+          <p>格子实时映射任意目录，资源管理器里右键，一键建格。</p>
+        </div>
+        <div class="cap cap-final" id="cap-map-2">
+          <h2>在资源管理器里改，格子里就变。</h2>
+        </div>
+      </section>
+    </div>
+
+    <!-- ============ 第六幕：双击显隐 ============ -->
+    <div id="pin-clean">
+      <section class="stage" id="stage-clean" aria-label="双击隐藏与恢复演示">
+        <div class="wall wall-clean" aria-hidden="true"></div>
+
+        <div class="grid grid-1">
+          <div class="grid-head">
+            <span class="grid-title">图片</span>
+            <span class="grid-tools">
+              <svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg>
+              <svg class="lock-ic" aria-hidden="true"><use href="#i-lock"/></svg>
+              <svg aria-hidden="true"><use href="#i-menu"/></svg>
+            </span>
+          </div>
+          <div class="grid-body">
+            <div class="frow"><svg class="fi t-img" aria-hidden="true"><use href="#i-img"/></svg><span class="nm">IMG_2048.jpg</span></div>
+            <div class="frow"><svg class="fi t-img" aria-hidden="true"><use href="#i-img"/></svg><span class="nm">Vacation.jpg</span></div>
+            <div class="frow"><svg class="fi t-img" aria-hidden="true"><use href="#i-img"/></svg><span class="nm">截图_1032.png</span></div>
+            <div class="frow"><svg class="fi t-img" aria-hidden="true"><use href="#i-img"/></svg><span class="nm">界面截图.png</span></div>
+          </div>
+        </div>
+
+        <div class="grid grid-2">
+          <div class="grid-head">
+            <span class="grid-title">文档</span>
+            <span class="grid-tools">
+              <svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg>
+              <svg class="lock-ic" aria-hidden="true"><use href="#i-lock"/></svg>
+              <svg aria-hidden="true"><use href="#i-menu"/></svg>
+            </span>
+          </div>
+          <div class="grid-body">
+            <div class="frow"><svg class="fi t-pdf" aria-hidden="true"><use href="#i-pdf"/></svg><span class="nm">Report.pdf</span></div>
+            <div class="frow"><svg class="fi t-doc" aria-hidden="true"><use href="#i-doc"/></svg><span class="nm">季度报告.docx</span></div>
+            <div class="frow"><svg class="fi t-xls" aria-hidden="true"><use href="#i-xls"/></svg><span class="nm">排期表.xlsx</span></div>
+            <div class="frow"><svg class="fi t-pdf" aria-hidden="true"><use href="#i-pdf"/></svg><span class="nm">设计规范.pdf</span></div>
+          </div>
+        </div>
+
+        <div class="grid grid-3">
+          <div class="grid-head">
+            <span class="grid-title">我的项目</span>
+            <span class="grid-tools">
+              <svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg>
+              <svg class="lock-ic" style="color:#f5a524" aria-hidden="true"><use href="#i-lock"/></svg>
+              <svg aria-hidden="true"><use href="#i-menu"/></svg>
+            </span>
+          </div>
+          <div class="grid-body">
+            <div class="frow"><svg class="fi t-folder" aria-hidden="true"><use href="#i-folder"/></svg><span class="nm">项目资料</span></div>
+            <div class="frow"><svg class="fi t-zip" aria-hidden="true"><use href="#i-zip"/></svg><span class="nm">Project.zip</span></div>
+            <div class="frow"><svg class="fi t-doc" aria-hidden="true"><use href="#i-doc"/></svg><span class="nm">产品演示.pptx</span></div>
+          </div>
+        </div>
+
+        <div class="grid grid-4">
+          <div class="grid-head">
+            <span class="grid-title">下载</span>
+            <span class="grid-tools">
+              <svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg>
+              <svg class="lock-ic" aria-hidden="true"><use href="#i-lock"/></svg>
+              <svg aria-hidden="true"><use href="#i-menu"/></svg>
+            </span>
+          </div>
+          <div class="grid-body">
+            <div class="frow"><svg class="fi t-mp4" aria-hidden="true"><use href="#i-mp4"/></svg><span class="nm">产品宣传片.mp4</span></div>
+            <div class="frow"><svg class="fi t-zip" aria-hidden="true"><use href="#i-zip"/></svg><span class="nm">备份文件.zip</span></div>
+            <div class="frow"><svg class="fi t-txt" aria-hidden="true"><use href="#i-txt"/></svg><span class="nm">安装说明.txt</span></div>
+          </div>
+        </div>
+
+        <div class="panel" id="panel-clean" aria-hidden="true">
+          <div class="panel-tabs">
+            <span class="on">日历</span><span>待办</span><span>传输</span>
+            <span class="panel-icons">
+              <svg aria-hidden="true"><use href="#i-gear"/></svg>
+              <svg aria-hidden="true"><use href="#i-minus"/></svg>
+            </span>
+          </div>
+          <div class="clock"><b id="clock-clean">00:00:00</b><span id="weekday-clean">今天</span></div>
+          <div class="month" id="month-clean"></div>
+        </div>
+
+        <div class="ripple r1" aria-hidden="true"></div>
+        <div class="ripple r2" aria-hidden="true"></div>
+
+        <div class="cap" id="cap-want"><h2>想要一个干净的桌面？</h2></div>
+        <div class="cap" id="cap-dbl"><h2>双击。</h2></div>
+        <div class="cap cap-final" id="cap-back">
+          <h2>一切如旧。</h2>
+          <p>格子、面板、文件，都在。Win+D 也吹不散。</p>
+        </div>
+      </section>
+    </div>
+
+    <!-- ============ 第七幕：日历与待办（真实截图） ============ -->
+    <section class="sec" id="sec-cal">
+      <div class="sec-inner">
+        <div class="center reveal">
+          <span class="kick">工作空间</span>
+          <h2 class="h2">不止是整洁的桌面。</h2>
+          <p class="sub">日历、待办、专注——让桌面成为一天开始的地方。</p>
+        </div>
+        <div class="cal-grid reveal">
+          <figure>
+            <div class="shot"><img src="assets/desktop/panel-calendar-todo.png" width="402" height="548" loading="lazy" decoding="async" alt="Zviber 悬浮面板·日历页：顶部时钟与倒计时、周一起始月视图、法定节假日休班角标、农历副标题" /></div>
+            <figcaption class="shot-cap">日历 · 时钟、倒计时、法定节假日与农历</figcaption>
+          </figure>
+          <figure>
+            <div class="shot"><img src="assets/desktop/panel-todo.png" width="402" height="548" loading="lazy" decoding="async" alt="Zviber 悬浮面板·待办页：逾期标红、今天、还剩 N 天的截止日期标签" /></div>
+            <figcaption class="shot-cap">待办 · 逾期标红，今日与倒计时一目了然</figcaption>
+          </figure>
+        </div>
+        <ul class="facts reveal">
+          <li><svg aria-hidden="true"><use href="#i-check"/></svg>法定节假日「休 / 班」角标</li>
+          <li><svg aria-hidden="true"><use href="#i-check"/></svg>农历与节日副标题</li>
+          <li><svg aria-hidden="true"><use href="#i-check"/></svg>截止 tag：逾期标红 · 今天 · 还剩 N 天</li>
+          <li><svg aria-hidden="true"><use href="#i-check"/></svg>双击空白新建待办</li>
+          <li><svg aria-hidden="true"><use href="#i-check"/></svg>勾选完成，置灰沉底</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ============ 第八幕：v0.3 多端传输 ============ -->
+    <div id="pin-transfer">
+      <section class="stage" id="stage-tr" aria-label="PC 与手机双向文件传输演示">
+        <div class="wall wall-clean" aria-hidden="true"></div>
+
+        <div class="grid" id="tr-gimg">
+          <div class="grid-head">
+            <span class="grid-title">图片</span>
+            <span class="grid-tools">
+              <svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg>
+              <svg class="lock-ic" aria-hidden="true"><use href="#i-lock"/></svg>
+              <svg aria-hidden="true"><use href="#i-menu"/></svg>
+            </span>
+          </div>
+          <div class="grid-body">
+            <div class="frow story" id="trow-vac2"><svg class="fi t-img" aria-hidden="true"><use href="#i-img"/></svg><span class="nm">Vacation.jpg</span></div>
+            <div class="frow"><svg class="fi t-img" aria-hidden="true"><use href="#i-img"/></svg><span class="nm">截图_1032.png</span></div>
+            <div class="frow"><svg class="fi t-img" aria-hidden="true"><use href="#i-img"/></svg><span class="nm">界面截图.png</span></div>
+          </div>
+        </div>
+
+        <div class="grid" id="tr-gdl">
+          <div class="grid-head">
+            <span class="grid-title">下载</span>
+            <span class="grid-tools">
+              <svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg>
+              <svg class="lock-ic" aria-hidden="true"><use href="#i-lock"/></svg>
+              <svg aria-hidden="true"><use href="#i-menu"/></svg>
+            </span>
+          </div>
+          <div class="grid-body">
+            <div class="frow"><svg class="fi t-mp4" aria-hidden="true"><use href="#i-mp4"/></svg><span class="nm">产品宣传片.mp4</span></div>
+            <div class="frow"><svg class="fi t-zip" aria-hidden="true"><use href="#i-zip"/></svg><span class="nm">备份文件.zip</span></div>
+            <div class="frow hot" id="trow-img2"><svg class="fi t-img" aria-hidden="true"><use href="#i-img"/></svg><span class="nm">IMG_2048.jpg</span></div>
+          </div>
+        </div>
+
+        <div class="panel tpanel" id="tpanel" aria-label="Zviber 传输面板（界面还原）">
+          <div class="panel-tabs">
+            <span>日历</span><span>待办</span><span class="on">传输</span>
+            <span class="panel-icons">
+              <svg aria-hidden="true"><use href="#i-gear"/></svg>
+              <svg aria-hidden="true"><use href="#i-minus"/></svg>
+            </span>
+          </div>
+          <div class="tlabel">附近的设备
+            <span class="ref"><svg aria-hidden="true"><use href="#i-refresh"/></svg></span>
+          </div>
+          <div class="dev-row">
+            <span class="tag">手机</span><span>Pixel 6</span><span class="st">在线</span>
+          </div>
+          <div class="tsend">
+            <span class="pick">选择文件发送（可拖）</span>
+            <button class="go" type="button" tabindex="-1">发送</button>
+          </div>
+          <div class="tlabel">传输记录</div>
+          <div class="trec" id="trec-vac">
+            <svg class="fi t-img" aria-hidden="true"><use href="#i-img"/></svg>
+            <span class="nm">Vacation.jpg · 发送至 Pixel 6</span>
+            <span class="ok">完成</span>
+          </div>
+        </div>
+
+        <div class="phone" id="phone-tr">
+          <div class="scr">
+            <img class="ps-1" src="assets/mobile/mobile-devices.png" width="1080" height="2400" loading="lazy" decoding="async" alt="Zviber Android 端设备列表：发现附近的电脑 DESKTOP-9F2K7L" />
+            <img class="ps-2" src="assets/mobile/mobile-receive-dialog.png" width="1080" height="2400" loading="lazy" decoding="async" alt="Zviber Android 端接收确认弹窗：来自电脑的 Vacation.jpg" />
+            <img class="ps-3" src="assets/mobile/mobile-transfers.png" width="1080" height="2400" loading="lazy" decoding="async" alt="Zviber Android 端传输记录：已接收 Vacation.jpg，已发送 IMG_2048.jpg" />
+            <img class="ps-4" src="assets/mobile/mobile-send.png" width="1080" height="2400" loading="lazy" decoding="async" alt="Zviber Android 端选择文件发送：选中 IMG_2048.jpg" />
+          </div>
+          <span class="cam" aria-hidden="true"></span>
+        </div>
+
+        <div class="fly" id="fly-vac2" style="left:6%;top:20%" data-x1="6" data-y1="20" data-x2="80" data-y2="44">
+          <svg class="fi t-img" aria-hidden="true"><use href="#i-img"/></svg><span>Vacation.jpg</span>
+        </div>
+        <div class="fly" id="fly-img2" style="left:80%;top:44%" data-x1="80" data-y1="44" data-x2="50" data-y2="48">
+          <svg class="fi t-img" aria-hidden="true"><use href="#i-img"/></svg><span>IMG_2048.jpg</span>
+        </div>
+
+        <div class="recv" id="recv" role="dialog" aria-label="接收文件确认（界面还原）">
+          <h4>收到文件</h4>
+          <p class="from">来自 Pixel 6 · 1 个文件 · 共 2.4 MB</p>
+          <div class="recv-file"><svg class="fi t-img" aria-hidden="true"><use href="#i-img"/></svg><span>IMG_2048.jpg</span></div>
+          <p class="recv-save">保存到：下载\Zviber<span class="chg">更改…</span></p>
+          <div class="recv-btns">
+            <button class="btn-ghost" type="button" tabindex="-1">拒绝</button>
+            <button class="btn-acc" id="btn-accept" type="button" tabindex="-1">接受</button>
+          </div>
+        </div>
+
+        <p class="corner-note">传输协议参照 LocalSend v2 · 私有实现（与官方 LocalSend 不互通）</p>
+
+        <div class="cap" id="cap-tr1">
+          <span class="kick">Zviber 0.3 · 新能力</span>
+          <h2>文件，随时流动。</h2>
+        </div>
+        <div class="cap" id="cap-tr2"><h2>Vacation.jpg，已到手机。</h2></div>
+        <div class="cap" id="cap-tr3"><h2>反过来，也一样。</h2></div>
+        <div class="cap cap-final" id="cap-trf">
+          <h2>文件，随时流动。</h2>
+          <p>局域网互传 · 手动启用 · 接收需确认</p>
+        </div>
+      </section>
+    </div>
+
+    <!-- ============ 第九幕：完整工作空间 ============ -->
+    <div id="pin-space">
+      <section class="stage" id="stage-space" aria-label="完整工作空间">
+        <div class="ws-frame">
+          <img src="assets/desktop/desktop-grids-overview.png" width="1920" height="1080" loading="lazy" decoding="async" alt="Zviber 整理后的完整桌面：图片、文档、项目、下载四个格子与日历面板" />
+        </div>
+        <div class="ws-ol" aria-hidden="true"></div>
+        <div class="ws-words" aria-hidden="true">
+          <span>你的<i>文件</i>。</span>
+          <span>你的<i>工作空间</i>。</span>
+          <span>你的<i>设备</i>。</span>
+        </div>
+        <div class="phone ws-phone">
+          <div class="scr">
+            <img src="assets/mobile/mobile-transfers.png" width="1080" height="2400" loading="lazy" decoding="async" alt="Zviber Android 端传输记录" />
+          </div>
+          <span class="cam" aria-hidden="true"></span>
+        </div>
+        <div class="cap cap-final" id="cap-space"><h2>这，就是 Zviber。</h2></div>
+      </section>
+    </div>
+
+    <!-- ============ 第十幕：v0.3 ============ -->
+    <section class="sec" id="sec-v03">
+      <div class="sec-inner center">
+        <div class="reveal">
+          <span class="kick">最新版本</span>
+          <h2 class="h2">Zviber 0.3</h2>
+          <p class="sub">桌面与手机，从此相连。</p>
+        </div>
+        <div class="v03-mark reveal" aria-hidden="true">
+          <span class="dev"><svg><use href="#i-pc"/></svg>Windows</span>
+          <span class="swap"><svg><use href="#i-swap"/></svg></span>
+          <span class="dev"><svg><use href="#i-phone"/></svg>Android</span>
+        </div>
+        <div class="v03-shots reveal">
+          <figure>
+            <div class="shot"><img src="assets/desktop/transfer-pc-devices.png" width="402" height="548" loading="lazy" decoding="async" alt="Zviber 传输页：本机别名与附近设备列表，发现 Pixel 6" /></div>
+            <figcaption class="shot-cap">启用传输 · 自动发现同网设备</figcaption>
+          </figure>
+          <figure>
+            <div class="shot"><img src="assets/desktop/transfer-pc-sending.png" width="402" height="548" loading="lazy" decoding="async" alt="Zviber 传输记录：Vacation.jpg 已发送至 Pixel 6，状态完成" /></div>
+            <figcaption class="shot-cap">真实界面，未加修饰</figcaption>
+          </figure>
+          <figure>
+            <div class="shot"><img src="assets/desktop/transfer-pc-received.png" width="419" height="579" loading="lazy" decoding="async" alt="Zviber 传输页收到文件：来自手机的 1000186943.jpg，含保存目录与拒绝、接受按钮" /></div>
+            <figcaption class="shot-cap">接收确认 · 手动接受才保存</figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 下载 ============ -->
+    <section class="sec" id="download">
+      <div class="sec-inner center">
+        <div class="reveal">
+          <h2 class="h2">给你的桌面，一点空间。</h2>
+          <p class="sub">下载 Zviber，把文件带回秩序。</p>
+        </div>
+        <div class="dl-grid reveal">
+          <div class="dl-card">
+            <svg class="os-ic" aria-hidden="true"><use href="#i-windows"/></svg>
+            <h3>Windows</h3>
+            <p class="meta">Windows 7 / 10 / 11 · x64 · 免费开源</p>
+            <p class="note">zviber-Setup-v0.3-x64.exe · 仅当前用户安装，免管理员</p>
+            <a class="btn-primary" data-dl="windows" href="https://github.com/evachxji/zviber/releases/download/v0.3/zviber-Setup-v0.3-x64.exe">
+              <svg aria-hidden="true"><use href="#i-dl"/></svg>下载 Windows 版
+            </a>
+          </div>
+          <div class="dl-card">
+            <svg class="os-ic" aria-hidden="true"><use href="#i-android"/></svg>
+            <h3>Android</h3>
+            <p class="meta">v0.3 · 与桌面端局域网互传文件</p>
+            <p class="note">zviber-v0.3.apk · Android 安装包</p>
+            <a class="btn-primary" data-dl="android" href="https://github.com/evachxji/zviber/releases">
+              <svg aria-hidden="true"><use href="#i-dl"/></svg>下载 Android 版
+            </a>
+          </div>
+        </div>
+        <div class="gh-row reveal">
+          <span>开源 · MIT License</span>
+          <a class="btn-sec" data-dl="github" href="https://github.com/evachxji/zviber">
+            <svg aria-hidden="true"><use href="#i-github"/></svg>在 GitHub 上查看
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============ 页脚 ============ -->
+  <footer class="footer">
+    <div class="footer-inner">
+      <div class="f-brand">
+        <img src="assets/brand/icon.png" width="256" height="256" alt="Zviber 标志" />
+        <div>
+          <b>Zviber</b>
+          <p>你的桌面，井然有条。</p>
+        </div>
+      </div>
+      <ul class="f-links">
+        <li><a data-dl="github" href="https://github.com/evachxji/zviber">GitHub</a></li>
+        <li><a href="https://github.com/evachxji/zviber/releases" target="_blank" rel="noopener">Releases</a></li>
+        <li><a href="https://github.com/evachxji/zviber/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a></li>
+      </ul>
+      <p class="fine">
+        © 2026 Zviber contributors · 页面截图均来自 Zviber v0.3 真实运行画面；整理与传输过程为滚动驱动的界面演示。<br />
+        Zviber 的局域网传输参照开源项目 LocalSend 的 v2 协议实现，为私有实例，与官方 LocalSend 应用不互通。
+      </p>
+    </div>
+    <p class="icp"><a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener">浙ICP备2024095561号-2</a></p>
+  </footer>
+
+  <script src="js/vendor/gsap.min.js"></script>
+  <script src="js/vendor/ScrollTrigger.min.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

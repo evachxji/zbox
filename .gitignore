@@ -13,3 +13,9 @@ designs/*.png
 
 /_*.log
 _build_manifest.xml
+
+# 网站构建工具缓存（od 工具版本/画框缓存，非站点内容）
+website/.file-versions/
+website/.od-frames/
+website/.od-skills/
+website/*.artifact.json
