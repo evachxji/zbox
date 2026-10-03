@@ -1,0 +1,39 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!-- 与 PC 端 app.make_icon 同一套设计：64x64 虚拟坐标按 1.3125 缩放居中到 108dp 安全区内
+     白杠 (18,20)-(46,20)/(18,44)-(46,44) 笔宽 5.5；琥珀斜杠 (46,20)-(18,44) 渐变 #ffc531→#ff7a18 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:pathData="M35.625,38.25 L72.375,38.25"
+        android:strokeColor="#f5f6fa"
+        android:strokeWidth="7.21875"
+        android:strokeLineCap="butt" />
+
+    <path
+        android:pathData="M35.625,69.75 L72.375,69.75"
+        android:strokeColor="#f5f6fa"
+        android:strokeWidth="7.21875"
+        android:strokeLineCap="butt" />
+
+    <path
+        android:pathData="M72.375,38.25 L35.625,69.75"
+        android:strokeWidth="7.21875"
+        android:strokeLineCap="butt">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="72.375"
+                android:startY="38.25"
+                android:endX="35.625"
+                android:endY="69.75"
+                android:startColor="#ffc531"
+                android:endColor="#ff7a18" />
+        </aapt:attr>
+    </path>
+
+</vector>

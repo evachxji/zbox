@@ -1,0 +1,9 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!-- 与 PC 端 app.make_icon 同一套设计：深靛渐变底（左上 #262b45 → 右下 #161a2b） -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <gradient
+        android:type="linear"
+        android:angle="315"
+        android:startColor="#262b45"
+        android:endColor="#161a2b" />
+</shape>
