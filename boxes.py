@@ -19,6 +19,9 @@
 - 双击桌面空白处显隐「桌面图标 + 全部格子 + 面板」：独立线程轮询左键自判双击
   （不用 WH_MOUSE_LL 全局钩子——每个系统鼠标事件都要等 Python 回调拿 GIL，拖拽时全系统
   鼠标卡顿，ctypes 回调里的崩溃还会直接闪退进程）；命中判定与旧钩子版一致。
+- 全隐藏态的桌面右键拦截（DesktopRightClickHook）：短命 WH_MOUSE_LL 吞掉桌面右键的系统
+  菜单、弹自己的单项菜单「显示桌面图标」。与上面「不用常驻 LL 钩子」不冲突——只在全隐藏
+  期间安装、恢复即卸载，回调只处理右键。阻塞式 GetMessage 泵是硬要求（见类 docstring）。
 - 视觉固定深色磨砂：格子贴在壁纸上，跟随面板明暗主题都不合适，故不挂主题系统。
   注意 WA_TranslucentBackground 会禁用 ClearType（app.py 面板因此不用它），
   格子文字少且参考软件本身就是半透明的，这里接受这个取舍。
@@ -145,6 +148,7 @@ _LVS_AUTOARRANGE = 0x0100
 _STAGE_NAME = '.zbox'
 
 SORT_CHOICES = [('name', '按名称'), ('type', '按类型'), ('mtime', '按修改时间')]
+VIEW_CHOICES = [('list', '按列表查看'), ('icon', '按图标查看')]
 
 TITLE_H = 30        # 标题栏高（设计像素，运行时过 sc()）
 EDGE = 10           # 边缘缩放命中宽度
@@ -170,7 +174,8 @@ QLineEdit#boxNameEdit { color: rgba(255,255,255,235); background: rgba(255,255,2
                         selection-background-color: rgba(255,255,255,90); }
 QListWidget { background: transparent; border: none; outline: none;
               color: rgba(255,255,255,225); font-size: @LFS@px; }
-QListWidget::item { height: @IH@px; border-radius: 4px; padding-left: 4px; }
+QListWidget::item { border-radius: 4px; }
+QListWidget[view="list"]::item { height: @IH@px; padding-left: 4px; }
 QListWidget::item:hover { background: rgba(255,255,255,16); }
 QListWidget::item:selected { background: rgba(255,255,255,30); }
 QScrollBar:vertical { width: @SBW@px; background: transparent; margin: 2px 2px 2px 0px; }
@@ -312,6 +317,7 @@ class BoxList(QListWidget):
     def __init__(self, box):
         super(BoxList, self).__init__()
         self.box = box
+        self.setProperty('view', 'list')   # QSS 行高选择器用；set_view 里切换并重刷样式
         self.setViewMode(QListWidget.ListMode)
         self.setIconSize(QSize(ui.sc(16), ui.sc(16)))
         self.setResizeMode(QListWidget.Adjust)
@@ -321,6 +327,28 @@ class BoxList(QListWidget):
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.itemDoubleClicked.connect(lambda it: self.box.open_path(it.data(Qt.UserRole)))
         self._menu_press_ts = 0.0   # 最近一次「点掉外壳菜单」的那按下（见 mouseDoubleClickEvent）
+
+    def set_view(self, key):
+        """按列表 / 按图标查看。图标视图 = 32px 图标 + 固定网格 + 名称两行折行；
+        QSS 的固定行高只对 list 生效（view 属性选择器），切完必须 unpolish/polish。"""
+        if key == 'icon':
+            self.setViewMode(QListWidget.IconMode)
+            self.setIconSize(QSize(ui.sc(32), ui.sc(32)))
+            self.setGridSize(QSize(ui.sc(84), ui.sc(72)))
+            self.setWordWrap(True)
+            # 按像素滚动：IconMode 下默认 ScrollPerItem 的步进极小，滚轮滚很久才动一点
+            self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+            self.verticalScrollBar().setSingleStep(ui.sc(24))   # 一 notch(3 行) ≈ 一格高
+        else:
+            self.setViewMode(QListWidget.ListMode)
+            self.setIconSize(QSize(ui.sc(16), ui.sc(16)))
+            self.setGridSize(QSize())   # 无效 QSize = 恢复自动
+            self.setWordWrap(False)
+            self.setVerticalScrollMode(QAbstractItemView.ScrollPerItem)
+        self.setProperty('view', key)
+        st = self.style()
+        st.unpolish(self)
+        st.polish(self)
 
     def mousePressEvent(self, e):
         # 菜单正开着（或刚被点关掉）时落下的这一按，就是「点掉那个菜单」的那一下——
@@ -728,14 +756,56 @@ class BoxWindow(QWidget):
         self.name.setText(self.rec['name'])
         self.set_collapsed(self.rec.get('collapsed', False), save=False)
         self.set_locked(self.rec.get('locked', False), save=False)
+        self.list.set_view(self.rec.get('view', 'list'))
 
     def _icon_for(self, path, is_dir):
-        """QFileIconProvider 需要 QFileInfo；文件夹图标直接取 style 的标准图标更稳。"""
+        """QFileIconProvider 需要 QFileInfo；文件夹图标直接取 style 的标准图标更稳。
+        .url 走 _url_icon：QFileIconProvider 不读文件里的 IconFile 指令，只给空白页图标。"""
+        if not is_dir and path.lower().endswith('.url'):
+            icon = self._url_icon(path)
+            if icon is not None:
+                return icon
         from PyQt5.QtCore import QFileInfo
         from PyQt5.QtWidgets import QFileIconProvider
         if not hasattr(self, '_icon_provider'):
             self._icon_provider = QFileIconProvider()
         return self._icon_provider.icon(QFileInfo(path))
+
+    def _url_icon(self, path):
+        """解析 .url 里的 IconFile/IconIndex，ExtractIconExW 取图标（同资源管理器）；没有就返回 None。"""
+        icon_file, idx = '', 0
+        try:
+            with open(path, encoding='utf-8', errors='ignore') as f:
+                for raw in f:
+                    line = raw.strip()
+                    low = line.lower()
+                    if low.startswith('iconfile='):
+                        icon_file = os.path.expandvars(line[9:].strip())
+                    elif low.startswith('iconindex='):
+                        try:
+                            idx = int(line[10:].strip())
+                        except ValueError:
+                            pass
+        except OSError:
+            return None
+        if not icon_file or not os.path.isfile(icon_file):
+            return None
+        h_big, h_small = ctypes.c_void_p(), ctypes.c_void_p()
+        _s32.ExtractIconExW.restype = wintypes.UINT
+        _s32.ExtractIconExW.argtypes = [wintypes.LPCWSTR, ctypes.c_int,
+                                        ctypes.c_void_p, ctypes.c_void_p, wintypes.UINT]
+        if _s32.ExtractIconExW(icon_file, idx, ctypes.byref(h_big), ctypes.byref(h_small), 1) <= 0:
+            return None
+        from PyQt5.QtWinExtras import QtWin
+        ctypes.windll.user32.DestroyIcon.argtypes = [wintypes.HANDLE]
+        icon = QIcon()
+        for h in (h_small, h_big):   # 列表视图用 16px、图标视图用 32px，两档都收
+            if h:
+                pm = QtWin.fromHICON(int(h.value))   # 必须传 int 句柄，c_void_p 会得空图
+                ctypes.windll.user32.DestroyIcon(int(h.value))
+                if not pm.isNull():
+                    icon.addPixmap(pm)
+        return icon if not icon.isNull() else None
 
     def display_dir(self):
         """格子内容所在目录：映射格子是映射的目录，空白格子是桌面（文件都在桌面上）。"""
@@ -770,7 +840,7 @@ class BoxWindow(QWidget):
 
         self.list.clear()
         for name, p, is_dir, st in entries:
-            disp = name[:-4] if name.lower().endswith('.lnk') else name   # 快捷方式不显示 .lnk 后缀
+            disp = name[:-4] if name.lower().endswith(('.lnk', '.url')) else name   # 快捷方式不显示 .lnk/.url 后缀
             item = QListWidgetItem(self._icon_for(p, is_dir), disp)
             item.setData(Qt.UserRole, p)
             item.setToolTip(p)
@@ -1171,6 +1241,14 @@ class BoxWindow(QWidget):
     def _show_menu(self):
         menu = QMenu(self)
         grp = QActionGroup(menu)
+        for key, label in VIEW_CHOICES:
+            act = menu.addAction(label)
+            act.setCheckable(True)
+            act.setChecked(self.rec.get('view', 'list') == key)
+            grp.addAction(act)
+            act.triggered.connect(lambda _c=False, k=key: self._set_view(k))
+        menu.addSeparator()
+        grp = QActionGroup(menu)
         for key, label in SORT_CHOICES:
             act = menu.addAction(label)
             act.setCheckable(True)
@@ -1180,6 +1258,11 @@ class BoxWindow(QWidget):
         menu.addSeparator()
         menu.addAction('解散格子', self.dissolve)
         menu.exec_(QCursor.pos())
+
+    def _set_view(self, key):
+        self.rec['view'] = key
+        self.mgr.save_rec(self)
+        self.list.set_view(key)
 
     def _set_sort(self, key):
         self.rec['sort'] = key
@@ -2241,6 +2324,49 @@ def _log_hook_error():
         pass
 
 
+class _MSLLHOOKSTRUCT(ctypes.Structure):
+    _fields_ = [('pt', wintypes.POINT), ('mouseData', wintypes.DWORD),
+                ('flags', wintypes.DWORD), ('time', wintypes.DWORD),
+                ('dwExtraInfo', ctypes.c_size_t)]   # ULONG_PTR
+
+
+_LOWLEVELPROC = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, ctypes.c_int,
+                                   ctypes.c_size_t, ctypes.c_size_t)
+
+
+def _hit_desktop(pt, own, my_pid, sw, sh, blank_only):
+    """桌面命中测试（DesktopClickHook 双击判定与 DesktopRightClickHook 右键拦截共用）。
+    命中窗口沿父链走：先碰到我们自己的窗口（own）则忽略；SysListView32/SHELLDLL_DefView
+    只有根窗口是 Progman/WorkerW 才是桌面（资源管理器窗口里也有这两个壳视图）；
+    桌面整理软件的全屏覆盖层也算（与 app.probe_desktop 同一判定）。
+    blank_only=True 时点中图标/文件夹不算空白（双击文件夹不能触发显隐）；右键拦截不需要区分。"""
+    h = ui._u32.WindowFromPoint(pt)
+    pid = wintypes.DWORD()
+    ui._u32.GetWindowThreadProcessId(h, ctypes.byref(pid))
+    if pid.value == my_pid:
+        # 本进程窗口一律不算桌面：文件夹选择框等系统对话框跑在本进程里，
+        # 内嵌 SysListView32，不挡会在框里双击空白时误判成双击桌面
+        return False
+    while h:
+        if h in own:
+            return False
+        cls = ui._class_name(h)
+        if cls == 'SysListView32' or cls == 'SHELLDLL_DefView':
+            if ui._class_name(ui._u32.GetAncestor(h, ui._GA_ROOT)) not in ('Progman', 'WorkerW'):
+                return False
+            if not blank_only:
+                return True
+            # 点在图标/文件夹上不算空白：双击文件夹不能触发显隐
+            return cls == 'SHELLDLL_DefView' or not _desktop_icon_at(h, pt)
+        if cls in ui._PROG_FAMILY:
+            return True
+        # 桌面整理软件的全屏覆盖层：与 app.probe_desktop 同一判定
+        if ui._is_desktop_surface(h, sw, sh):
+            return True
+        h = ui._u32.GetParent(h)
+    return False
+
+
 class DesktopClickHook(QThread):
     """双击桌面空白处 → 显隐全部格子。
     WH_MOUSE_LL 看不到 WM_LBUTTONDBLCLK（它是投递时才合成的），
@@ -2273,32 +2399,7 @@ class DesktopClickHook(QThread):
         my_pid = k32.GetCurrentProcessId()
 
         def _is_desktop(pt):
-            h = ui._u32.WindowFromPoint(pt)
-            pid = wintypes.DWORD()
-            ui._u32.GetWindowThreadProcessId(h, ctypes.byref(pid))
-            if pid.value == my_pid:
-                # 本进程窗口一律不算桌面：文件夹选择框等系统对话框跑在本进程里，
-                # 内嵌 SysListView32，不挡会在框里双击空白时误判成双击桌面
-                return False
-            own = self.own_hwnds()
-            while h:
-                if h in own:
-                    return False
-                cls = ui._class_name(h)
-                if cls == 'SysListView32' or cls == 'SHELLDLL_DefView':
-                    # 资源管理器窗口（CabinetWClass）里也有这两个壳视图：
-                    # 只有根窗口是 Progman/WorkerW 的才是桌面，否则一律不算
-                    if ui._class_name(ui._u32.GetAncestor(h, ui._GA_ROOT)) not in ('Progman', 'WorkerW'):
-                        return False
-                    # 点在图标/文件夹上不算空白：双击文件夹不能触发显隐
-                    return cls == 'SHELLDLL_DefView' or not _desktop_icon_at(h, pt)
-                if cls in ui._PROG_FAMILY:
-                    return True
-                # 桌面整理软件的全屏覆盖层：与 app.probe_desktop 同一判定
-                if ui._is_desktop_surface(h, sw, sh):
-                    return True
-                h = ui._u32.GetParent(h)
-            return False
+            return _hit_desktop(pt, self.own_hwnds(), my_pid, sw, sh, blank_only=True)
 
         # 轮询左键代替 LL 钩子：只在本线程内做事，_is_desktop 的跨进程命中测试
         # 最坏多占几毫秒，也绝不影响系统鼠标管道。
@@ -2340,6 +2441,124 @@ class DesktopClickHook(QThread):
         self.wait(2000)
 
 
+class DesktopRightClickHook(QThread):
+    """全隐藏态专用：WH_MOUSE_LL 吞掉落在桌面上的右键（Explorer 收不到，系统菜单不弹），
+    再发信号让 GUI 线程弹自己的单项菜单「显示桌面图标」。只在全隐藏期间安装钩子、
+    恢复显示立即卸载——平时对系统鼠标零开销。
+    与文件头「不用 WH_MOUSE_LL」的教训不冲突：那里反对的是常驻全量钩子（每个鼠标
+    事件都等 Python 回调拿 GIL）；这里钩子短命、回调只做一次 wParam 比较就放行，
+    只有右键按下才做命中测试。两个硬约束：
+    - WH_MOUSE_LL 回调靠安装线程的消息泵派发，且事件要等钩子链返回才投递给目标
+      窗口，所以 run() 必须用阻塞式 GetMessage 泵——轮询泵会给全系统鼠标事件加延迟；
+    - ctypes 回调里的异常不走 sys.excepthook、还会向系统返回垃圾值，必须就地兜住落盘。"""
+
+    right_clicked = pyqtSignal()
+    # 菜单开着时点了菜单以外：True = 桌面右键（关掉并在新位置重弹），False = 只关掉
+    outside_clicked = pyqtSignal(bool)
+
+    def __init__(self, own_hwnds, parent=None):
+        super(DesktopRightClickHook, self).__init__(parent)
+        self.own_hwnds = own_hwnds   # callable -> set(int)
+        self.menu_open = False   # GUI 线程写：单项菜单开着时，钩子接管菜单以外的点击
+        self._stop = False
+        self._tid = None
+
+    def start(self):
+        # _stop 由 start() 清而不是 run() 清：run() 清会丢掉「stop 抢在 run 进泵前」的
+        # 竞态（run 把自己刚被置位的 _stop 又抹掉，泵就永远退不出）
+        self._stop = False
+        super(DesktopRightClickHook, self).start()
+
+    def run(self):
+        u32 = ctypes.windll.user32
+        k32 = ctypes.windll.kernel32
+        # windll 默认按 32 位 int 截断参数/返回值，64 位下句柄与指针必须先声明原型
+        u32.SetWindowsHookExW.restype = ctypes.c_void_p
+        u32.SetWindowsHookExW.argtypes = [ctypes.c_int, _LOWLEVELPROC,
+                                          ctypes.c_void_p, wintypes.DWORD]
+        u32.CallNextHookEx.restype = ctypes.c_ssize_t
+        u32.CallNextHookEx.argtypes = [ctypes.c_void_p, ctypes.c_int,
+                                       ctypes.c_size_t, ctypes.c_size_t]
+        u32.UnhookWindowsHookEx.argtypes = [ctypes.c_void_p]
+        u32.PostThreadMessageW.argtypes = [wintypes.DWORD, wintypes.UINT,
+                                           ctypes.c_size_t, ctypes.c_size_t]
+        self._tid = k32.GetCurrentThreadId()
+        if self._stop:   # stop() 抢在进泵前到了（_tid 未设，WM_QUIT 发不出）：别装钩子直接退
+            self._tid = None
+            return
+        my_pid = k32.GetCurrentProcessId()
+        sw = u32.GetSystemMetrics(0)
+        sh = u32.GetSystemMetrics(1)
+        sw_l = [False]   # 左/右键按下被吞时，对应松开/双击也要吞，
+        sw_r = [False]   # 否则桌面收到一个没有按下的 BUTTONUP
+
+        def proc(nCode, wParam, lParam):
+            try:
+                if nCode == 0:   # HC_ACTION；nCode < 0 时 lParam 无效，必须直接放行
+                    if wParam in (0x0201, 0x0204):   # WM_LBUTTONDOWN / WM_RBUTTONDOWN
+                        right = wParam == 0x0204
+                        ms = ctypes.cast(lParam, ctypes.POINTER(_MSLLHOOKSTRUCT)).contents
+                        h = ui._u32.WindowFromPoint(ms.pt)
+                        pid = wintypes.DWORD()
+                        ui._u32.GetWindowThreadProcessId(h, ctypes.byref(pid))
+                        if pid.value == my_pid:
+                            pass   # 自己进程的窗口（含弹出的菜单）：Qt 自己处理，点菜单项才点得上
+                        elif self.menu_open:
+                            # 菜单开着时点外面（Qt 的弹窗抓取抓不住桌面点击——SetCapture
+                            # 只在抓取时有按键按住才管别的线程窗口，菜单是从队列信号弹出的，
+                            # 所以「点外面关闭」只能由钩子代劳）：
+                            # 左键/点别的应用 = 发信号关掉；桌面右键 = 发信号关掉并在新位置重弹
+                            on_desktop = _hit_desktop(ms.pt, self.own_hwnds(), my_pid, sw, sh,
+                                                      blank_only=False)
+                            self.outside_clicked.emit(bool(right and on_desktop))
+                            if on_desktop:
+                                (sw_r if right else sw_l)[0] = True
+                                return 1   # 桌面上的点击吞掉：系统菜单不弹、框选不发生
+                            # 点在别的应用窗口：放行让窗口正常激活，菜单由信号关掉
+                        elif right and _hit_desktop(ms.pt, self.own_hwnds(), my_pid, sw, sh,
+                                                    blank_only=False):
+                            sw_r[0] = True
+                            self.right_clicked.emit()   # 队列到 GUI 线程弹菜单
+                            return 1   # 吞掉：Explorer 收不到这次点击，系统菜单不弹
+                    elif wParam == 0x0202 and sw_l[0]:   # WM_LBUTTONUP
+                        sw_l[0] = False
+                        return 1
+                    elif wParam == 0x0203 and sw_l[0]:   # WM_LBUTTONDBLCLK
+                        return 1
+                    elif wParam == 0x0205 and sw_r[0]:   # WM_RBUTTONUP
+                        sw_r[0] = False
+                        return 1
+                    elif wParam == 0x0206 and sw_r[0]:   # WM_RBUTTONDBLCLK
+                        return 1
+            except Exception:
+                _log_hook_error()
+            return u32.CallNextHookEx(None, nCode, wParam, lParam)
+
+        cb = _LOWLEVELPROC(proc)   # 必须留住引用：回调被 GC 后系统再来消息 = 进程崩
+        hook = u32.SetWindowsHookExW(14, cb, None, 0)   # WH_MOUSE_LL
+        if not hook:
+            return   # 装不上就降级：桌面右键只剩注册表那枚单项菜单（系统菜单照常弹）
+        msg = wintypes.MSG()
+        while not self._stop:
+            r = u32.GetMessageW(ctypes.byref(msg), None, 0, 0)
+            if r <= 0:   # 0 = WM_QUIT（stop() 投递），-1 = 错误
+                break
+            u32.TranslateMessage(ctypes.byref(msg))
+            u32.DispatchMessageW(ctypes.byref(msg))
+        u32.UnhookWindowsHookEx(hook)
+        self._tid = None
+
+    def stop(self):
+        self._stop = True
+        tid = self._tid
+        if tid and self.isRunning():
+            # 唤醒阻塞在 GetMessage 的泵让它看到 _stop。
+            # 时序安全：run() 先设 _tid 再进泵——tid 读到了就一定能唤醒；
+            # tid 还没设说明 run() 未进泵，_stop 置位会让它装完钩子前直接退。
+            ctypes.windll.user32.PostThreadMessageW(tid, 0x0012, 0, 0)   # WM_QUIT
+        self.wait(2000)
+
+
 class BoxManager(object):
     """格子总管：恢复/新建/解散/显隐，维护双击桌面钩子。"""
 
@@ -2348,9 +2567,15 @@ class BoxManager(object):
         self.box_root = os.path.join(data_dir, 'Boxes')
         self.panel = panel
         self.windows = []
+        self.menu_icon = None   # 右键菜单图标路径，main.pyw 注入（frozen 用 exe 自带图标，不用传）
         self._own_hwnd_cache = frozenset()
         self.hook = DesktopClickHook(self.own_hwnds)
         self.hook.double_clicked.connect(self.toggle_all)
+        self.rhook = DesktopRightClickHook(self.own_hwnds)
+        self.rhook.right_clicked.connect(self._popup_show_icons_menu)
+        self.rhook.outside_clicked.connect(self._menu_outside_clicked)
+        self._menu = None          # 全隐藏态弹出的单项菜单（开着时非 None）
+        self._reopen_menu = False  # 桌面右键换位置：关掉当前菜单后在光标处重弹
         if panel.cfg.data.get('box_dblclick', True):
             self.hook.start()
         self.restore()
@@ -2533,6 +2758,40 @@ class BoxManager(object):
             if w.rec['kind'] == 'blank':
                 (w.hide_icons if show else w.show_icons)()
 
+    # 显示三连的实测绘制延迟（2026-10 本机实测，ShowWindow/setVisible 调用到画出来）：
+    # 面板 ~165ms、格子 ~255ms、桌面图标 ~480ms（Explorer 画图标最慢且不受我们控制）。
+    # 按延迟倒序错峰翻牌，三者凑到同一帧出现；数值是经验值，别的机器略有出入无妨。
+    _SHOW_DELAY_BOXES = 230
+    _SHOW_DELAY_PANEL = 320
+
+    def _show_everything(self, lv):
+        """显示三连凑同一帧：先做掉所有慢操作（空白格子收文件图标要逐文件改属性 +
+        SHChangeNotify 同步等壳刷新、写盘），然后按绘制延迟倒序错峰翻牌——
+        桌面图标（最慢）→ 格子 → 面板（最快），三者同时画完。
+        （旧顺序三连紧挨着翻，但三方绘制耗时长短不一，用户看到的是格子→面板→图标三批。）"""
+        self.store.data['visible'] = True
+        self.store.save()
+        for w in self.windows:
+            if w.rec['kind'] == 'blank':
+                w.hide_icons()   # 慢操作全部前置（_hide_icon 对已隐藏的早退，重复调用安全）
+        if lv:
+            ui._u32.ShowWindow(lv, 5)   # SW_SHOW：最慢的先开始画
+        QTimer.singleShot(self._SHOW_DELAY_BOXES, self._show_boxes)
+        QTimer.singleShot(self._SHOW_DELAY_PANEL, self._show_panel)
+
+    def _show_boxes(self):
+        if not self.store.data.get('visible', True):
+            return   # 错峰等待期间用户又双击收起来了，别再放出来
+        for w in self.windows:
+            w.setVisible(True)
+
+    def _show_panel(self):
+        if not self.store.data.get('visible', True):
+            return   # 同上
+        self.panel.show()   # 与 panel.toggle_visible 的显示分支一致
+        self.panel.raise_()
+        self.panel.activateWindow()
+
     def toggle_all(self):
         """双击桌面空白处：桌面图标 + 全部格子 + 面板一起显隐。
         任一还可见就算「显示中」，全部收起来；全收了再一起放出来。
@@ -2542,18 +2801,63 @@ class BoxManager(object):
                    or any(w.isVisible() for w in self.windows)
                    or bool(lv and ui._u32.IsWindowVisible(lv)))
         show = not showing
-        self.set_boxes_visible(show)
-        if show:   # 与 panel.toggle_visible 的显示分支一致
-            self.panel.show()
-            self.panel.raise_()
-            self.panel.activateWindow()
+        if show:
+            self._show_everything(lv)   # 慢操作前置 + 三连翻牌，三者同帧出现
         else:
+            self.set_boxes_visible(False)
             self.panel.close_panel()   # 顶部栏是独立小窗，必须跟着收
-        if lv:
-            ui._u32.ShowWindow(lv, 5 if show else 0)   # SW_SHOW / SW_HIDE
+            if lv:
+                ui._u32.ShowWindow(lv, 0)   # SW_HIDE
+        # 全隐藏态桌面右键收成唯一直链项「显示桌面图标」，恢复后切回级联六项
+        sysutil.context_menu_set_icons_hidden(not show, icon_path=self.menu_icon)
+        # 全隐藏态再挂上右键拦截钩（吞掉系统菜单弹自己的单项菜单）；恢复显示立即卸载，
+        # 钩子只活在这一小段时间——平时对系统鼠标零开销
+        if show:
+            self.rhook.stop()
+        elif not self.rhook.isRunning():
+            self.rhook.start()
+
+    def show_all(self):
+        """桌面右键「显示桌面图标」（仅全隐藏态注入的单项）：图标 + 格子 + 面板一起
+        放出，菜单切回级联。不在全隐藏态（崩溃残留的单项菜单被点到）只拨回菜单形态。"""
+        self.rhook.stop()   # 两个分支的结果都是「不在全隐藏态」，拦截钩一并卸掉
+        lv = find_desktop_listview()
+        if (self.panel.isVisible() or any(w.isVisible() for w in self.windows)
+                or bool(lv and ui._u32.IsWindowVisible(lv))):
+            sysutil.context_menu_set_icons_hidden(False, icon_path=self.menu_icon)
+            return
+        self._show_everything(lv)   # 与 toggle_all 的显示分支同一条路：三者同帧出现
+        sysutil.context_menu_set_icons_hidden(False, icon_path=self.menu_icon)
+
+    def _popup_show_icons_menu(self):
+        """全隐藏态桌面右键（系统菜单已被 DesktopRightClickHook 吞掉）：弹自己的单项菜单。
+        「点外面关闭 / 右键换位置重弹」不靠 Qt 的弹窗抓取（抓不住，见钩子 proc 注释），
+        由钩子的 outside_clicked 信号驱动（_menu_outside_clicked）。"""
+        if self._menu is not None or not self.rhook.isRunning():
+            return   # 已开着（连点右键排队的重复信号），或已不在全隐藏态（重弹定时器晚到）
+        self.rhook.menu_open = True
+        m = QMenu(self.panel)
+        self._menu = m
+        m.addAction(sysutil.SHOW_ICONS_TEXT, self.show_all)
+        m.exec_(QCursor.pos())
+        self._menu = None
+        self.rhook.menu_open = False
+        if self._reopen_menu:   # 桌面右键换了位置：exec_ 已返回、状态归位后在光标处重弹
+            self._reopen_menu = False
+            QTimer.singleShot(0, self._popup_show_icons_menu)
+
+    def _menu_outside_clicked(self, reopen):
+        """菜单开着时点了菜单以外（钩子信号）：左键/点别的应用 = 只关掉；
+        桌面右键 = 关掉并在新位置重弹（重弹标志在 _popup_show_icons_menu 里消费）。"""
+        if self._menu is None:
+            return
+        if reopen:
+            self._reopen_menu = True
+        self._menu.close()
 
     def shutdown(self):
         self.hook.stop()
+        self.rhook.stop()   # 退出时若仍在全隐藏态（--quit / stop.cmd），拦截钩必须卸掉
         # 关程序：空白格子里的文件全部「还原」到桌面（文件本来就在桌面，只是被隐藏了
         # 图标）——不还原的话用户关掉程序后桌面上找不到它们。分组记录留着，下次启动
         # 再收进格子（用户实测：关程序后文件被吞在 AppData 里，就是这个没做）。

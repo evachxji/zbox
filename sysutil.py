@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """系统集成：开机自启 + 桌面/文件夹右键菜单 + 应用列表卸载项。
 默认写 HKCU（免管理员，Win7/10/11 通用）；all_users=True 写 HKLM（exe 安装向导「此计算机」选项，需管理员）。"""
+import json
 import os
 import shutil
 import sys
@@ -25,6 +26,9 @@ MENU_ITEMS = [
 # 否则改名后旧键清不掉，右键菜单新旧并存
 MENU_SUBKEYS_OLD = ['A_Toggle', 'B_NewBox', 'C_NewFolderBox', 'D_ToggleBoxes',
                     'E_Settings', 'F_About', 'G_Quit']
+# 全隐藏态（双击桌面把图标/格子/面板全收起来后）的桌面右键唯一直链项：单击恢复原状
+SHOW_ICONS_TEXT = '显示桌面图标'
+SHOW_ICONS_ARG = '--show-icons'
 IPC_KEY = 'zbox-panel-v1'   # 新名字从 v1 重新起：与旧版 zviber（zviber-panel-v2）天然不串话
 RUN_KEY = r'Software\Microsoft\Windows\CurrentVersion\Run'
 # 右键菜单键相对 HKCR 的路径；ExtendedSubCommandsKey 要的就是这段（不带 Software\Classes\）
@@ -64,19 +68,42 @@ def _migrate_appdata(base, new_dir):
     old = os.path.join(base, 'zviber')
     if not os.path.isdir(old):
         return
+    old_cfg = os.path.join(old, 'config.json')
+    new_cfg = os.path.join(new_dir, 'config.json')
     if not os.path.isdir(new_dir):
         try:
             os.rename(old, new_dir)
+            _reset_migrated_transfer(new_cfg)
             return
         except OSError:
             try:
                 os.makedirs(new_dir)
             except OSError:
                 return
+    had_old_cfg = os.path.isfile(old_cfg)
+    had_new_cfg = os.path.isfile(new_cfg)
     _merge_tree(old, new_dir)
+    if had_old_cfg and not had_new_cfg and not os.path.isfile(old_cfg):
+        _reset_migrated_transfer(new_cfg)   # 旧配置刚搬过来才重置；新目录已有的配置不动
     try:
         os.rmdir(old)      # 只为「空目录残留」清场；非空会抛错，放着下次再搬
     except OSError:
+        pass
+
+
+def _reset_migrated_transfer(cfg_path):
+    """从 zviber 搬来的旧配置里 transfer_enabled 可能是 true（旧版里手动开过传输），
+    升级后第一次启动不该直接监听端口、弹 Windows 防火墙授权——重置为关闭，
+    想用的人在传输页手动启用一次（防火墙提示也出现在那一刻）。"""
+    try:
+        with open(cfg_path, 'r', encoding='utf-8') as f:
+            cfg = json.load(f)
+        if not cfg.get('transfer_enabled'):
+            return
+        cfg['transfer_enabled'] = False
+        with open(cfg_path, 'w', encoding='utf-8') as f:
+            json.dump(cfg, f, ensure_ascii=False)
+    except (ValueError, OSError):
         pass
 
 
@@ -250,6 +277,19 @@ def _write_flat(root, exe, icon_path):
         winreg.SetValueEx(k, None, 0, winreg.REG_SZ, launcher_cmd(exe=exe))
 
 
+def _write_show_icons(root, exe, icon_path):
+    """全隐藏形态：直链单项「显示桌面图标」，单击恢复桌面图标 + 格子 + 面板。
+    结构与 _write_flat 相同（SHELL_KEY + command），整树删除逻辑无需改。"""
+    with winreg.CreateKey(root, SHELL_KEY) as k:
+        winreg.SetValueEx(k, 'MUIVerb', 0, winreg.REG_SZ, SHOW_ICONS_TEXT)
+        icon = _menu_icon(exe, icon_path)
+        if icon:
+            winreg.SetValueEx(k, 'Icon', 0, winreg.REG_SZ, icon)
+    with winreg.CreateKey(root, SHELL_KEY + r'\command') as k:
+        winreg.SetValueEx(k, None, 0, winreg.REG_SZ,
+                          launcher_cmd(arg=SHOW_ICONS_ARG, exe=exe))
+
+
 def _write_cascade(root, exe, icon_path):
     """运行中形态：级联菜单，二级项与托盘右键一致（ExtendedSubCommandsKey 自引用）。
     两个实测坑（Win11 真机验证）：① 别用 SubCommands——它只按 HKLM 的 Explorer\\CommandStore
@@ -309,6 +349,19 @@ def context_menu_set_running(running, icon_path=None):
     elif hkcu_installed and not uninstall_reg_get('InstallLocation', True):
         _write_flat(winreg.HKEY_CURRENT_USER, None, None)
     # 其余情况（HKLM 安装 / 源码运行）：删干净即可，分别回落 HKLM 直链 / 无菜单
+
+
+def context_menu_set_icons_hidden(hidden, icon_path=None):
+    """双击桌面全隐藏后，把桌面右键收成唯一直链项「显示桌面图标」；恢复后切回级联六项。
+    隐藏态只可能由运行中的 toggle_all 造成，故与 context_menu_set_running 一样只写 HKCU
+    （HKLM 安装时同样是写 HKCU 覆盖层）。单项形态下文件夹右键项一并撤掉
+    （_delete_shell_tree 顺手删），恢复时随级联带回。"""
+    if hidden:
+        _delete_shell_tree(winreg.HKEY_CURRENT_USER)
+        _write_show_icons(winreg.HKEY_CURRENT_USER, None, icon_path)
+    else:
+        context_menu_set_running(True, icon_path)
+
 
 def uninstall_reg_install(exe_path, all_users=False, size_kb=None):
     """写入「设置→应用→安装的应用」卸载项。size_kb 不给时按 exe 自身大小估算。"""

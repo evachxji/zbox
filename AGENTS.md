@@ -107,11 +107,17 @@ Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyQ
 - `website/` — 产品介绍页（纯静态无构建），线上 https://zbox.wzyjc.cn（腾讯云 COS 静态托管）；
   `deploy-cos.py` 一键上传部署 / `--bind-cert <ID>` 绑定续期证书，细节见 `.claude/skills/site-deploy/`
 - `android/` — Android 端独立 Gradle 工程（Kotlin + Compose，与 PC 代码完全分离）
+- `build-apk.cmd` — 双击打包 Android APK：自动定位 JDK 17 再调 `gradlew assembleDebug`
+- `assets/` — README 引用的图标与功能截图
+- `docs/` — 历史实现计划存档（`superpowers/plans/`）
 
-运行时数据在 `%APPDATA%\zbox\`（`config.json` / `todos.json` / `holidays.json` / `icons/`）——不要提交。
+运行时数据在 `%APPDATA%\zbox\`（`config.json` / `todos.json` / `holidays.json` / `boxes.json` / `icons/`）——不要提交。
 **目录名 2026-10 由 `zviber` 改成 `zbox`**：`sysutil.appdata_dir()` 首次调用时自动把旧目录搬过来
 （`_migrate_appdata`：整目录 rename → 逐文件 `_merge_tree`；同名文件以新目录为准，被占用的下次启动再搬），
-老用户的待办 / 格子 / 配置不丢。
+老用户的待办 / 格子 / 配置不丢。唯一例外：旧配置里的 `transfer_enabled` 会被
+`_reset_migrated_transfer` 重置为关闭——升级后第一次启动不该直接监听端口、弹防火墙授权，
+想用传输在传输页手动启用一次（防火墙提示出现在那一刻）。只有配置真从旧目录搬过来才重置，
+新目录已有的配置不碰。
 
 ## Build, Test, and Development Commands
 
@@ -123,7 +129,7 @@ native\build_native.cmd      :: 编译外壳菜单宿主 zshell_host.exe（改 n
 python install.py            :: 源码方式开启开机自启
 python install.py --remove   :: 移除自启并清理旧的右键菜单
 python transfer_selftest.py  :: 传输协议自检（全过打印 SELFTEST OK）
-cd android && gradlew.bat assembleDebug   :: 构建 Android debug APK
+cd android && gradlew.bat assembleDebug   :: 构建 Android debug APK（或双击 build-apk.cmd）
 set ZBOX_SHOT=designs\verify && python main.pyw   :: 截图自检
 ```
 
@@ -160,6 +166,27 @@ set ZBOX_SHOT=designs\verify && python main.pyw   :: 截图自检
 
 - 单实例靠 `QLocalServer` 名称 `zbox-panel-v1`；消息由 `_on_ipc` 按 `actions` 字典分发，`quit` 消息供卸载程序请求退出。
 - 桌面右键是**级联菜单**：父项「zbox桌面格子」用 `MUIVerb` + `ExtendedSubCommandsKey` 自引用（子项放父项 `shell\` 子键下，子键名字母序即菜单顺序，故带 A_/B_… 前缀）。两个实测坑：① 别用 `SubCommands` 方案——它只按 **HKLM** 的 `Explorer\CommandStore` 解析，HKCU 的不认，免管理员安装没法用；② 父项绝不能有 `command` 子键，否则退化成直链不展开。6 个二级项：新建格子、新建文件夹格子、显示/隐藏卡片、设置、关于、退出，各走 `--new-box`/`--pick-folder`/`--toggle`/`--settings`/`--about`/`--quit` 命令行参数，经 IPC（`IPC_ACTIONS`）转发给运行中的实例，不新起进程。**菜单形态跟随运行状态**：`context_menu_set_running()` 在面板启停时改写——运行中 = 级联六项，未运行 = 直链单项「单击启动」（安装时写入的就是直链形态）；HKLM 安装无权改写，运行时往 HKCU 写覆盖层、退出删掉回落；源码运行（无安装记录）启动时注入级联菜单、退出时整体删除（崩溃残留由下次启动时 `sync_context_menu` 清掉）。
+  **第三种形态——全隐藏单项**：双击桌面把图标/格子/面板全收起来后，`toggle_all` 调
+  `context_menu_set_icons_hidden(True)` 把桌面右键收成唯一直链项「显示桌面图标」
+  （`--show-icons` 经 IPC 调 `BoxManager.show_all`，图标 + 格子 + 面板一起放回），恢复后切回级联；
+  文件夹右键项在单项形态下一并撤掉、恢复时随级联带回。无实例时点到残留单项 = 正常启动后菜单归位。
+  单项形态下还有一层主动拦截：`DesktopRightClickHook`（WH_MOUSE_LL）把落在桌面上的右键吞掉，
+  Explorer 的系统菜单整体不弹，改弹自己的 QMenu 单项。「点外面关闭 / 右键换位置重弹」不靠
+  Qt 的弹窗鼠标抓取（SetCapture 只在抓取时有按键按住才管别的线程窗口，菜单是从队列信号
+  弹出的、抓不住桌面点击），由钩子代劳：菜单开着时点菜单以外发 `outside_clicked`——
+  点桌面吞掉（系统菜单不弹、框选不发生）、点别的应用放行（窗口正常激活）只关菜单；
+  桌面右键关掉当前菜单并在新位置重弹（`_reopen_menu` 标志，exec_ 返回后 singleShot 重弹）。
+  点菜单自身（本进程窗口）放行给 Qt，菜单项才点得上。钩子只在全隐藏期间安装、恢复立即卸载，
+  回调对非右键消息只做一次 wParam 比较就放行——与 boxes.py 文件头「不用常驻 WH_MOUSE_LL」的
+  教训不冲突（那里反对的是常驻全量钩子）。两个硬约束：run() 必须用阻塞式 GetMessage 泵
+  （LL 钩子回调靠安装线程的消息泵派发，事件要等钩子链返回才投递，轮询泵会给全系统鼠标加延迟）；
+  ctypes 回调异常就地兜住落盘。命中判定与双击共用 `_hit_desktop`（blank_only 区分点中图标）。
+  钩子装不上时降级：系统菜单照常弹，但里面只剩注册表那枚单项。
+  恢复显示三者同帧：`_show_everything`（toggle_all 与 show_all 共用）先把收文件图标等
+  慢操作（逐文件改属性 + SHChangeNotify）做完，再按实测绘制延迟倒序错峰翻牌——
+  桌面图标（Explorer 画得最慢，~480ms）立即翻，格子延迟 ~230ms、面板延迟 ~320ms
+  （`_SHOW_DELAY_BOXES`/`_SHOW_DELAY_PANEL`，经验值），三者凑到同一帧出现。
+  紧挨着三连翻没用：三方绘制耗时不同，用户看到的是格子→面板→图标三批。
 - `installer.setup_main()`（setup exe 入口）里 `ZBOX_AUTO_INSTALL` 是静默安装测试钩子。
 - **没有系统托盘图标**（已移除）：显隐/新建格子/设置/关于/退出等入口全在桌面右键级联菜单，
   别再往回加托盘。设置窗口是**非模态**的（桌面右键「设置」），已开着就 `raise_()`，不会叠第二个。
@@ -341,6 +368,23 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
 IPC 通道（与 `--pick-folder` 同一条）发回面板建格子；`new_folder` 按 normcase 去重——同一路径
 已有格子不新建，改为显示出来并 `flash()` 透明度闪烁提示（「新建文件夹格子」对话框路线同样去重）。
 
+- **格子内容两种视图**（标题栏 ≡ 菜单「查看」组，`rec['view']` 持久化，与排序组并列）：
+  按列表（默认，ListMode + 16px 图标）/ 按图标（IconMode + 32px 图标 + 固定网格
+  sc(84)×sc(72) + 名称两行折行）。QSS 里固定行高/左 padding 只对列表生效——
+  选择器是 `QListWidget[view="list"]::item`，切换走 `BoxList.set_view`（改 `view`
+  动态属性后 unpolish/polish 重刷），直接 setViewMode 不改属性会留着列表行高把图标格压扁。
+  - **图标视图必须切 ScrollPerPixel**：IconMode 下默认 ScrollPerItem 的滚轮步进极小
+    （滚很久只动一点），set_view 里顺带 `verticalScrollBar().setSingleStep(sc(24))`
+    （一 notch ≈ 一格高）；切回列表恢复 ScrollPerItem。
+  - **缩放卡顿是半透明分层窗口的结构性成本，别轻易再试「优化」**：格子是
+    `WA_TranslucentBackground`，每次 resize = 布局 + CPU 光栅化全帧 + 整帧 ARGB
+    上传 DWM（Qt5 不吃 GPU），而 move 零重绘所以拖动丝滑（实测 1.4-1.8ms vs 0.23ms）。
+    2026-10 试过帧合流（8ms 定时器合并 mousemove）与双击当 press 修复，用户实测
+    仍有行为问题，已整体回退——缩放维持每个 mousemove 直接 `_apply_resize` 的原始
+    实现。两个相关事实备查：① 500ms 内的第二次按下 Qt 发 `MouseButtonDblClick`
+    而非 Press（快速两抓时整次抓取无 `_op`，目前按原样保留）；②
+    `QWidget.mouseDoubleClickEvent` 默认转发 `mousePressEvent`，收起格子后 `_op`
+    残留一个 move 即来源于此，松手收尾无害。
 - **层级策略（踩坑三轮后的终态）：挂桌面带（`pin_to_desktop`，免疫 Win+D）
   + 永不主动沉底 + 被桌面整理表层压住时由 WinEvent 钩子/看门狗抬回。**
   带内窗口点击激活会浮到应用窗口之上（实测确认），只要不主动 sink 它就一直在，
@@ -591,7 +635,7 @@ IPC 通道（与 `--pick-folder` 同一条）发回面板建格子；`new_folder
   `ctxmenu: R=… 用时=…s 在途=…`（按每个请求自己的发出时刻算；有请求没应答=宿主不健康）。
   排查「误激活」时 `tpm cmd≠0` 就是「有项被执行了」的判据（cmd=0 既可能是用户取消、
   也可能是正常关闭），`elapsed` 是菜单存活时长——空放很久的菜单突然返回 cmd，八成是键盘。
-- 列表里 `.lnk` 显示名去掉后缀（对齐资源管理器），UserRole 仍存完整路径，拖出/打开不受影响
+- 列表里 `.lnk` / `.url` 显示名去掉后缀（对齐资源管理器），UserRole 仍存完整路径，拖出/打开不受影响；`.url` 图标走 `_url_icon`：解析文件里的 `IconFile`/`IconIndex` 用 `ExtractIconExW` 取（大小两档），`QFileIconProvider` 不读 IconFile、只给空白页图标；`QtWin.fromHICON` 必须传 int 句柄，传 c_void_p 得空图；取不到回落 provider
 - **双击只认左键**：`BoxList.mouseDoubleClickEvent` / `BoxWindow.mouseDoubleClickEvent` 开头都对
   非左键早退。原因：**Qt 对右键也发双击事件**（实测：同一位置两次右键、间隔 <500ms 即触发
   `itemDoubleClicked`；位移 ~40px 以上不触发），而 `BoxList` 把 `itemDoubleClicked` 直接接到了
@@ -659,7 +703,7 @@ HTTP 模式无加密，只面向可信局域网。组播失效时有 /24 子网�
 - Android 端在 `android/`：独立 Gradle 工程（Kotlin + Compose + OkHttp + NanoHTTPD，minSdk 26），
   与 PC 代码完全分离；指纹/别名/保存目录存 SharedPreferences，SAF 落盘，仅前台传输
   （`onStop` 即停服务）。
-- `config.json` 新增键：`transfer_fingerprint` / `transfer_alias` / `transfer_dir` / `transfer_enabled`（默认 false，老用户升级后同样默认关闭，需手动启用一次）。
+- `config.json` 新增键：`transfer_fingerprint` / `transfer_alias` / `transfer_dir` / `transfer_enabled`（默认 false；zviber→zbox 迁移时旧值被 `_reset_migrated_transfer` 重置为关闭，升级用户需手动启用一次）。
 
 
 
@@ -695,7 +739,7 @@ PR 需说明改了什么与为什么；视觉改动附自检截图；注明验�
 ## Security & Configuration Tips
 
 - 注册表只写 HKCU（免管理员）；「此计算机」安装写 HKLM 才需要 UAC 提权
-- 网络访问仅限 timor.tech 的节假日接口——该接口不带 User-Agent 会回 403；
+- 网络访问仅限三个节假日数据源（timor.tech / jiejiariapi.com / cdn.jsdelivr.net，按序回退，见 `calendar_data.SOURCES`）——timor.tech 不带 User-Agent 会回 403；
   内网用户走离线 JSON 导入，这条路径必须一直可用
 - 局域网传输监听 TCP/UDP 53327（自定义端口，与官方 LocalSend 53317 隔离不互通）；
   HTTP 无加密，仅限可信局域网；Windows 防火墙首次监听会弹授权，需允许

@@ -1708,6 +1708,12 @@ class SettingsDialog(QDialog):
             lb.setObjectName('setLabel')
             return lb
 
+        # 开机自启
+        auto = QCheckBox('登录 Windows 后自动启动')
+        auto.setChecked(bool(sysutil.autostart_get()))
+        auto.toggled.connect(lambda on: sysutil.autostart_set() if on else sysutil.autostart_remove())
+        form.addRow(row_label('开机自启'), auto)
+
         # 主题
         theme_row = QHBoxLayout()
         theme_row.setSpacing(sc(14))
@@ -1719,6 +1725,37 @@ class SettingsDialog(QDialog):
         theme_row.addStretch(1)
         form.addRow(row_label('主题'), theme_row)
 
+
+        # 桌面格子
+        dbl = QCheckBox('双击桌面显示 / 隐藏格子')
+        dbl.setChecked(bool(cfg.data.get('box_dblclick', True)))
+
+        def commit_dblclick(on):
+            cfg.set('box_dblclick', bool(on))
+            if boxmgr is not None:
+                boxmgr.set_dblclick_enabled(bool(on))
+        dbl.toggled.connect(commit_dblclick)
+        form.addRow(row_label('格子'), dbl)
+
+        # 分隔线：通用设置 / 日历与时间
+        sep1 = QFrame()
+        sep1.setObjectName('setSep')
+        sep1.setFixedHeight(1)
+        form.addRow(sep1)
+
+        # 日历假期数据
+        holiday_row = QHBoxLayout()
+        holiday_row.setSpacing(sc(8))
+        self._on_fetch = on_fetch
+        self.btn_fetch = QPushButton('联网更新')
+        self.btn_fetch.setObjectName('setBtn')
+        self.btn_fetch.clicked.connect(self._fetch_clicked)
+        holiday_row.addWidget(self.btn_fetch)
+        b = QPushButton('导入 JSON…')
+        b.setObjectName('setBtn')
+        b.clicked.connect(on_import)
+        holiday_row.addWidget(b)
+        form.addRow(row_label('日历假期'), holiday_row)
 
         # 下班倒计时（自由文本输入 + 时钟弹层）
         # 用 QLineEdit 而非 QTimeEdit：QTimeEdit 是按时/分分段校验的，全选后直接打字会被
@@ -1800,17 +1837,17 @@ class SettingsDialog(QDialog):
         evening.textChanged.connect(lambda _t: commit_single(evening, 'off_evening', False))
         evening.editingFinished.connect(lambda: commit_single(evening, 'off_evening', True))
 
-        # 开机自启
-        auto = QCheckBox('登录 Windows 后自动启动')
-        auto.setChecked(bool(sysutil.autostart_get()))
-        auto.toggled.connect(lambda on: sysutil.autostart_set() if on else sysutil.autostart_remove())
-        form.addRow(row_label('开机自启'), auto)
+        # 分隔线：日历与时间 / 传输
+        sep2 = QFrame()
+        sep2.setObjectName('setSep')
+        sep2.setFixedHeight(1)
+        form.addRow(sep2)
 
         # 局域网传输：默认关闭（不监听端口）；开启失败（端口被占）时传输页会给提示，
         # 这里把勾选弹回去。右侧「?」与传输页门禁层共用同一个说明弹窗
         tr_row = QHBoxLayout()
         tr_row.setSpacing(sc(6))
-        self.transfer_chk = QCheckBox('局域网内与其他设备互传文件')
+        self.transfer_chk = QCheckBox('开启局域网互传')
         self.transfer_chk.setChecked(panel.transfer.service_enabled())
         tr_row.addWidget(self.transfer_chk)
         tr_help = QToolButton()
@@ -1829,39 +1866,6 @@ class SettingsDialog(QDialog):
                 self._sync_transfer_chk()   # 开启失败（端口被占）：弹回勾选
         self.transfer_chk.toggled.connect(commit_transfer)
         panel.transfer.enabled_changed.connect(lambda _on: self._sync_transfer_chk())
-
-        # 桌面格子
-        sep_b = QFrame()
-        sep_b.setObjectName('setSep')
-        sep_b.setFixedHeight(1)
-        form.addRow(sep_b)
-        dbl = QCheckBox('双击桌面显示 / 隐藏格子')
-        dbl.setChecked(bool(cfg.data.get('box_dblclick', True)))
-
-        def commit_dblclick(on):
-            cfg.set('box_dblclick', bool(on))
-            if boxmgr is not None:
-                boxmgr.set_dblclick_enabled(bool(on))
-        dbl.toggled.connect(commit_dblclick)
-        form.addRow(row_label('格子'), dbl)
-
-        # 节假日数据
-        sep = QFrame()
-        sep.setObjectName('setSep')
-        sep.setFixedHeight(1)
-        form.addRow(sep)
-        holiday_row = QHBoxLayout()
-        holiday_row.setSpacing(sc(8))
-        self._on_fetch = on_fetch
-        self.btn_fetch = QPushButton('联网更新')
-        self.btn_fetch.setObjectName('setBtn')
-        self.btn_fetch.clicked.connect(self._fetch_clicked)
-        holiday_row.addWidget(self.btn_fetch)
-        b = QPushButton('导入 JSON…')
-        b.setObjectName('setBtn')
-        b.clicked.connect(on_import)
-        holiday_row.addWidget(b)
-        form.addRow(row_label('节假日'), holiday_row)
 
         # 保存按钮（改动即时生效，点击即确认并关闭）；左下角版本号与关于窗/安装程序一致
         save_row = QHBoxLayout()

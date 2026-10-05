@@ -160,11 +160,12 @@ def start_holiday_update(hstore, cfg, panel, groups, manual=True, fallback_url=N
     return True
 
 
-# 命令行参数 → IPC 消息（桌面右键二级菜单的六个项；--pick-folder 不查此表，
+# 命令行参数 → IPC 消息（桌面右键级联六项 + 全隐藏态单项；--pick-folder 不查此表，
 # 由独立进程弹完目录框后把路径包进 b'folder:' 消息发回）
 IPC_ACTIONS = {
     '--toggle': b'toggle',
     '--new-box': b'new-box',
+    '--show-icons': b'show-icons',   # 全隐藏态桌面右键单项「显示桌面图标」
     '--settings': b'settings',
     '--about': b'about',
     '--quit': b'quit',
@@ -292,6 +293,7 @@ def main():
             icon = os.path.join(data_dir, 'icon.ico')
             if not os.path.exists(icon):
                 ui.make_icon().pixmap(64, 64).save(icon, 'ICO')
+        boxmgr.menu_icon = icon   # 全隐藏态/恢复时改写右键菜单也要用同一个图标
         sysutil.context_menu_set_running(True, icon_path=icon)  # 桌面右键切级联形态
 
     # IPC 服务：桌面右键二级菜单 / 重复启动时把动作转发进来（actions 定义后才挂连接）
@@ -369,6 +371,7 @@ def main():
                b'about': lambda: ui.AboutDialog(panel).exec_()}
     if boxmgr:
         actions[b'new-box'] = boxmgr.new_blank
+        actions[b'show-icons'] = boxmgr.show_all
         actions[b'folder:'] = boxmgr.new_folder
     server.newConnection.connect(lambda: _on_ipc(server, actions))
     if cli_arg and cli_arg != '--toggle':
