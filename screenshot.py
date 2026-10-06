@@ -12,11 +12,11 @@ import ctypes
 from ctypes import wintypes
 from datetime import datetime
 
-from PyQt5.QtCore import (Qt, QRect, QRectF, QPoint, QPointF, QSize, QTimer, QEvent,
-                          pyqtSignal, QAbstractNativeEventFilter)
-from PyQt5.QtGui import (QPainter, QColor, QPen, QPixmap, QImage, QFont, QFontMetrics,
+from PySide6.QtCore import (Qt, QRect, QRectF, QPoint, QPointF, QSize, QTimer, QEvent,
+                          Signal, QAbstractNativeEventFilter)
+from PySide6.QtGui import (QPainter, QColor, QPen, QPixmap, QImage, QFont, QFontMetrics,
                          QKeySequence, QPainterPath, QCursor, QGuiApplication, QIcon)
-from PyQt5.QtWidgets import (QWidget, QApplication, QFrame, QHBoxLayout, QToolButton,
+from PySide6.QtWidgets import (QWidget, QApplication, QFrame, QHBoxLayout, QToolButton,
                              QLabel, QLineEdit, QPushButton, QFileDialog)
 
 import app as ui          # sc / ui_scale / pick_fonts / resolve_theme
@@ -209,8 +209,8 @@ def _find_shift(prev, cur):
 class _LongBar(QWidget):
     """长图模式的悬浮控制条：遮罩隐藏后它是会话唯一的可见 UI。"""
 
-    done = pyqtSignal()
-    canceled = pyqtSignal()
+    done = Signal()
+    canceled = Signal()
 
     def __init__(self, qss, parent=None):
         super(_LongBar, self).__init__(parent, Qt.FramelessWindowHint | Qt.Tool
@@ -273,7 +273,7 @@ class _LongBar(QWidget):
 class ShotOverlay(QWidget):
     """全屏灰罩 + 框选 + 标注 + 工具条。构造时先抓屏再显示，遮罩不会入镜。"""
 
-    finished = pyqtSignal()   # 会话结束（无论结果），入口用来清引用
+    finished = Signal()   # 会话结束（无论结果），入口用来清引用
 
     def __init__(self, cfg):
         super(ShotOverlay, self).__init__(None, Qt.FramelessWindowHint | Qt.Tool

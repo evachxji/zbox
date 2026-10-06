@@ -18,10 +18,10 @@ import time
 from datetime import date, datetime, timedelta
 
 
-from PyQt5.QtCore import Qt, QTimer, QThread, QUrl, pyqtSignal, QCoreApplication
-from PyQt5.QtGui import QDesktopServices
-from PyQt5.QtNetwork import QLocalServer, QLocalSocket
-from PyQt5.QtWidgets import QApplication, QFileDialog
+from PySide6.QtCore import Qt, QTimer, QThread, QUrl, Signal, QCoreApplication
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtNetwork import QLocalServer, QLocalSocket
+from PySide6.QtWidgets import QApplication, QFileDialog
 
 import app as ui
 import boxes as bx
@@ -33,10 +33,10 @@ import transfer
 
 IPC_KEY = sysutil.IPC_KEY
 
-# Qt5 在含非 ASCII 字符的安装路径下会把插件目录里的用户名算成 ??，导致
-# "no Qt platform plugin could be initialized"；这里按真实路径手动补正。
+# Qt5 曾在含非 ASCII 字符的安装路径下把插件目录里的用户名算成 ??，导致
+# "no Qt platform plugin could be initialized"；Qt6 未复现但保留手动补正作防御。
 QCoreApplication.addLibraryPath(
-    os.path.join(os.path.dirname(__import__('PyQt5').__file__), 'Qt5', 'plugins'))
+    os.path.join(os.path.dirname(__import__('PySide6').__file__), 'plugins'))
 
 _worker = []   # 当前后台抓取线程：留引用防 GC，也用来判断是否已在抓
 
@@ -46,7 +46,7 @@ class _HolidayWorker(QThread):
     groups 是若干组候选 (名称, URL)：每组按顺序试，取第一个成功的。
     save_dir 非空时（导入窗「下载并导入」），抓到的原始 JSON 存一份到该目录。"""
 
-    done = pyqtSignal(object)   # {'off': {}, 'work': set(), 'hit': [源名], 'err': '失败原因'}
+    done = Signal(object)   # {'off': {}, 'work': set(), 'hit': [源名], 'err': '失败原因'}
 
     def __init__(self, groups, parent=None, save_dir=None):
         super(_HolidayWorker, self).__init__(parent)
@@ -224,8 +224,10 @@ def main():
     # ⇒ **Qt 所有窗口的拖放目标都注册不上**（实测 RevokeDragDrop：MTA 下 DRAGDROP_E_NOTREGISTERED，
     # STA 下 S_OK）⇒ 往格子里拖任何文件都是红色禁止光标（用户报的 bug 1 真身）。
     ctypes.windll.ole32.CoInitializeEx(None, 0x2)   # COINIT_APARTMENTTHREADED
-    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+    # Qt6 高 DPI 恒开（Qt5 的 AA_EnableHighDpiScaling/AA_UseHighDpiPixmaps 已废弃）；
+    # 取整策略对齐 Qt5.15 默认（Round）：非整数缩放比屏幕的布局与旧版一致
+    QApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.Round)
     QApplication.setQuitOnLastWindowClosed(False)
     qapp = QApplication(sys.argv)
     qapp.setApplicationName(sysutil.APP_NAME)
@@ -383,7 +385,7 @@ def main():
     # 桌面右键二级菜单的动作分发表
     actions = {b'toggle': panel.toggle_visible, b'quit': qapp.quit,
                b'settings': open_settings,
-               b'about': lambda: ui.AboutDialog(panel).exec_()}
+               b'about': lambda: ui.AboutDialog(panel).exec()}
     if boxmgr:
         actions[b'new-box'] = boxmgr.new_blank
         actions[b'show-icons'] = boxmgr.show_all
@@ -398,7 +400,7 @@ def main():
         panel.place_initial()
         panel.show()
         QTimer.singleShot(1500, lambda: _grab_screen(panel, qapp))
-        return qapp.exec_()
+        return qapp.exec()
     if shot_dir:
         QTimer.singleShot(600, lambda: selfshot.run(shot_dir, panel, cfg, tstore, qapp))
     else:
@@ -411,7 +413,7 @@ def main():
             panel.show()
         ui._dbg('main: after show visible=%s pos=(%d,%d) size=(%d,%d)' % (
             panel.isVisible(), panel.x(), panel.y(), panel.width(), panel.height()))
-    return qapp.exec_()
+    return qapp.exec()
 
 
 def _grab_screen(panel, qapp):

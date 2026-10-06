@@ -36,12 +36,13 @@ import threading
 import time
 from ctypes import wintypes
 
-from PyQt5.QtCore import (Qt, QObject, QTimer, QThread, QUrl, QPoint, QRect, QSize,
-                          QFileSystemWatcher, pyqtSignal)
-from PyQt5.QtGui import QIcon, QCursor, QPainter, QColor, QPen, QFont
-from PyQt5.QtWidgets import (QWidget, QDialog, QListWidget, QListWidgetItem, QVBoxLayout,
+from PySide6.QtCore import (Qt, QObject, QTimer, QThread, QUrl, QPoint, QRect, QSize,
+                          QFileSystemWatcher, Signal, QEvent)
+from PySide6.QtGui import (QIcon, QCursor, QPainter, QColor, QPen, QFont, QImage, QPixmap,
+                          QActionGroup)   # QActionGroup Qt6 起从 QtWidgets 挪到 QtGui
+from PySide6.QtWidgets import (QWidget, QDialog, QListWidget, QListWidgetItem, QVBoxLayout,
                              QHBoxLayout, QGridLayout, QLabel, QToolButton,
-                             QPushButton, QStackedLayout, QMenu, QActionGroup,
+                             QPushButton, QStackedLayout, QMenu,
                              QMessageBox, QFileDialog, QLineEdit,
                              QAbstractItemView, QApplication, QStyle)
 
@@ -80,6 +81,57 @@ _h32.TrackPopupMenu.restype = wintypes.BOOL
 _h32.TrackPopupMenu.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_int,
                                 ctypes.c_int, wintypes.HWND, ctypes.c_void_p]
 _s32 = ctypes.windll.shell32
+
+def _hicon_to_image(hicon, size):
+    """HICON → QImage（Qt6 移除了 QtWinExtras.fromHICON 的替代）：DrawIconEx 画进
+    清零的 32bpp 顶向下 DIB section，直接读回像素内存。GDI 对 32bpp 图标会写 alpha；
+    老式 mask 图标 alpha 全 0 时按「RGB 非黑即不透明」兜底（纯黑像素会变透明，可接受）。"""
+    g32, u32 = ctypes.windll.gdi32, ctypes.windll.user32
+    w = h = size
+
+    class _BIH(ctypes.Structure):   # BITMAPINFOHEADER，负高 = 顶向下
+        _fields_ = [('biSize', wintypes.DWORD), ('biWidth', wintypes.LONG),
+                    ('biHeight', wintypes.LONG), ('biPlanes', wintypes.WORD),
+                    ('biBitCount', wintypes.WORD), ('biCompression', wintypes.DWORD),
+                    ('biSizeImage', wintypes.DWORD), ('biXPelsPerMeter', wintypes.LONG),
+                    ('biYPelsPerMeter', wintypes.LONG), ('biClrUsed', wintypes.DWORD),
+                    ('biClrImportant', wintypes.DWORD)]
+
+    bih = _BIH()
+    bih.biSize = ctypes.sizeof(_BIH)
+    bih.biWidth, bih.biHeight, bih.biPlanes, bih.biBitCount = w, -h, 1, 32
+    # GDI 句柄是 64 位指针：不声明 c_void_p 原型，默认 int32 转换会 OverflowError
+    g32.CreateCompatibleDC.restype = ctypes.c_void_p
+    g32.CreateCompatibleDC.argtypes = [ctypes.c_void_p]
+    g32.SelectObject.restype = ctypes.c_void_p
+    g32.SelectObject.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    g32.DeleteObject.argtypes = [ctypes.c_void_p]
+    g32.DeleteDC.argtypes = [ctypes.c_void_p]
+    hdc = g32.CreateCompatibleDC(None)
+    bits = ctypes.c_void_p()
+    g32.CreateDIBSection.restype = ctypes.c_void_p
+    g32.CreateDIBSection.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
+                                     wintypes.UINT, ctypes.c_void_p,
+                                     wintypes.HANDLE, wintypes.DWORD]
+    hbm = g32.CreateDIBSection(hdc, ctypes.byref(bih), 0, ctypes.byref(bits), None, 0)
+    if not hbm:
+        g32.DeleteDC(hdc)
+        return None
+    old_bm = g32.SelectObject(hdc, hbm)
+    ctypes.memset(bits.value, 0, w * h * 4)
+    u32.DrawIconEx.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+                               wintypes.HANDLE, ctypes.c_int, ctypes.c_int,
+                               wintypes.UINT, wintypes.HANDLE, wintypes.UINT]
+    u32.DrawIconEx(hdc, 0, 0, hicon, w, h, 0, None, 3)   # DI_NORMAL
+    data = bytearray(ctypes.string_at(bits.value, w * h * 4))
+    g32.SelectObject(hdc, old_bm)
+    g32.DeleteObject(hbm)
+    g32.DeleteDC(hdc)
+    if not any(data[3::4]):   # alpha 全 0：老式 mask 图标兜底
+        for i in range(0, len(data), 4):
+            data[i + 3] = 255 if (data[i] or data[i + 1] or data[i + 2]) else 0
+    img = QImage(bytes(data), w, h, w * 4, QImage.Format_ARGB32)
+    return img.copy()   # 脱离本地 buffer 生命周期
 _s32.SHParseDisplayName.restype = ctypes.c_long
 _s32.SHParseDisplayName.argtypes = [wintypes.LPCWSTR, ctypes.c_void_p,
                                     ctypes.POINTER(ctypes.c_void_p), wintypes.DWORD,
@@ -777,8 +829,8 @@ class BoxWindow(QWidget):
             icon = self._url_icon(path)
             if icon is not None:
                 return icon
-        from PyQt5.QtCore import QFileInfo
-        from PyQt5.QtWidgets import QFileIconProvider
+        from PySide6.QtCore import QFileInfo
+        from PySide6.QtWidgets import QFileIconProvider
         if not hasattr(self, '_icon_provider'):
             self._icon_provider = QFileIconProvider()
         return self._icon_provider.icon(QFileInfo(path))
@@ -802,21 +854,25 @@ class BoxWindow(QWidget):
             return None
         if not icon_file or not os.path.isfile(icon_file):
             return None
+        if icon_file.lower().endswith('.ico'):
+            icon = QIcon(icon_file)   # Qt 原生读 ico（全尺寸一档收齐）
+            return icon if not icon.isNull() else None
         h_big, h_small = ctypes.c_void_p(), ctypes.c_void_p()
         _s32.ExtractIconExW.restype = wintypes.UINT
         _s32.ExtractIconExW.argtypes = [wintypes.LPCWSTR, ctypes.c_int,
                                         ctypes.c_void_p, ctypes.c_void_p, wintypes.UINT]
         if _s32.ExtractIconExW(icon_file, idx, ctypes.byref(h_big), ctypes.byref(h_small), 1) <= 0:
             return None
-        from PyQt5.QtWinExtras import QtWin
-        ctypes.windll.user32.DestroyIcon.argtypes = [wintypes.HANDLE]
+        u32 = ctypes.windll.user32
+        u32.DestroyIcon.argtypes = [wintypes.HANDLE]
         icon = QIcon()
-        for h in (h_small, h_big):   # 列表视图用 16px、图标视图用 32px，两档都收
+        # 列表视图用 16px、图标视图用 32px，两档都收；尺寸随系统图标档（DPI 会放大）
+        for h, metric in ((h_small, 49), (h_big, 11)):   # SM_CXSMICON / SM_CXICON
             if h:
-                pm = QtWin.fromHICON(int(h.value))   # 必须传 int 句柄，c_void_p 会得空图
-                ctypes.windll.user32.DestroyIcon(int(h.value))
-                if not pm.isNull():
-                    icon.addPixmap(pm)
+                img = _hicon_to_image(int(h.value), u32.GetSystemMetrics(metric))
+                u32.DestroyIcon(int(h.value))
+                if img is not None and not img.isNull():
+                    icon.addPixmap(QPixmap.fromImage(img))
         return icon if not icon.isNull() else None
 
     def display_dir(self):
@@ -1342,7 +1398,7 @@ class BoxWindow(QWidget):
 
     def _confirm_dissolve(self):
         """解散二次确认：空白格子提示文件会回到桌面，映射格子提示不影响原文件夹。"""
-        return self._dissolve_confirm_dialog().exec_() == QDialog.Accepted
+        return self._dissolve_confirm_dialog().exec() == QDialog.Accepted
 
     def dissolve(self):
         """解散格子：空白格子把桌面图标放出来（文件本来就在桌面，不搬动文件）；
@@ -1520,24 +1576,24 @@ class BoxWindow(QWidget):
         # 三类鼠标事件都吃掉——按下不放给父窗口（否则进拖动）、双击不收起、
         # 双击的第二次松开也不再开一次
         if obj is self.icon and self.rec['kind'] == 'folder':
-            if e.type() == e.MouseButtonPress and e.button() == Qt.LeftButton:
+            if e.type() == QEvent.MouseButtonPress and e.button() == Qt.LeftButton:
                 self.open_path(self.rec['path'])
                 return True
-            if e.type() in (e.MouseButtonRelease, e.MouseButtonDblClick):
+            if e.type() in (QEvent.MouseButtonRelease, QEvent.MouseButtonDblClick):
                 return True
         # 名称标签双击 → 内联重命名；吃掉事件，不再传给父窗口触发收起
-        if obj is self.name and e.type() == e.MouseButtonDblClick:
+        if obj is self.name and e.type() == QEvent.MouseButtonDblClick:
             self._start_rename()
             return True
         # 输入框里 Esc 取消：失焦会触发 editingFinished，借 _edit_cancel 跳过提交
-        if obj is self.edit and e.type() == e.KeyPress and e.key() == Qt.Key_Escape:
+        if obj is self.edit and e.type() == QEvent.KeyPress and e.key() == Qt.Key_Escape:
             self._edit_cancel = True
             self.edit.clearFocus()
             return True
         # 列表视口会吃掉左键按下（选中项），父窗口收不到——底部边缘和两个下角的
         # 缩放从这里起；起缩放后移动/松开同样发给视口，直接在过滤器里驱动到底。
         if obj is self.list.viewport():
-            if e.type() == e.MouseButtonPress and e.button() == Qt.LeftButton \
+            if e.type() == QEvent.MouseButtonPress and e.button() == Qt.LeftButton \
                     and not self.rec.get('locked') and not self.rec.get('collapsed'):
                 edges = self._hit_edges(obj.mapTo(self, e.pos()))
                 if edges:
@@ -1545,14 +1601,14 @@ class BoxWindow(QWidget):
                     self._press_pos = e.globalPos()
                     return True
             if self._op and self._op[0] == 'resize':
-                if e.type() == e.MouseMove:
+                if e.type() == QEvent.MouseMove:
                     self._apply_resize(e.globalPos())
                     return True
-                if e.type() == e.MouseButtonRelease:
+                if e.type() == QEvent.MouseButtonRelease:
                     self._finish_op(e.globalPos())
                     return True
         # 子控件上的 MouseMove 转成窗口坐标同步光标（子控件不设光标，跟随窗口）
-        if e.type() == e.MouseMove and not self._op:
+        if e.type() == QEvent.MouseMove and not self._op:
             self._sync_cursor(obj.mapTo(self, e.pos()))
         return super(BoxWindow, self).eventFilter(obj, e)
 
@@ -2123,7 +2179,7 @@ class _HostDaemon(QObject):
     每次右键只写一行管道请求，省掉每次新建进程 + 重载全部壳扩展的 ~500ms。
     请求/响应按 FIFO 配对：结果回调队列与请求一一对应。"""
 
-    result = pyqtSignal(int)
+    result = Signal(int)
 
     def __init__(self):
         super(_HostDaemon, self).__init__()
@@ -2494,7 +2550,7 @@ class DesktopClickHook(QThread):
     命中窗口沿父链走：先碰到我们自己的窗口（格子/面板）则忽略；
     碰到桌面家族（Progman/SHELLDLL_DefView/WorkerW/SysListView32）才算桌面。"""
 
-    double_clicked = pyqtSignal()
+    double_clicked = Signal()
 
     def __init__(self, own_hwnds, parent=None):
         super(DesktopClickHook, self).__init__(parent)
@@ -2572,9 +2628,9 @@ class DesktopRightClickHook(QThread):
       窗口，所以 run() 必须用阻塞式 GetMessage 泵——轮询泵会给全系统鼠标事件加延迟；
     - ctypes 回调里的异常不走 sys.excepthook、还会向系统返回垃圾值，必须就地兜住落盘。"""
 
-    right_clicked = pyqtSignal()
+    right_clicked = Signal()
     # 菜单开着时点了菜单以外：True = 桌面右键（关掉并在新位置重弹），False = 只关掉
-    outside_clicked = pyqtSignal(bool)
+    outside_clicked = Signal(bool)
 
     def __init__(self, own_hwnds, parent=None):
         super(DesktopRightClickHook, self).__init__(parent)

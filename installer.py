@@ -11,8 +11,8 @@ import subprocess
 import sys
 import time
 
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtWidgets import (QApplication, QDialog, QWidget, QVBoxLayout, QHBoxLayout, QStyle,
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import (QApplication, QDialog, QWidget, QVBoxLayout, QHBoxLayout, QStyle,
                              QLabel, QFrame, QToolButton, QCheckBox, QRadioButton,
                              QPushButton, QLineEdit, QProgressBar, QFileDialog,
                              QStackedLayout, QMessageBox)
@@ -154,7 +154,7 @@ def sync_context_menu():
 
 def request_quit():
     """通知运行中的实例退出（卸载前调用，避免文件占用）。"""
-    from PyQt5.QtNetwork import QLocalSocket
+    from PySide6.QtNetwork import QLocalSocket
     s = QLocalSocket()
     s.connectToServer(sysutil.IPC_KEY)
     if s.waitForConnected(500):
@@ -293,7 +293,7 @@ def _uninstall_flow():
     if sysutil.uninstall_reg_get('InstallLocation', True) and not is_admin():
         relaunch_elevated(['--uninstall'])
         return
-    UninstallWizard().exec_()
+    UninstallWizard().exec()
 
 
 def maybe_install():
@@ -318,13 +318,13 @@ def setup_main():
             path, all_users=True,
             shortcut='--no-shortcut' not in sys.argv,
             autostart='--no-autostart' not in sys.argv))
-        wiz.exec_()
+        wiz.exec()
         return 0
     if os.environ.get('ZBOX_AUTO_INSTALL'):
         # 测试钩子：跳过向导按默认项静默安装
         _relaunch(install(install_dir()))
         return 0
-    InstallWizard().exec_()
+    InstallWizard().exec()
     return 0
 
 

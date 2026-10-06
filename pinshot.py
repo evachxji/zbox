@@ -2,9 +2,9 @@
 """钉图：把截图钉在桌面上的无边框贴图窗（Snipaste F3 / QQ 钉在桌面同款）。
 拖拽移动、双击关闭；置顶 Tool 窗——故意不挂桌面带（挂带会被应用窗口压住，
 贴图的意义就是浮在最上面随时对照）；不持久化，进程退出即消失。"""
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QPainter, QColor, QPen
-from PyQt5.QtWidgets import QWidget
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QPainter, QColor, QPen
+from PySide6.QtWidgets import QWidget
 
 _pins = []   # 存活引用：贴图窗无父对象，靠它防 GC；窗口销毁时移除
 

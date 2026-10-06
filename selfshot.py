@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """全界面截图自检 harness：ZBOX_SHOT=<目录> 启动时由 main.pyw 调用。
 
-目标：同一台机器上两次运行（PyQt5 基线 / PySide6 迁移后）产出逐像素可比的 PNG 集。
+目标：同一台机器上两次运行（PySide6 基线 / PySide6 迁移后）产出逐像素可比的 PNG 集。
 手段：冻结时间（patch app 模块的 date/datetime）、注入固定示例数据（结束后还原）、
 全部走 widget.grab() 离屏渲染（规避 DWM 圆角/屏幕合成差异）、版本号与磁盘剩余空间
 等运行期变量一律打桩成固定值。
@@ -16,9 +16,9 @@ import tempfile
 import threading
 from datetime import date, datetime, timedelta
 
-from PyQt5.QtCore import Qt, QTimer, QPoint
-from PyQt5.QtGui import QImage, QPainter, QColor, QFont
-from PyQt5.QtWidgets import QApplication, QMenu
+from PySide6.QtCore import Qt, QTimer, QPoint
+from PySide6.QtGui import QImage, QPainter, QColor, QFont
+from PySide6.QtWidgets import QApplication, QMenu
 
 import app as ui
 import boxes as bx

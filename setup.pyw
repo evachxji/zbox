@@ -6,15 +6,19 @@ import ctypes
 import sys
 
 # 同 main.pyw：Qt 默认把 GUI 线程的 COM 初始化为 MTA，安装向导「浏览…」的原生目录框
-# 在 MTA 下会抛 RPC_E_WRONG_THREAD（0x8001010e）致命错误。必须在 PyQt5 导入前初始化 STA。
+# 在 MTA 下会抛 RPC_E_WRONG_THREAD（0x8001010e）致命错误。必须在 PySide6 导入前初始化 STA。
 # ⚠️ COINIT_APARTMENTTHREADED 是 **0x2**，不是 0（0 = COINIT_MULTITHREADED；写错的话这里
 # 反而把线程初始化成 MTA，Qt 的 OleInitialize 会失败 RPC_E_CHANGED_MODE）。
 ctypes.windll.ole32.CoInitializeEx(None, 0x2)   # COINIT_APARTMENTTHREADED
 
-from PyQt5.QtWidgets import QApplication
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication
 
 
 def main():
+    # 同 main.pyw：Qt6 取整策略对齐 Qt5.15 默认（Round），须在 QApplication 创建前设置
+    QApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.Round)
     qapp = QApplication(sys.argv)
     qapp.setApplicationName('zboxSetup')
     import installer

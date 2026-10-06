@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Zbox 桌面悬浮面板：日历 + 待办。PyQt5，兼容 Win7/10/11、Python 3.8+。"""
+"""Zbox 桌面悬浮面板：日历 + 待办。PySide6，兼容 Win7/10/11、Python 3.8+。"""
 import ctypes
 from ctypes import wintypes
 import json
@@ -8,15 +8,15 @@ import sys
 import time
 from datetime import date, datetime, timedelta
 
-from PyQt5.QtCore import (Qt, QTimer, QSize, QPoint, QPointF, QRectF, QDate, QTime,
-                          pyqtSignal, QEvent, QPropertyAnimation, QVariantAnimation, QEasingCurve)
-from PyQt5.QtGui import (QFont, QFontDatabase, QPainter, QColor, QPixmap, QIcon, QPainterPath,
+from PySide6.QtCore import (Qt, QTimer, QSize, QPoint, QPointF, QRectF, QDate, QTime,
+                          Signal, QEvent, QPropertyAnimation, QVariantAnimation, QEasingCurve)
+from PySide6.QtGui import (QFont, QFontDatabase, QPainter, QColor, QPixmap, QIcon, QPainterPath,
                          QRegion, QPen, QLinearGradient, QCursor, QKeySequence)
-from PyQt5.QtWidgets import (QWidget, QFrame, QLabel, QToolButton, QVBoxLayout, QHBoxLayout,
+from PySide6.QtWidgets import (QWidget, QFrame, QLabel, QToolButton, QVBoxLayout, QHBoxLayout,
                              QGridLayout, QListWidget,
                              QListWidgetItem, QLineEdit, QMenu, QApplication, QDialog,
                              QFormLayout, QCheckBox, QRadioButton, QPushButton, QCalendarWidget,
-                             QLayout, QGraphicsOpacityEffect)
+                             QLayout, QGraphicsOpacityEffect, QSizePolicy)
 
 import calendar_data as cd
 import sysutil
@@ -223,7 +223,7 @@ def resolve_theme(key):
 # ---------------- 日历 ----------------
 
 # 日历数字字体：Qt 用 pixelSize + weight 精确控制，对齐 Win11 日历（字形高 21px / Medium）
-_NUM_FONT = {'name': None, 'size': 19, 'weight': 50}
+_NUM_FONT = {'name': None, 'size': 19, 'weight': QFont.Normal}  # Qt6 起 setWeight 只收枚举
 
 
 def set_num_font(name):
@@ -231,7 +231,7 @@ def set_num_font(name):
 
 
 class DayCell(QFrame):
-    clicked = pyqtSignal()
+    clicked = Signal()
 
     def __init__(self, parent=None):
         super(DayCell, self).__init__(parent)
@@ -801,8 +801,8 @@ class TodoStore(object):
 
 
 class TodoList(QListWidget):
-    emptyDoubleClicked = pyqtSignal()
-    itemEditRequested = pyqtSignal(int)
+    emptyDoubleClicked = Signal()
+    itemEditRequested = Signal(int)
 
     def __init__(self, parent=None):
         super(TodoList, self).__init__(parent)
@@ -958,7 +958,7 @@ class TodoWidget(QWidget):
         hint = QToolButton()
         hint.setObjectName('addHint')
         hint.setText('＋ 双击空白处新建待办')
-        hint.setSizePolicy(hint.sizePolicy().Expanding, hint.sizePolicy().Fixed)
+        hint.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         hint.clicked.connect(self.start_add)
         pl.addWidget(hint)
 
@@ -1894,7 +1894,7 @@ class SettingsDialog(QDialog):
         tr_help.setFixedSize(sc(20), sc(20))
         tr_help.setCursor(Qt.PointingHandCursor)
         tr_help.setToolTip('什么是局域网传输')
-        tr_help.clicked.connect(lambda: transfer_ui.TransferInfoDialog(self).exec_())
+        tr_help.clicked.connect(lambda: transfer_ui.TransferInfoDialog(self).exec())
         tr_row.addWidget(tr_help)
         tr_row.addStretch(1)
         form.addRow(row_label('传输'), tr_row)
@@ -2309,8 +2309,8 @@ def _hide_toast_on(win, seq):
 
 
 class FloatingPanel(QWidget):
-    toggled = pyqtSignal()
-    settingsRequested = pyqtSignal()   # 顶部栏齿轮按钮 → 入口 open_settings（非模态去重在那里）
+    toggled = Signal()
+    settingsRequested = Signal()   # 顶部栏齿轮按钮 → 入口 open_settings（非模态去重在那里）
 
     def __init__(self, cfg, hstore, tstore, device_info=None, transfer_autostart=True):
         super(FloatingPanel, self).__init__()
