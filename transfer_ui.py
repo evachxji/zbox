@@ -727,7 +727,15 @@ class TransferWidget(QWidget):
                 self._show_gate('enable')
                 self.enabled_changed.emit(False)
             else:
+                # 启动期间禁用按钮防连点并显示 loading：成功后门禁层隐藏，
+                # 失败已切「确定」形态，异常返回（未切形态）则恢复按钮文字
+                self.gate_ok.setEnabled(False)
+                self.gate_ok.setText('启用中…')
+                self.gate_ok.repaint()
                 self.set_enabled(True)
+                self.gate_ok.setEnabled(True)
+                if self._gate_mode == 'enable':
+                    self.gate_ok.setText('启用传输')
         except Exception:
             pass
 

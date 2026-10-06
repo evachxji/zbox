@@ -1867,20 +1867,14 @@ class SettingsDialog(QDialog):
         self.transfer_chk.toggled.connect(commit_transfer)
         panel.transfer.enabled_changed.connect(lambda _on: self._sync_transfer_chk())
 
-        # 保存按钮（改动即时生效，点击即确认并关闭）；左下角版本号与关于窗/安装程序一致
-        save_row = QHBoxLayout()
-        save_row.setContentsMargins(0, sc(12), sc(4), 0)
+        # 改动即时生效，无需保存按钮；左下角版本号与关于窗/安装程序一致
+        ver_row = QHBoxLayout()
+        ver_row.setContentsMargins(0, sc(12), sc(4), 0)
         ver = QLabel('v%s' % APP_VERSION)
         ver.setObjectName('setLabel')   # 借用表单标签的弱化色
-        save_row.addWidget(ver)
-        save_row.addStretch(1)
-        save = QPushButton('保存')
-        save.setObjectName('setSave')
-        save.setCursor(Qt.PointingHandCursor)
-        save.setDefault(True)
-        save.clicked.connect(self.accept)
-        save_row.addWidget(save)
-        lay.addLayout(save_row)
+        ver_row.addWidget(ver)
+        ver_row.addStretch(1)
+        lay.addLayout(ver_row)
 
         # 默认居中在屏幕可用区（不贴着面板：面板常停右下角，跟着它会被挤到屏幕边上）
         # 面板在哪个屏幕就居中到哪个屏幕，多显示器下对话框跟人待的那块屏一致

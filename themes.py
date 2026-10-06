@@ -165,6 +165,7 @@ QPushButton#setSave {
 }
 QPushButton#setSave:hover { background: #f2b45a; }
 QPushButton#setSave:pressed { background: #d18f2e; }
+QPushButton#setSave:disabled { background: rgba(232,163,61,70); color: rgba(26,22,16,120); }
 /* 截止日期 tag（仿 Element 标签：圆角浅底 + 同色字） */
 QLabel#todoDue {
     color: #a39e93; background: rgba(255,255,255,14); border-radius: 8px;
@@ -434,6 +435,7 @@ QPushButton#setSave {
 }
 QPushButton#setSave:hover { background: #1a77cc; }
 QPushButton#setSave:pressed { background: #0059a6; }
+QPushButton#setSave:disabled { background: rgba(0,103,192,70); color: rgba(255,255,255,160); }
 QLabel#todoDue {
     color: #0067c0; background: rgba(0,103,192,26); border-radius: 8px;
     font: 10px "%CN%"; padding: 2px 7px;
