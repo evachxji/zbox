@@ -1219,15 +1219,18 @@ class BoxWindow(QWidget):
             self.name.setText(name)
             self.mgr.save_rec(self)
 
-    def _confirm_dissolve(self):
-        """解散二次确认：空白格子提示文件会回到桌面，映射格子提示不影响原文件夹。"""
+    def _dissolve_confirm_dialog(self):
+        """构造解散确认弹窗（截图自检也走这里，保证弹的就是真实弹窗）。"""
         if self.rec['kind'] == 'blank':
             detail = '里面的文件会回到桌面（取消桌面图标隐藏）。'
         else:
             detail = '只移除格子，不影响文件夹本身。'
-        dlg = BoxConfirmDialog(self, '解散格子',
-                               '解散格子「%s」？%s' % (self.rec['name'], detail), '解散')
-        return dlg.exec_() == QDialog.Accepted
+        return BoxConfirmDialog(self, '解散格子',
+                                '解散格子「%s」？%s' % (self.rec['name'], detail), '解散')
+
+    def _confirm_dissolve(self):
+        """解散二次确认：空白格子提示文件会回到桌面，映射格子提示不影响原文件夹。"""
+        return self._dissolve_confirm_dialog().exec_() == QDialog.Accepted
 
     def dissolve(self):
         """解散格子：空白格子把桌面图标放出来（文件本来就在桌面，不搬动文件）；
@@ -1238,7 +1241,8 @@ class BoxWindow(QWidget):
             self.show_icons()
         self.mgr.remove(self)
 
-    def _show_menu(self):
+    def _build_menu(self):
+        """构造 ≡ 菜单（截图自检也走这里，保证弹的就是真实菜单）。"""
         menu = QMenu(self)
         grp = QActionGroup(menu)
         for key, label in VIEW_CHOICES:
@@ -1257,7 +1261,10 @@ class BoxWindow(QWidget):
             act.triggered.connect(lambda _c=False, k=key: self._set_sort(k))
         menu.addSeparator()
         menu.addAction('解散格子', self.dissolve)
-        menu.exec_(QCursor.pos())
+        return menu
+
+    def _show_menu(self):
+        self._build_menu().exec_(QCursor.pos())
 
     def _set_view(self, key):
         self.rec['view'] = key
