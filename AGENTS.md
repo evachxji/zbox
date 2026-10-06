@@ -551,8 +551,12 @@ IPC 通道（与 `--pick-folder` 同一条）发回面板建格子；`new_folder
   → 测属性框出现时间（旧宿主：4s 不出、再弹一次菜单 0.08s 才出；新宿主：0.34s 出，宿主日志里
   有 `verb=properties -> 独立 STA 线程弹属性框`）。
   ⑥ 菜单位置自己 `GetCursorPos`（物理坐标）——Qt 传过来的 globalPos 是逻辑像素，
-  多显示器/缩放下不可靠；宿主入口必须 `SetProcessDpiAwarenessContext(PM_V2)`，
-  否则菜单被系统按 96 DPI 渲染再位图放大（字体发糊）；TrackPopupMenu 要给
+  多显示器/缩放下不可靠；宿主入口必须声明 DPI 感知（PM_V2），否则菜单被系统按 96 DPI 渲染再位图
+  放大（字体发糊）——但 `SetProcessDpiAwarenessContext` 是 Win10 1703 才加的导出，
+  **静态调用会让老 Win10（10240/10586/14393）与 Win7 在进程加载阶段就弹
+  「无法定位程序输入点」整个起不来**，必须 `set_dpi_awareness()` 里 GetProcAddress
+  逐级回退：1703+ SetProcessDpiAwarenessContext(PM_V2) → Win8.1/1607-
+  shcore!SetProcessDpiAwareness(PER_MONITOR) → Vista/Win7 SetProcessDPIAware；TrackPopupMenu 要给
   `TPM_RECURSE`——菜单开着时在别处再点右键，系统才会先关旧菜单再把
   WM_CONTEXTMENU 转发给落点窗口（资源管理器的「右键连击」），不给则第一次右键
   只关菜单不弹新菜单；`BoxList.contextMenuEvent` 取落点用

@@ -669,9 +669,31 @@ static int serve() {
     return 0;
 }
 
+// DPI 感知逐级回退：SetProcessDpiAwarenessContext 是 Win10 1703+ 才有的导出，
+// 静态链接会让老 Win10（10240/10586/14393）与 Win7 在进程加载阶段就报
+// 「无法定位程序输入点」直接起不来——必须 GetProcAddress 运行时解析。
+static void set_dpi_awareness(void) {
+    HMODULE u32 = GetModuleHandleW(L"user32.dll");
+    typedef BOOL (WINAPI *PFN_SetCtx)(HANDLE);
+    PFN_SetCtx pCtx = (PFN_SetCtx)GetProcAddress(u32, "SetProcessDpiAwarenessContext");
+    if (pCtx && pCtx(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2))
+        return;                                     // Win10 1703+
+    HMODULE shc = LoadLibraryW(L"shcore.dll");      // Win7 没有 shcore，加载失败安全跳过
+    if (shc) {
+        typedef HRESULT (WINAPI *PFN_SetAwareness)(int);
+        PFN_SetAwareness pAw = (PFN_SetAwareness)GetProcAddress(shc, "SetProcessDpiAwareness");
+        if (pAw && SUCCEEDED(pAw(2 /*PROCESS_PER_MONITOR_DPI_AWARE*/)))
+            return;                                 // Win8.1 / Win10 1607-
+    }
+    typedef BOOL (WINAPI *PFN_SetAware)(void);
+    PFN_SetAware pA = (PFN_SetAware)GetProcAddress(u32, "SetProcessDPIAware");
+    if (pA)
+        pA();                                       // Vista / Win7：系统级 DPI 感知
+}
+
 int wmain(int argc, wchar_t **argv) {
     // DPI 感知必须在任何 UI 之前：不声明则菜单被系统按 96 DPI 渲染再位图放大（字体发糊）
-    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    set_dpi_awareness();
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
     int rc = 1;
     if (argc >= 2 && lstrcmpW(argv[1], L"--serve") == 0) {
