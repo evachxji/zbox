@@ -8,7 +8,8 @@
 //   zshell_host.exe <hwnd十进制> <x> <y> <路径1> [路径2 ...]   一次性弹菜单（调试用）
 //   zshell_host.exe --serve                                    常驻服务模式（面板用）
 // 服务模式协议（stdin/stdout，UTF-8 行）：
-//   请求: "M <hwnd> <路径数>\n" + 每行一个路径；响应: "R <退出码>\n"
+//   请求: "M <hwnd> <路径数> <x> <y>\n" + 每行一个路径；响应: "R <退出码>\n"。
+//   x/y 是调用方在右键按下那一刻捕获的物理屏幕坐标（弹菜单的落点）；缺省退回实时光标。
 //   退出码: 0=已执行所选命令或用户取消；2=用户选了「重命名」（调用方做行内重命名）；1=失败。
 //   两个动词在宿主内部特判（原因见下面对应注释）：「属性」走独立 STA 线程 ShellExecuteExW，
 //   「剪切/复制/创建快捷方式」先把文件的隐藏位摘掉（格子文件是靠隐藏桌面图标藏起来的）。
@@ -406,7 +407,7 @@ static void clear_hidden_bit(int pathc, wchar_t **pathv) {
     dbg_log("  clear HIDDEN for cut/copy (%d)\n", pathc);
 }
 
-static int show_menu_once(HWND hwnd, int pathc, wchar_t **pathv) {
+static int show_menu_once(HWND hwnd, int pathc, wchar_t **pathv, long x, long y, bool has_xy) {
     apply_menu_theme();
 
     HMENU hmenu = CreatePopupMenu();
@@ -458,11 +459,15 @@ static int show_menu_once(HWND hwnd, int pathc, wchar_t **pathv) {
         SetActiveWindow(hhidden);
     }
 
-    // 菜单位置取当前光标物理坐标（Qt 传过来的是逻辑像素，125% 缩放下会偏移）；
+    // 菜单位置用调用方在右键按下那一刻捕获的物理坐标（请求里的 x/y）——不能在这里
+    // GetCursorPos 取实时位置：serve 经管道收请求 + 建壳菜单要花几十~几百毫秒，
+    // 用户右键后随手一挪，菜单就落到新位置了（2026-10 用户报障）。一次性调试模式
+    // 不带坐标，退回实时光标。坐标必须是物理像素（QCursor.pos() 是逻辑像素会偏移），
+    // 调用方用 GetCursorPos 取。
     // TPM_RECURSE：菜单开着时在别处再点右键，系统先关旧菜单再把 WM_CONTEXTMENU
     // 转发给落点窗口——对齐资源管理器的「右键连击」体验，不给就只有关菜单的效果。
     POINT pt;
-    GetCursorPos(&pt);
+    if (has_xy) { pt.x = x; pt.y = y; } else { GetCursorPos(&pt); }
     // 排干线程队列里积压的鼠标/上下文菜单消息：serve 循环平时阻塞在 fgets
     // 不泵消息，上一次菜单经 TPM_RECURSE 转发给属主窗的右键消息一直积压在
     // 队列里，下次 TPM 的消息循环一上来就捞到它，按 TPM_RECURSE 语义立刻
@@ -597,8 +602,8 @@ static int show_menu_once(HWND hwnd, int pathc, wchar_t **pathv) {
 // CRT 预读整块，已被缓冲的请求在管道句柄上查不到）。留一个不生效的守卫比没有更糟：
 // 用户主动连击时会把过期菜单再闪一次。将来「Win+D 后首次右键不弹」若重现，去修排干
 // 那一步，不要加盲重试。
-static int show_menu_impl(HWND hwnd, int pathc, wchar_t **pathv) {
-    return show_menu_once(hwnd, pathc, pathv);
+static int show_menu_impl(HWND hwnd, int pathc, wchar_t **pathv, long x, long y, bool has_xy) {
+    return show_menu_once(hwnd, pathc, pathv, x, y, has_xy);
 }
 
 // 服务模式预热：用自身 exe 构建一次菜单并立刻销毁，
@@ -629,7 +634,10 @@ static int serve() {
             continue;
         long long hwnd = 0;
         int n = 0;
-        sscanf_s(line + 1, "%lld %d", &hwnd, &n);
+        long x = 0, y = 0;
+        bool has_xy = sscanf_s(line + 1, "%lld %d %ld %ld", &hwnd, &n, &x, &y) == 4;
+        if (!has_xy)
+            sscanf_s(line + 1, "%lld %d", &hwnd, &n);   // 旧协议不带坐标：退回实时光标
         if (n < 1 || n > 64) {
             fputs("R 1\n", stdout);
             fflush(stdout);
@@ -651,7 +659,7 @@ static int serve() {
         int rc = 1;
         if (got == n) {
             __try {
-                rc = show_menu_impl((HWND)(ULONG_PTR)hwnd, got, paths);
+                rc = show_menu_impl((HWND)(ULONG_PTR)hwnd, got, paths, x, y, has_xy);
             } __except (EXCEPTION_EXECUTE_HANDLER) {
                 rc = 1;
             }
@@ -702,7 +710,7 @@ int wmain(int argc, wchar_t **argv) {
         // 一次性模式（调试用）：x/y 参数忽略，位置取 GetCursorPos
         HWND hwnd = (HWND)(ULONG_PTR)_wcstoui64(argv[1], NULL, 10);
         __try {
-            rc = show_menu_impl(hwnd, argc - 4, argv + 4);
+            rc = show_menu_impl(hwnd, argc - 4, argv + 4, 0, 0, false);
         } __except (EXCEPTION_EXECUTE_HANDLER) {
             rc = 1;
         }
