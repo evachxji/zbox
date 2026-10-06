@@ -94,6 +94,8 @@ Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyQ
 - `themes.py` — 两套主题 QSS（深色 `nocturne` / 浅色 `mica`）加 `auto` 伪主题；`%CN%`/`%NUM%` 为字体占位符
 - `version.py` — 版本号唯一来源：关于窗、设置窗左下角、安装向导、卸载注册表项共用 `APP_VERSION`，发版只改这一个文件
 - `sysutil.py` — 注册表集成：开机自启、桌面右键菜单、应用列表卸载项（默认 HKCU，免管理员）
+- `screenshot.py` — QQ 风格截图：全屏灰罩遮罩（`ShotOverlay`）、框选/8 手柄调整、矩形/椭圆/文字标注（颜色 + 反色）、导出复制/保存/钉图、滚动截长图；`HotkeyManager` 全局热键
+- `pinshot.py` — 钉图窗 `PinWindow`：置顶无边框贴图，拖拽移动、双击关闭，不持久化
 - `installer.py` — 安装向导（选项/进度/完成页）与卸载向导（可选删除个人数据）；供 setup exe（安装）与程序本体 `--uninstall`（卸载）共用
 - `install.py` — 源码方式的系统集成（只装开机自启）
 - `setup.pyw` — 安装包入口：build.py 把它打成 onefile exe，内嵌 onedir 本体为 payload，双击弹安装向导
@@ -228,7 +230,7 @@ ClearType，文字发灰），圆角靠 Win11 DWM，Win7/10 降级为圆角遮�
 - 内容区是 `_SlideStack`（横向滑动切页动画）：日历/待办/传输三页**按 tab 顺序入栈**——
   `slide_to` 靠页面在列表里的先后判断左滑/右滑，顺序错了方向就反。
 - 尺寸常量 `SINGLE_W / PANEL_H`；`cfg` 键：`theme` / `tab` / `pos` /
-  `off_noon` / `off_evening`，`Config` 用 `__getattr__` 暴露为属性。
+  `off_noon` / `off_evening` / `shot_hotkey`（截图热键，空串 = 不启用），`Config` 用 `__getattr__` 暴露为属性。
 - **桌面格子模式**：窗口标志是 `FramelessWindowHint | Tool`，**故意不带 `WindowStaysOnTopHint`**
   ——面板就该被别的窗口正常盖住，别再顺手加回去。
 - **顶部栏默认收起**（`_slide_titlebar`）：栏窗高度 0↔`sc(42)` 做动画，靠 `_set_tb_height` 把它摆到
@@ -356,6 +358,28 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
 - `installer.py` 的向导**只在 frozen 时生效**；源码运行走 `install.py`。
 - 安装 = 把安装包内嵌的 payload（onefile 运行时解压到 `_MEIPASS\payload` 的 onedir 本体：exe + `_internal\`）**整体复制**到目标位置，按字节回报进度；目标目录已有旧安装（含 `zbox.exe`）时先整体清空再复制——`_check_dir` 只放行空目录/新目录/含 `zbox.exe` 的旧安装目录，别放宽这个签名判断，否则覆盖重装与卸载会误删用户文件。
 - 卸载走与安装同风格的**卸载向导**（确认页 → 进度页 → 完成页）：确认页 checkbox「同时删除个人数据」勾选后连同 `%APPDATA%\zbox`（待办、格子、配置）一起 rmtree，默认保留；程序目录用延迟 `rmdir` 删除（exe 运行中删不掉自己）。
+
+### 截图（`screenshot.py` + `pinshot.py`）
+
+- **会话**：`ShotOverlay` 是覆盖虚拟桌面的无边框置顶 Tool 窗，构造时**先逐屏
+  `grabWindow(0)` 抓底图再显示**（顺序反了遮罩自己会入镜）。灰罩 = 底图上盖
+  `MASK_COLOR`，选区镂空 = 裁剪选区把底图再画一遍——不用 WA_TranslucentBackground。
+- **键盘**：全屏 Tool 窗未必拿得到焦点，遮罩与长图控制条都在 `showEvent` 里
+  `grabKeyboard()`（Esc/Enter/Ctrl+Z 才可靠），`closeEvent` 里配对 release。
+- **标注**：shapes 列表（rect/ellipse/text × 颜色 × 档位 × invert），QPainter 画在
+  底图副本上；导出时按选区矢量重绘一遍（dpr 取覆盖屏幕最大值），撤销 = pop。
+- **主题**：调色板 `PALETTES` 按 `resolve_theme(cfg.theme)` 二选一（nocturne 琥珀 /
+  mica 蓝），工具条 QSS 现拼，不进 themes.py 的面板 QSS 体系。
+- **全局热键**：`HotkeyManager` 用 `RegisterHotKey(HWND=None)`（走线程消息队列，
+  不占钩子线程）+ `QAbstractNativeEventFilter` 收 `WM_HOTKEY`；空串 = 不注册，
+  裸键只放行 F1-F12/PrintScreen；设置窗修改后 `apply()` 即时注销重注册，
+  失败文案显示在设置窗「截图」行右侧。
+- **截长图**：进长图模式**必须 hide() 遮罩**（否则抓帧抓到的是遮罩自己），
+  之后由用户自己滚动页面（滚轮自然落在目标窗口），280ms 定时器抓选区帧，
+  用灰度行签名 `_row_sig` 找纵向位移拼接；匹配失败（动画/跳变）只提示不硬拼。
+  `_row_sig` 里 `bits().asarray()` 的对象不支持步长切片，要先 `bytes()` 转换。
+- **钉图**：`PinWindow` 置顶 Tool 窗，**故意不挂桌面带**（挂带会被应用窗口压住，
+  贴图的意义是浮在最上面）；拖拽移动、双击关闭；不持久化，进程退出即消失。
 
 ### 桌面格子（`boxes.py`）
 
