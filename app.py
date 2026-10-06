@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta
 from PyQt5.QtCore import (Qt, QTimer, QSize, QPoint, QPointF, QRectF, QDate, QTime,
                           pyqtSignal, QEvent, QPropertyAnimation, QVariantAnimation, QEasingCurve)
 from PyQt5.QtGui import (QFont, QFontDatabase, QPainter, QColor, QPixmap, QIcon, QPainterPath,
-                         QRegion, QPen, QLinearGradient, QCursor)
+                         QRegion, QPen, QLinearGradient, QCursor, QKeySequence)
 from PyQt5.QtWidgets import (QWidget, QFrame, QLabel, QToolButton, QVBoxLayout, QHBoxLayout,
                              QGridLayout, QListWidget,
                              QListWidgetItem, QLineEdit, QMenu, QApplication, QDialog,
@@ -185,7 +185,7 @@ class Config(object):
         self.path = path
         self.data = {'theme': THEME_ORDER[0], 'tab': 0, 'pos': None,
                      'off_noon': '12:00-13:00', 'off_evening': '18:00',
-                     'transfer_enabled': False}
+                     'transfer_enabled': False, 'shot_hotkey': ''}
         self.load()
 
     def load(self):
@@ -1659,7 +1659,7 @@ class SettingsDialog(QDialog):
     """齿轮按钮弹出的无边框设置窗口，样式跟随当前主题（themes.py #settingsPanel 区段）。
     on_fetch/on_import 为节假日数据回调（由入口提供）。
     改动即时生效并写入 config.json。"""
-    def __init__(self, panel, on_fetch, on_import, boxmgr=None):
+    def __init__(self, panel, on_fetch, on_import, boxmgr=None, on_hotkey=None):
         super(SettingsDialog, self).__init__(panel)
         self.setObjectName('settingsDlg')
         self.setWindowTitle('设置')
@@ -1669,6 +1669,8 @@ class SettingsDialog(QDialog):
         self._drag = None
         self._panel = panel
         cfg = panel.cfg
+        self._cfg = cfg
+        self._on_hotkey = on_hotkey
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -1737,6 +1739,43 @@ class SettingsDialog(QDialog):
         dbl.toggled.connect(commit_dblclick)
         form.addRow(row_label('格子'), dbl)
 
+        # 截图快捷键（留空 = 不启用）：外框复用时间框的 #timeField 交互样式
+        # （hover/focus 描边由 _time_rows 驱动），点框后按组合键录入，框内 ✕ 清空
+        self._time_rows = []
+        self.key_edit = QLineEdit(cfg.data.get('shot_hotkey') or '')
+        self.key_edit.setReadOnly(True)
+        self.key_edit.setPlaceholderText('点击后按组合键')
+        self.key_edit.setToolTip('按下组合键录入；留空 = 不启用截图热键')
+        key_field = QWidget()
+        key_field.setObjectName('timeField')
+        key_field.setFocusProxy(self.key_edit)
+        key_field.setFixedSize(sc(180), sc(30))
+        kf = QHBoxLayout(key_field)
+        kf.setContentsMargins(0, 0, sc(3), 0)
+        kf.setSpacing(0)
+        kf.addWidget(self.key_edit, 1)
+        self.key_clear = QToolButton()
+        self.key_clear.setObjectName('timeBtn')
+        self.key_clear.setText('✕')
+        self.key_clear.setStyleSheet('color: #8a8a90;')
+        self.key_clear.setFixedSize(sc(24), sc(24))
+        self.key_clear.setCursor(Qt.PointingHandCursor)
+        self.key_clear.setToolTip('清空快捷键')
+        self.key_clear.clicked.connect(self._clear_hotkey)
+        self.key_clear.setVisible(bool(cfg.data.get('shot_hotkey')))
+        kf.addWidget(self.key_clear)
+        self.key_edit.installEventFilter(self)
+        self.key_clear.installEventFilter(self)
+        self._time_rows.append((self.key_edit, self.key_clear, key_field))
+        key_row = QHBoxLayout()
+        key_row.setSpacing(sc(8))
+        key_row.addWidget(key_field)
+        self.key_warn = QLabel('')
+        self.key_warn.setStyleSheet('color: #e05252;')
+        key_row.addWidget(self.key_warn)
+        key_row.addStretch(1)
+        form.addRow(row_label('截图'), key_row)
+
         # 分隔线：通用设置 / 日历与时间
         sep1 = QFrame()
         sep1.setObjectName('setSep')
@@ -1760,7 +1799,6 @@ class SettingsDialog(QDialog):
         # 下班倒计时（自由文本输入 + 时钟弹层）
         # 用 QLineEdit 而非 QTimeEdit：QTimeEdit 是按时/分分段校验的，全选后直接打字会被
         # 校验器拒掉（要么必须先选中某一段，要么根本打不进冒号）
-        self._time_rows = []
 
         def time_field(text):
             """一个时间输入框 + 时钟按钮，返回 (外框, 输入框)。外框顺带接好 hover/焦点描边。"""
@@ -1898,6 +1936,37 @@ class SettingsDialog(QDialog):
         except RuntimeError:
             pass  # 设置窗已关，按钮随窗口销毁
 
+    _MOD_KEYS = (Qt.Key_Control, Qt.Key_Shift, Qt.Key_Alt, Qt.Key_Meta)
+
+    def _record_hotkey(self, ev):
+        """热键录入（eventFilter 转发来的 KeyPress）：单按修饰键不结算，等组合键；
+        Esc 放弃录入；Backspace/Delete = 清空；其余组合直接落盘即时重注册。"""
+        key = ev.key()
+        if key in self._MOD_KEYS:
+            return True
+        if key == Qt.Key_Escape:
+            self.key_edit.clearFocus()
+            return True
+        if key in (Qt.Key_Backspace, Qt.Key_Delete):
+            self._clear_hotkey()
+            return True
+        seq = QKeySequence(int(ev.modifiers()) | key).toString(QKeySequence.PortableText)
+        self.key_edit.setText(seq)
+        self._commit_hotkey()
+        return True
+
+    def _commit_hotkey(self):
+        """录入完成即落盘并即时重注册；注册失败（被占用/不识别）在右侧红字提示。"""
+        seq = self.key_edit.text().strip()
+        self._cfg.set('shot_hotkey', seq)
+        self.key_clear.setVisible(bool(seq))
+        if self._on_hotkey:
+            self.key_warn.setText(self._on_hotkey(seq) or '')
+
+    def _clear_hotkey(self):
+        self.key_edit.clear()
+        self._commit_hotkey()
+
     def _sync_transfer_chk(self):
         """传输页门禁层改动开关后，同步这里的勾选状态。"""
         try:
@@ -1927,7 +1996,15 @@ class SettingsDialog(QDialog):
         pop.move(max(x, ag.left()), max(y, ag.top()))
 
     def eventFilter(self, obj, ev):
-        """时间输入框的 hover/焦点态同步到外框，驱动描边与底色变化。"""
+        """时间/热键输入框的 hover/焦点态同步到外框，驱动描边与底色变化；
+        热键框另吃 KeyPress 做组合键录入，焦点进出切换提示文案。"""
+        if obj is getattr(self, 'key_edit', None):
+            if ev.type() == QEvent.KeyPress:
+                return self._record_hotkey(ev)
+            if ev.type() == QEvent.FocusIn:
+                self.key_edit.setPlaceholderText('请按组合键…')
+            elif ev.type() == QEvent.FocusOut:
+                self.key_edit.setPlaceholderText('点击后按组合键')
         for te, btn, field in getattr(self, '_time_rows', []):
             if obj is te or obj is btn:
                 t = ev.type()

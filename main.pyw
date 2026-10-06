@@ -27,6 +27,7 @@ import app as ui
 import boxes as bx
 import calendar_data as cd
 import installer
+import screenshot as shotmod
 import sysutil
 import transfer
 from themes import THEME_ORDER
@@ -307,7 +308,12 @@ def main():
         if boxmgr:
             boxmgr.shutdown()
             sysutil.context_menu_set_running(False)  # 桌面右键切回直链「单击启动」
+        hotkey.shutdown()
     qapp.aboutToQuit.connect(_quit_cleanup)
+
+    # 截图全局热键（配置为空 = 不启用）；设置窗修改后走 hotkey.apply 即时重注册
+    hotkey = shotmod.HotkeyManager(qapp, lambda: shotmod.start_session(cfg))
+    hotkey.apply(cfg.data.get('shot_hotkey'))
 
     # 无系统托盘，分支的托盘气泡通道整体不进：
     # ① 传输服务起不来（端口被占）——传输页门禁层会给「不可用」提示，无需另提示；
@@ -359,7 +365,7 @@ def main():
             return
         dlg = ui.SettingsDialog(panel, fetch_holidays,
                                 lambda: _import_holidays(hstore, panel, download_source),
-                                boxmgr)
+                                boxmgr, hotkey.apply)
         settings_dlg[:] = [dlg]
         dlg.show()
 

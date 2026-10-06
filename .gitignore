@@ -9,7 +9,7 @@ _build_icon.ico
 
 # 自检截图与设计稿渲染图（不上传仓库）
 designs/verify/
-designs/*.png
+designs/**/*.png
 
 /_*.log
 _build_manifest.xml
