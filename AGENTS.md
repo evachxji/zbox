@@ -330,7 +330,12 @@ DuePopup 的 QCalendarWidget 行高用 `verticalHeader().setMinimumSectionSize` 
 ① Qt6.7+ 默认 windows11 风格会给 QCalendarWidget 画网格线、选中态不吃
 `selection-background-color`——QSS 加 `gridline-color: transparent` 与
 `QAbstractItemView::item:selected` 两条；② QSS 的 `background: transparent`
-不再传导到滚动区视口（palette 是不透明黑），BoxList 手动把视口置透明。
+不再传导到滚动区视口（palette 是不透明黑），BoxList 手动把视口置透明；
+③ `grab()/render()` 会把透明区填成 palette Window 色（不透明黑）——抓半透明页面前
+临时挂 `WA_TranslucentBackground` 保 alpha（`_freeze_content`）；④ Qt6 DirectWrite
+渲染字重比 Qt5 GDI 细一档（Qt5 Normal ≈ Qt6 Medium 视觉），且 `QFont.setWeight()`
+对 Bahnschrift/雅黑实测不改变渲染（QSS `font-weight` 路径正常）——日历数字代码
+字重用 Medium、小字在 QSS 补 500。
 
 ### 节假日与农历（`calendar_data.py` + `main.pyw`）
 

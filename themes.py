@@ -43,7 +43,7 @@ QToolButton#todayBtn {
 QToolButton#todayBtn:hover { background: rgba(232,163,61,30); }
 QFrame#clockBar { background: #e8a33d; border: none; border-radius: 1.5px; margin: 5px 0px; }
 QLabel#clockBig { color: #f0ede6; font: 500 40px "%NUM%"; }
-QLabel#calSub { color: #6d6a62; font: 10.5px "%CN%"; }
+QLabel#calSub { color: #6d6a62; font: 500 10.5px "%CN%"; }
 QLabel#calSub[accent="true"] { color: #e8a33d; }
 QLabel#weekLabel { color: #6d6a62; font: 600 10px "%CN%"; }
 QFrame#dayCell { border-radius: 10px; background: transparent; margin: 3px 0; }
@@ -58,7 +58,7 @@ QFrame#dayCell[today="true"] { background: #e8a33d; }
 QFrame#dayCell[today="true"]:hover { background: #f2b45a; }
 QFrame#dayCell[today="true"] QLabel#dayNum { color: #1a1610; font-weight: 700; }
 QFrame#dayCell[today="true"] QLabel#daySub { color: rgba(26,22,16,190); }
-QLabel#daySub { color: #6d6a62; font: 9px "%CN%"; }
+QLabel#daySub { color: #6d6a62; font: 500 9px "%CN%"; }
 QLabel#daySub[fest="true"] { color: #e8a33d; }
 /* 节假日角标：贴格子右上角的圆角标签 —— 法定节假日「休」，调休上班日「班」。
    普通双休日不标；文字与配色都在这里给，app 只负责内容与摆位。 */
@@ -314,7 +314,7 @@ QToolButton#todayBtn {
 QToolButton#todayBtn:hover { background: rgba(0,103,192,26); }
 QFrame#clockBar { background: #0067c0; border: none; border-radius: 1.5px; margin: 5px 0px; }
 QLabel#clockBig { color: #1b1b1f; font: 500 40px "%NUM%"; }
-QLabel#calSub { color: #8a8a90; font: 10.5px "%CN%"; }
+QLabel#calSub { color: #8a8a90; font: 500 10.5px "%CN%"; }
 QLabel#calSub[accent="true"] { color: #0067c0; }
 QLabel#weekLabel { color: #8a8a90; font: 600 10px "%CN%"; }
 QLabel#weekLabel[we="true"] { color: #c94f4f; }
@@ -330,7 +330,7 @@ QFrame#dayCell[today="true"] { background: #0067c0; }
 QFrame#dayCell[today="true"]:hover { background: #1a77cc; }
 QFrame#dayCell[today="true"] QLabel#dayNum { color: #ffffff; font-weight: 700; }
 QFrame#dayCell[today="true"] QLabel#daySub { color: rgba(255,255,255,210); }
-QLabel#daySub { color: #9a9aa0; font: 9px "%CN%"; }
+QLabel#daySub { color: #9a9aa0; font: 500 9px "%CN%"; }
 QLabel#daySub[fest="true"] { color: #0067c0; font-weight: 600; }
 /* 节假日角标：贴格子右上角的圆角标签 —— 法定节假日「休」，调休上班日「班」。
    普通双休日不标；文字与配色都在这里给，app 只负责内容与摆位。 */

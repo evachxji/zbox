@@ -223,7 +223,9 @@ def resolve_theme(key):
 # ---------------- 日历 ----------------
 
 # 日历数字字体：Qt 用 pixelSize + weight 精确控制，对齐 Win11 日历（字形高 21px / Medium）
-_NUM_FONT = {'name': None, 'size': 19, 'weight': QFont.Normal}  # Qt6 起 setWeight 只收枚举
+_NUM_FONT = {'name': None, 'size': 19, 'weight': QFont.Medium}
+# 重量用 Medium：Qt5 的 Normal 由 GDI 渲染，视觉重量≈Qt6 DirectWrite 的 Medium，
+# 用 Normal 会显得「字小了一圈」（实测渲染对比）
 
 
 def set_num_font(name):

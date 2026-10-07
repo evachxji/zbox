@@ -1706,7 +1706,13 @@ class BoxWindow(QWidget):
         if self._frozen_on:
             return
         self._frozen_on = True
-        self._frozen.setPixmap(self.pages.currentWidget().grab())
+        page = self.pages.currentWidget()
+        # Qt6 的 grab()/render() 会把透明区填成 palette Window 色（不透明黑）——
+        # 抓图前临时给页面挂 WA_TranslucentBackground 保住 alpha，否则冻结页是一块黑
+        page.setAttribute(Qt.WA_TranslucentBackground, True)
+        pm = page.grab()
+        page.setAttribute(Qt.WA_TranslucentBackground, False)
+        self._frozen.setPixmap(pm)
         self.pages.setCurrentIndex(2)
 
     def _unfreeze_content(self):
