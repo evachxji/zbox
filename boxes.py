@@ -39,7 +39,7 @@ from ctypes import wintypes
 from PySide6.QtCore import (Qt, QObject, QTimer, QThread, QUrl, QPoint, QRect, QSize,
                           QFileSystemWatcher, Signal, QEvent)
 from PySide6.QtGui import (QIcon, QCursor, QPainter, QColor, QPen, QFont, QImage, QPixmap,
-                          QActionGroup)   # QActionGroup Qt6 起从 QtWidgets 挪到 QtGui
+                          QActionGroup, QPalette)   # QActionGroup Qt6 起从 QtWidgets 挪到 QtGui
 from PySide6.QtWidgets import (QWidget, QDialog, QListWidget, QListWidgetItem, QVBoxLayout,
                              QHBoxLayout, QGridLayout, QLabel, QToolButton,
                              QPushButton, QStackedLayout, QMenu,
@@ -376,6 +376,13 @@ class BoxList(QListWidget):
         self.setViewMode(QListWidget.ListMode)
         self.setIconSize(QSize(ui.sc(16), ui.sc(16)))
         self.setResizeMode(QListWidget.Adjust)
+        # Qt6 起 QSS 的 background: transparent 不再传导到滚动区视口（视口 palette 是不透明黑，
+        # 格子内容区整块黑底）——手动把视口置透明
+        vp = self.viewport()
+        vp.setAutoFillBackground(False)
+        pal = vp.palette()
+        pal.setColor(QPalette.Base, QColor(0, 0, 0, 0))
+        vp.setPalette(pal)
         self.setUniformItemSizes(True)
         self.setDragDropMode(QAbstractItemView.DragDrop)
         self.setDefaultDropAction(Qt.MoveAction)
@@ -1545,9 +1552,6 @@ class BoxWindow(QWidget):
         p.setBrush(QColor(25, 28, 34, 140))
         p.setPen(QPen(QColor(255, 255, 255, 28), 1))
         p.drawRoundedRect(r, ui.sc(8), ui.sc(8))
-        if self.isActiveWindow():
-            p.setPen(QPen(QColor(255, 255, 255, 70), 1))
-            p.drawRoundedRect(r, ui.sc(8), ui.sc(8))
         p.end()
 
     # ---------- 拖动 / 缩放 ----------
@@ -1609,7 +1613,7 @@ class BoxWindow(QWidget):
                     self._op = ('resize', edges, e.globalPos(), self.geometry())
                     self._press_pos = e.globalPos()
                     self._freeze_content()
-                    self.activateWindow()
+                    self.grabMouse()   # 冻结页切换会隐藏视口：Qt6 丢弃隐式抓取，事件流就断了
                     return True
             if self._op and self._op[0] == 'resize':
                 if e.type() == QEvent.MouseMove:
@@ -1639,7 +1643,7 @@ class BoxWindow(QWidget):
         if edges:
             self._op = ('resize', edges, e.globalPos(), self.geometry())
             self._freeze_content()
-            self.activateWindow()
+            self.grabMouse()
         elif e.pos().y() < ui.sc(TITLE_H):
             self._op = ('move', 0, e.globalPos(), self.geometry())
         else:
@@ -1710,6 +1714,7 @@ class BoxWindow(QWidget):
         if not self._frozen_on:
             return
         self._frozen_on = False
+        self.releaseMouse()
         self._frozen.setPixmap(QPixmap())
         self.refresh()
 

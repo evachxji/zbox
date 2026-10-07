@@ -323,6 +323,14 @@ QApplication 创建前调，main.pyw 与 setup.pyw 各一处）；`QActionGroup`
 `QFont.setWeight` 只收 `QFont.Weight` 枚举；事件类型枚举必须类级访问（`QEvent.MouseMove`，
 实例级 `e.MouseMove` 不存在）；`QtWinExtras` 已移除，HICON 转图走 `boxes.py` 的
 `_hicon_to_image`（纯 ctypes：DrawIconEx → 32bpp DIB section → QImage）。
+Qt6 行高度量收紧（改用字体的 USE_TYPO_METRICS），靠字体行高自撑的固定行会变矮、
+弹性区（日历网格）被撑开：日历时钟行/周标签行按 Qt5 实测 `setFixedHeight`，
+DuePopup 的 QCalendarWidget 行高用 `verticalHeader().setMinimumSectionSize` 钳住
+（日历内部按字体度量逐行 resizeSection，只有 minimum 钳得住）。另两处行为差：
+① Qt6.7+ 默认 windows11 风格会给 QCalendarWidget 画网格线、选中态不吃
+`selection-background-color`——QSS 加 `gridline-color: transparent` 与
+`QAbstractItemView::item:selected` 两条；② QSS 的 `background: transparent`
+不再传导到滚动区视口（palette 是不透明黑），BoxList 手动把视口置透明。
 
 ### 节假日与农历（`calendar_data.py` + `main.pyw`）
 
@@ -411,9 +419,12 @@ IPC 通道（与 `--pick-folder` 同一条）发回面板建格子；`new_folder
 
 - **缩放快照冻结**：拖边缘缩放起手即把内容页 `grab()` 成位图切到冻结页（`_freeze_content`，
   左上角对齐、超出裁切），拖动期间只有标题栏 + 一张图在重绘——活列表（`QListWidget.Adjust`）
-  不再逐 mousemove 全量重排，半透明分层窗口也少一层合成；`activateWindow()` 只在起手调一次
-  （原来每个 mousemove 都调）。松手 `_finish_op` → `_unfreeze_content` 切回活页、重排、落盘。
-  冻结期间文件监听触发的 `refresh()` 不切页（防中途露回活列表）。
+  不再逐 mousemove 全量重排，半透明分层窗口也少一层合成；逐次的 `activateWindow()` 已去掉。
+  起手同时 `grabMouse()`：**视口在按下时持有隐式鼠标抓取，冻结页切换把它隐藏后
+  Qt6 会丢弃抓取**——不抢过来的话 move/release 全丢，首次缩放必死且冻结页卡住；
+  松手 `_finish_op` → `_unfreeze_content`（内含 releaseMouse）切回活页、重排、落盘。
+  冻结期间文件监听触发的 `refresh()` 不切页（防中途露回活列表）。格子边框不再随
+  激活态变亮（`isActiveWindow()` 高亮已移除）：任何状态下颜色保持一致。
 - **格子内容两种视图**（标题栏 ≡ 菜单「查看」组，`rec['view']` 持久化，与排序组并列）：
   按列表（默认，ListMode + 16px 图标）/ 按图标（IconMode + 32px 图标 + 固定网格
   sc(84)×sc(72) + 名称两行折行）。QSS 里固定行高/左 padding 只对列表生效——

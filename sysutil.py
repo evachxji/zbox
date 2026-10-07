@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """系统集成：开机自启 + 桌面/文件夹右键菜单 + 应用列表卸载项。
-默认写 HKCU（免管理员，Win7/10/11 通用）；all_users=True 写 HKLM（exe 安装向导「此计算机」选项，需管理员）。"""
+默认写 HKCU（免管理员，Win10/11 通用）；all_users=True 写 HKLM（exe 安装向导「此计算机」选项，需管理员）。"""
 import json
 import os
 import shutil

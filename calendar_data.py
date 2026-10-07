@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-"""节假日数据（内置官方调休 + 联网更新 + 离线导入）与农历计算。兼容 Python 3.8 / Win7。"""
+"""节假日数据（内置官方调休 + 联网更新 + 离线导入）与农历计算。"""
 import json
 import os
 import urllib.request

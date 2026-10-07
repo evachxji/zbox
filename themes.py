@@ -179,7 +179,8 @@ QToolButton#todoDateBtn:hover { background: rgba(255,255,255,20); color: #e8a33d
 QFrame#duePopup { background: #23252d; border: 1px solid rgba(255,255,255,30); border-radius: 10px; }
 QCalendarWidget QWidget#qt_calendar_navigationbar { background: #23252d; }
 QCalendarWidget QWidget#qt_calendar_calendarview { background: #23252d; alternate-background-color: #23252d; }
-QCalendarWidget QTableView { background: #23252d; }
+QCalendarWidget QTableView { background: #23252d; gridline-color: transparent; }
+QCalendarWidget QAbstractItemView::item:selected { background: #e8a33d; color: #1a1610; }
 QCalendarWidget QAbstractItemView:enabled {
     color: #e8e6e1; background: #23252d; font: 12px "%NUM%"; outline: none;
     selection-background-color: #e8a33d; selection-color: #1a1610;
@@ -448,7 +449,8 @@ QToolButton#todoDateBtn:hover { background: rgba(0,103,192,13); color: #0067c0; 
 QFrame#duePopup { background: #ffffff; border: 1px solid rgba(0,0,0,26); border-radius: 10px; }
 QCalendarWidget QWidget#qt_calendar_navigationbar { background: #ffffff; }
 QCalendarWidget QWidget#qt_calendar_calendarview { background: #ffffff; alternate-background-color: #ffffff; }
-QCalendarWidget QTableView { background: #ffffff; }
+QCalendarWidget QTableView { background: #ffffff; gridline-color: transparent; }
+QCalendarWidget QAbstractItemView::item:selected { background: #0067c0; color: #ffffff; }
 QCalendarWidget QAbstractItemView:enabled {
     color: #1b1b1f; background: #ffffff; font: 12px "%CN%"; outline: none;
     selection-background-color: #0067c0; selection-color: #ffffff;

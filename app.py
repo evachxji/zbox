@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (QWidget, QFrame, QLabel, QToolButton, QVBoxLayout
                              QGridLayout, QListWidget,
                              QListWidgetItem, QLineEdit, QMenu, QApplication, QDialog,
                              QFormLayout, QCheckBox, QRadioButton, QPushButton, QCalendarWidget,
-                             QLayout, QGraphicsOpacityEffect, QSizePolicy)
+                             QLayout, QGraphicsOpacityEffect, QSizePolicy, QTableView)
 
 import calendar_data as cd
 import sysutil
@@ -394,6 +394,9 @@ class CalendarWidget(QWidget):
         bar.setFixedWidth(sc(3))
         self.clock_hm = QLabel()
         self.clock_hm.setObjectName('clockBig')
+        # Qt6 行高度量收紧（USE_TYPO_METRICS），时钟行不再自己撑到 Qt5 的高度，
+        # 高出的部分会被日历网格分走（周行距变稀）。按 Qt5 实测行高固定（53.6*1.25=67）。
+        self.clock_hm.setFixedHeight(sc(53.6))
         self.sub = QLabel()
         self.sub.setObjectName('calSub')
         self._sub_fm_key = None    # _sync_sub_baseline 的缓存：字体没变就不重复量
@@ -420,6 +423,7 @@ class CalendarWidget(QWidget):
             lb = QLabel()
             lb.setObjectName('weekLabel')
             lb.setAlignment(Qt.AlignCenter)
+            lb.setFixedHeight(sc(15.2))   # 同时钟行：按 Qt5 实测固定（15.2*1.25=19）
             lb.setProperty('we', 'true' if i >= 5 else 'false')
             week.addWidget(lb, 0, i)
             self.week_labels.append(lb)
@@ -836,6 +840,11 @@ class DuePopup(QFrame):
         lay.setSpacing(sc(6))
         cal = QCalendarWidget(self)
         cal.setGridVisible(False)
+        # Qt6 行高度量收紧，日历视口行高跟着矮一截（整个弹层比 Qt5 矮 37px）：
+        # 按 Qt5 的行高固定（24*1.25=30）
+        _cal_view = cal.findChild(QTableView, 'qt_calendar_calendarview')
+        if _cal_view:
+            _cal_view.verticalHeader().setMinimumSectionSize(sc(24.0))
         cal.setVerticalHeaderFormat(QCalendarWidget.NoVerticalHeader)
         cal.setHorizontalHeaderFormat(QCalendarWidget.ShortDayNames)
         cal.setFirstDayOfWeek(Qt.Monday)
