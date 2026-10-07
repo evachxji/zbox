@@ -20,18 +20,18 @@ if errorlevel 1 goto :no_python
 
 if not exist "%~dp0build.py" goto :no_build
 
-rem ---- 依赖：PyQt5（生成图标）+ PyInstaller（打包）----
-%PY% -c "import PyQt5" >nul 2>nul
+rem ---- 依赖：PySide6（生成图标）+ PyInstaller（打包）----
+%PY% -c "import PySide6" >nul 2>nul
 if errorlevel 1 goto :need_deps
 %PY% -c "import PyInstaller" >nul 2>nul
 if not errorlevel 1 goto :build
 
 :need_deps
-echo   [提示] 缺少打包依赖（PyQt5 / PyInstaller）。
+echo   [提示] 缺少打包依赖（PySide6 / PyInstaller）。
 choice /c YN /n /m "   现在自动安装吗？[Y/N] "
 if errorlevel 2 goto :no_deps
 echo   正在安装依赖，可能需要几分钟 ...
-%PY% -m pip install PyQt5 pyinstaller
+%PY% -m pip install PySide6 pyinstaller
 if errorlevel 1 goto :pip_failed
 echo.
 
@@ -61,7 +61,7 @@ exit /b 1
 :no_deps
 echo.
 echo   请先手动安装，再双击本脚本：
-echo       %PY% -m pip install PyQt5 pyinstaller
+echo       %PY% -m pip install PySide6 pyinstaller
 echo.
 pause
 exit /b 1
@@ -74,7 +74,7 @@ pause
 exit /b 1
 
 :no_python
-echo   [错误] 未找到可用的 Python，请先安装 Python 3.8 或更高版本。
+echo   [错误] 未找到可用的 Python，请先安装 Python 3.10 或更高版本。
 echo          下载：https://www.python.org/downloads/
 echo          安装时务必勾选 "Add Python to PATH"。
 echo.

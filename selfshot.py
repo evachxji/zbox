@@ -114,6 +114,9 @@ class _Runner(object):
         usage = collections.namedtuple('usage', 'total used free')
         installer.shutil.disk_usage = \
             lambda _p: usage(500 * 2 ** 30, 200 * 2 ** 30, 300 * 2 ** 30)
+        # 「所需空间」= payload 目录大小，随打包产物变化：同样打桩成固定值
+        self._dirsize_backup = installer._dir_size
+        installer._dir_size = lambda _p: 100 * 2 ** 20
 
         self.panel.todo.rebuild()
         self.panel.set_tab(0, save=False)
@@ -133,6 +136,8 @@ class _Runner(object):
             shutil.rmtree(self._sample_dir, ignore_errors=True)
         if self._du_backup:
             installer.shutil.disk_usage = self._du_backup
+        if getattr(self, '_dirsize_backup', None):
+            installer._dir_size = self._dirsize_backup
         if self._ver_backup:
             ui.APP_VERSION, sysutil.APP_VERSION = self._ver_backup
         for w in self._keepalive:

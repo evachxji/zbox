@@ -4,7 +4,7 @@
 
 # Zbox 桌面格子
 
-Windows 桌面整理格子工具：把堆在桌面的文件拖进格子即归类，附带日历 + 待办 + 局域网传输悬浮小面板。Win7 / Win10 / Win11 通用。
+Windows 桌面整理格子工具：把堆在桌面的文件拖进格子即归类，附带日历 + 待办 + 局域网传输悬浮小面板。Win10 / Win11。
 
 ## 功能
 
@@ -37,7 +37,7 @@ Windows 桌面整理格子工具：把堆在桌面的文件拖进格子即归类
 
 到 [Releases](https://github.com/evachxji/zbox/releases) 下载 `zbox-Setup-v<版本>-x64.exe`，双击打开安装向导即可（仅当前用户安装免管理员）。
 
-源码运行：双击 `run.cmd`（缺 PyQt5 会提示自动安装）。
+源码运行：双击 `run.cmd`（缺 PySide6 会提示自动安装）。
 
 ## 自行构建
 
@@ -46,7 +46,7 @@ Windows 桌面整理格子工具：把堆在桌面的文件拖进格子即归类
 
 ## 兼容性
 
-PyQt5（Qt 5.15），Win7 / Win10 / Win11 通用；Win7 需 Python 3.8 + `PyQt5==5.15.*`。
+PySide6（Qt 6.8 LTS），Python 3.10+，Win10 / Win11。
 
 ## 开源致谢
 

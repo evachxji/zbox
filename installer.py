@@ -266,7 +266,7 @@ def _desktop_dir():
 
 
 def create_desktop_shortcut(exe_path):
-    """在桌面创建指向 exe 的 .lnk：借 PowerShell 的 WScript.Shell COM，免 pywin32 依赖（Win7+ 自带）。"""
+    """在桌面创建指向 exe 的 .lnk：借 PowerShell 的 WScript.Shell COM，免 pywin32 依赖（Win10+ 自带）。"""
     lnk = os.path.join(_desktop_dir(), '%s.lnk' % APP_TITLE)
     args = tuple(p.replace("'", "''") for p in (lnk, exe_path, os.path.dirname(exe_path), exe_path))
     ps = ("$w=New-Object -ComObject WScript.Shell;"

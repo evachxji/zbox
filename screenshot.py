@@ -988,18 +988,21 @@ _QT_VK = {
     Qt.Key_Right: 0x27, Qt.Key_Down: 0x28, Qt.Key_Print: 0x2C, Qt.Key_Insert: 0x2D,
     Qt.Key_Delete: 0x2E,
 }
+_QT_VK = {int(k): v for k, v in _QT_VK.items()}   # PySide6 枚举哈希与 int 不等，统一 int 键
 
 
 def _qt_to_win(keyval):
-    """QKeySequence[0] 的 int（修饰键|键码）→ (win32 修饰, VK)。识别不了返回 (mods, None)。"""
+    """QKeySequence[0]（PySide6 起是 QKeyCombination，先转 int）→ (win32 修饰, VK)。
+    识别不了返回 (mods, None)。"""
+    keyval = keyval.toCombined() if hasattr(keyval, 'toCombined') else int(keyval)
     mods = 0
-    if keyval & Qt.ShiftModifier:
+    if keyval & Qt.ShiftModifier.value:
         mods |= 0x0004
-    if keyval & Qt.ControlModifier:
+    if keyval & Qt.ControlModifier.value:
         mods |= 0x0002
-    if keyval & Qt.AltModifier:
+    if keyval & Qt.AltModifier.value:
         mods |= 0x0001
-    if keyval & Qt.MetaModifier:
+    if keyval & Qt.MetaModifier.value:
         mods |= 0x0008
     key = keyval & 0x01FFFFFF
     if 0x41 <= key <= 0x5A or 0x30 <= key <= 0x39:   # A-Z / 0-9 与 VK 同码

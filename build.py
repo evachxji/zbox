@@ -44,7 +44,7 @@ MANIFEST_XML = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 
 def gen_icon():
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-    from PyQt5.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication
     qapp = QApplication([])
     try:
         import app as ui

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Zbox 桌面悬浮面板：日历 + 待办。PySide6，兼容 Win7/10/11、Python 3.8+。"""
+"""Zbox 桌面悬浮面板：日历 + 待办。PySide6，Win10 / Win11，Python 3.10+。"""
 import ctypes
 from ctypes import wintypes
 import json
@@ -1218,7 +1218,7 @@ class TodoWidget(QWidget):
         m = QMenu(self)
         act_edit = m.addAction('编辑')
         act_del = m.addAction('删除')
-        act = m.exec_(self.list.viewport().mapToGlobal(pos))
+        act = m.exec(self.list.viewport().mapToGlobal(pos))
         if act is act_edit:
             for it in self.store.items:
                 if it['id'] == item_id:
@@ -1419,7 +1419,7 @@ def sink_to_desktop(win, anchor=None):
 
 def round_corners(win):
     """无边框窗口圆角：Win11 用 DWM（DWMWA_WINDOW_CORNER_PREFERENCE = DWMWCP_ROUND），
-    Win7/10 降级为圆角遮罩。"""
+    Win10 降级为圆角遮罩。"""
     try:
         if sys.getwindowsversion().build >= 22000:
             ctypes.windll.dwmapi.DwmSetWindowAttribute(
@@ -1434,7 +1434,7 @@ def round_corners(win):
 
 def bar_corner_radius(win):
     """栏窗顶角半径（也是底边探进面板的深度）：对齐面板的实际圆角——
-    Win11 DWM 圆角约 8 物理像素（换算成逻辑像素），Win7/10 遮罩固定 14（同 round_corners）。"""
+    Win11 DWM 圆角约 8 物理像素（换算成逻辑像素），Win10 遮罩固定 14（同 round_corners）。"""
     try:
         if sys.getwindowsversion().build >= 22000:
             return 8.0 / win.devicePixelRatioF()
@@ -1950,7 +1950,7 @@ class SettingsDialog(QDialog):
         if key in (Qt.Key_Backspace, Qt.Key_Delete):
             self._clear_hotkey()
             return True
-        seq = QKeySequence(int(ev.modifiers()) | key).toString(QKeySequence.PortableText)
+        seq = QKeySequence(ev.modifiers().value | key).toString(QKeySequence.PortableText)
         self.key_edit.setText(seq)
         self._commit_hotkey()
         return True
@@ -2318,7 +2318,7 @@ class FloatingPanel(QWidget):
         self.cn_font, self.num_font = pick_fonts()
         set_num_font(self.num_font)
         # 不用 WA_TranslucentBackground：分层窗口禁用 ClearType，文字灰糊。
-        # 不透明窗口 + Win11 DWM 圆角（Win7/10 降级为圆角遮罩），文字锐利度对齐系统组件。
+        # 不透明窗口 + Win11 DWM 圆角（Win10 降级为圆角遮罩），文字锐利度对齐系统组件。
         # 桌面格子模式：不置顶，可被其它窗口覆盖；移动靠顶部栏（悬浮滑出）或日历左侧时分秒拖拽。
         # 桌面层级（见 _ensure_band）：属主设为桌面图标窗加入「桌面带」，Win+D 收不走；
         # z-order 由看门狗维护在桌面带之上、应用窗口之下
@@ -2525,7 +2525,7 @@ class FloatingPanel(QWidget):
         return False
 
     def _grab_input_focus(self, _old, new):
-        """桌面带窗口的键盘焦点兜底（Win7/10 用；Win11 实测点击即自然获得焦点）。
+        """桌面带窗口的键盘焦点兜底（Win10 用；Win11 实测点击即自然获得焦点）。
         焦点不在面板上时不动。"""
         if not self._desk_pinned or new is None or new.window() is not self:
             return

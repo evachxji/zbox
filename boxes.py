@@ -585,7 +585,7 @@ class BoxList(QListWidget):
             menu.addAction('在资源管理器中打开',
                            lambda: self.box.open_path(self.box.display_dir()))
         if menu.actions():
-            act = menu.exec_(QCursor.pos())
+            act = menu.exec(QCursor.pos())
             ui._dbg('★ Qt 兜底菜单选择: %s' % (act.text() if act else None))
 
 
@@ -784,6 +784,13 @@ class BoxWindow(QWidget):
         il.addStretch(1)
         self.pages.addWidget(page_invalid)
 
+        # 缩放冻结页：拖边缘缩放期间用内容位图占位——活列表（QListWidget.Adjust）
+        # 不再随每个 mousemove 全量重排，半透明分层窗口也少合成一层，缩放跟手
+        self._frozen_on = False
+        self._frozen = QLabel()
+        self._frozen.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.pages.addWidget(self._frozen)
+
         # 子控件默认继承顶层窗口的光标：边缘悬停设了双箭头后划入子控件不会复位。
         # 全部子控件开鼠标跟踪并装过滤器，MouseMove 时按窗口坐标同步光标；
         # 不开跟踪的话标题栏等区域收不到 MouseMove，光标会一直残留双箭头。
@@ -889,13 +896,15 @@ class BoxWindow(QWidget):
         if self.rec['kind'] == 'folder':
             path = self.rec['path']
             if not os.path.isdir(path):
-                self.pages.setCurrentIndex(1)
+                if not self._frozen_on:   # 缩放冻结期间不切页，松手时 _unfreeze 会重刷
+                    self.pages.setCurrentIndex(1)
                 self._rewatch()
                 return
             entries = self._scan_dir(path)
         else:
             entries = self._entries_from_items()
-        self.pages.setCurrentIndex(0)
+        if not self._frozen_on:
+            self.pages.setCurrentIndex(0)
         self._rewatch()
         sort = self.rec.get('sort', 'name')
         if sort == 'mtime':
@@ -1432,7 +1441,7 @@ class BoxWindow(QWidget):
         return menu
 
     def _show_menu(self):
-        self._build_menu().exec_(QCursor.pos())
+        self._build_menu().exec(QCursor.pos())
 
     def _set_view(self, key):
         self.rec['view'] = key
@@ -1599,6 +1608,8 @@ class BoxWindow(QWidget):
                 if edges:
                     self._op = ('resize', edges, e.globalPos(), self.geometry())
                     self._press_pos = e.globalPos()
+                    self._freeze_content()
+                    self.activateWindow()
                     return True
             if self._op and self._op[0] == 'resize':
                 if e.type() == QEvent.MouseMove:
@@ -1627,6 +1638,8 @@ class BoxWindow(QWidget):
         edges = 0 if self.rec.get('collapsed') else self._hit_edges(e.pos())
         if edges:
             self._op = ('resize', edges, e.globalPos(), self.geometry())
+            self._freeze_content()
+            self.activateWindow()
         elif e.pos().y() < ui.sc(TITLE_H):
             self._op = ('move', 0, e.globalPos(), self.geometry())
         else:
@@ -1661,7 +1674,6 @@ class BoxWindow(QWidget):
             r.setBottom(start_geo.bottom() + delta.y())
         if r.width() >= self.minimumWidth() and r.height() >= self.minimumHeight():
             self.setGeometry(r)
-        self.activateWindow()
 
     def mouseReleaseEvent(self, e):
         if self._op:
@@ -1671,6 +1683,7 @@ class BoxWindow(QWidget):
     def _finish_op(self, global_pos):
         """拖动/缩放收尾（mouseReleaseEvent 与视口事件过滤器共用）。"""
         self._op = None
+        self._unfreeze_content()
         if self._press_pos is not None and \
                 (global_pos - self._press_pos).manhattanLength() > 4:
             self._last_drag_ts = time.time()
@@ -1682,6 +1695,23 @@ class BoxWindow(QWidget):
         self.mgr.save_rec(self)
         # 不动 z-order：格子保持当前层级（拖拽激活时浮在应用之上），
         # 失焦也不沉底——用户明确要求：除双击桌面/解散外，格子永不消失
+
+    def _freeze_content(self):
+        """缩放起手：内容页抓成位图切到冻结页（左上角对齐、超出裁切），
+        拖动期间只有标题栏 + 一张图在重绘。"""
+        if self._frozen_on:
+            return
+        self._frozen_on = True
+        self._frozen.setPixmap(self.pages.currentWidget().grab())
+        self.pages.setCurrentIndex(2)
+
+    def _unfreeze_content(self):
+        """缩放收尾：切回活页并按新尺寸重排（refresh 内部会摆正 currentIndex）。"""
+        if not self._frozen_on:
+            return
+        self._frozen_on = False
+        self._frozen.setPixmap(QPixmap())
+        self.refresh()
 
     def _clamp_to_screen(self):
         """保证至少标题栏露在屏幕内（面板同款思路，见 FloatingPanel._clamp_to_screen）。"""
@@ -3026,7 +3056,7 @@ class BoxManager(object):
         m = QMenu(self.panel)
         self._menu = m
         m.addAction(sysutil.SHOW_ICONS_TEXT, self.show_all)
-        m.exec_(QCursor.pos())
+        m.exec(QCursor.pos())
         self._menu = None
         self.rhook.menu_open = False
         if self._reopen_menu:   # 桌面右键换了位置：exec_ 已返回、状态归位后在光标处重弹

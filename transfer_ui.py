@@ -1212,7 +1212,7 @@ class TransferWidget(QWidget):
             self.recv.show()
             self.recv.raise_()
             self.recv.activateWindow()
-            ui.round_corners(self.recv)   # winId 已创建：Win11 DWM 圆角 / Win7/10 遮罩
+            ui.round_corners(self.recv)   # winId 已创建：Win11 DWM 圆角 / Win10 遮罩
             anim = QPropertyAnimation(self.recv, b'geometry', self)
             anim.setDuration(180)
             anim.setEasingCurve(QEasingCurve.OutCubic)
@@ -1506,7 +1506,7 @@ class TransferWidget(QWidget):
             menu = QMenu(self)
             act_reveal = menu.addAction('打开文件位置') if paths else None
             act_del = menu.addAction('删除记录（不删除文件）')
-            act = menu.exec_(rec['row'].mapToGlobal(pos))
+            act = menu.exec(rec['row'].mapToGlobal(pos))
             if act is None:
                 return
             if act_reveal is not None and act is act_reveal:
