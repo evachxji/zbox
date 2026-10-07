@@ -333,9 +333,12 @@ DuePopup 的 QCalendarWidget 行高用 `verticalHeader().setMinimumSectionSize` 
 不再传导到滚动区视口（palette 是不透明黑），BoxList 手动把视口置透明；
 ③ `grab()/render()` 会把透明区填成 palette Window 色（不透明黑）——抓半透明页面前
 临时挂 `WA_TranslucentBackground` 保 alpha（`_freeze_content`）；④ Qt6 DirectWrite
-渲染字重比 Qt5 GDI 细一档（Qt5 Normal ≈ Qt6 Medium 视觉），且 `QFont.setWeight()`
-对 Bahnschrift/雅黑实测不改变渲染（QSS `font-weight` 路径正常）——日历数字代码
-字重用 Medium、小字在 QSS 补 500。
+渲染字重比 Qt5 GDI 细一档（Qt5 Normal ≈ Qt6 Medium 视觉）且字宽紧约 10%，
+`QFont.setWeight()` 对 Bahnschrift/雅黑实测不改变渲染（QSS `font-weight` 路径正常）
+——日历数字代码字重用 Medium、农历小字 9px→10px 并在 QSS 补 500；⑤ Qt6 给无边框窗
+显式设 DWMWCP_DONOTROUND（Qt5 没有，靠 Win11 默认圆角），且挂带后
+DwmSetWindowAttribute 报 E_HANDLE——面板的 `round_corners()` 必须在
+`_ensure_band()` 挂带之前调用（FloatingPanel.__init__ 里已提前）。
 
 ### 节假日与农历（`calendar_data.py` + `main.pyw`）
 
@@ -430,6 +433,8 @@ IPC 通道（与 `--pick-folder` 同一条）发回面板建格子；`new_folder
   松手 `_finish_op` → `_unfreeze_content`（内含 releaseMouse）切回活页、重排、落盘。
   冻结期间文件监听触发的 `refresh()` 不切页（防中途露回活列表）。格子边框不再随
   激活态变亮（`isActiveWindow()` 高亮已移除）：任何状态下颜色保持一致。
+  `paintEvent` 先整窗铺一层 alpha=1 的不可见填充：圆角裁切区（alpha=0）在分层窗口里
+  是点击穿透的，右下角缩放命中带大半落在裁切区——不铺的话按进死区事件全漏给桌面。
 - **格子内容两种视图**（标题栏 ≡ 菜单「查看」组，`rec['view']` 持久化，与排序组并列）：
   按列表（默认，ListMode + 16px 图标）/ 按图标（IconMode + 32px 图标 + 固定网格
   sc(84)×sc(72) + 名称两行折行）。QSS 里固定行高/左 padding 只对列表生效——

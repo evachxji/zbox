@@ -1548,6 +1548,10 @@ class BoxWindow(QWidget):
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
+        # 圆角裁切区（alpha=0）在分层窗口里是点击穿透的——右下角缩放命中带大半落在
+        # 裁切区里，点上去事件全漏给桌面（「连拖几次失效」根因之一）。先整窗铺一层
+        # alpha=1 的不可见填充：视觉不变，命中恢复。
+        p.fillRect(self.rect(), QColor(0, 0, 0, 1))
         r = self.rect().adjusted(0, 0, -1, -1)
         p.setBrush(QColor(25, 28, 34, 140))
         p.setPen(QPen(QColor(255, 255, 255, 28), 1))

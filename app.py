@@ -2435,6 +2435,9 @@ class FloatingPanel(QWidget):
         self.setFixedSize(sc(SINGLE_W), sc(PANEL_H))
         self.set_tab(int(cfg.tab or 0), save=False)
 
+        # Qt6 给无边框窗显式设了 DWMWCP_DONOTROUND（Qt5 没有，靠 Win11 默认圆角）；
+        # 且挂带后 DwmSetWindowAttribute 会 E_HANDLE——圆角偏好必须在挂带之前设
+        round_corners(self)
         # 桌面层级：归属桌面带（Win+D 免疫）+ 看门狗维护 z-order 与挂接健康
         self._ensure_band()
         # WinEvent 钩子：桌面整理软件的表层重建时立刻把面板抬回（等看门狗会闪 0.3~0.6s）

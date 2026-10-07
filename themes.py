@@ -58,7 +58,7 @@ QFrame#dayCell[today="true"] { background: #e8a33d; }
 QFrame#dayCell[today="true"]:hover { background: #f2b45a; }
 QFrame#dayCell[today="true"] QLabel#dayNum { color: #1a1610; font-weight: 700; }
 QFrame#dayCell[today="true"] QLabel#daySub { color: rgba(26,22,16,190); }
-QLabel#daySub { color: #6d6a62; font: 500 9px "%CN%"; }
+QLabel#daySub { color: #6d6a62; font: 500 10px "%CN%"; }   /* Qt6 DirectWrite 天然字宽比 Qt5 GDI 紧 ~10%，补 1px 找回视觉大小 */
 QLabel#daySub[fest="true"] { color: #e8a33d; }
 /* 节假日角标：贴格子右上角的圆角标签 —— 法定节假日「休」，调休上班日「班」。
    普通双休日不标；文字与配色都在这里给，app 只负责内容与摆位。 */
@@ -180,6 +180,8 @@ QFrame#duePopup { background: #23252d; border: 1px solid rgba(255,255,255,30); b
 QCalendarWidget QWidget#qt_calendar_navigationbar { background: #23252d; }
 QCalendarWidget QWidget#qt_calendar_calendarview { background: #23252d; alternate-background-color: #23252d; }
 QCalendarWidget QTableView { background: #23252d; gridline-color: transparent; }
+QCalendarWidget QTableView::item { border: none; }   /* windows11 风格会给日历画列分隔线，
+  gridline-color/showGrid 都管不住它，::item 全态规则让 QSS 接管条目绘制才消失 */
 QCalendarWidget QAbstractItemView::item:selected { background: #e8a33d; color: #1a1610; }
 QCalendarWidget QAbstractItemView:enabled {
     color: #e8e6e1; background: #23252d; font: 12px "%NUM%"; outline: none;
@@ -330,7 +332,7 @@ QFrame#dayCell[today="true"] { background: #0067c0; }
 QFrame#dayCell[today="true"]:hover { background: #1a77cc; }
 QFrame#dayCell[today="true"] QLabel#dayNum { color: #ffffff; font-weight: 700; }
 QFrame#dayCell[today="true"] QLabel#daySub { color: rgba(255,255,255,210); }
-QLabel#daySub { color: #9a9aa0; font: 500 9px "%CN%"; }
+QLabel#daySub { color: #9a9aa0; font: 500 10px "%CN%"; }   /* 同 nocturne */
 QLabel#daySub[fest="true"] { color: #0067c0; font-weight: 600; }
 /* 节假日角标：贴格子右上角的圆角标签 —— 法定节假日「休」，调休上班日「班」。
    普通双休日不标；文字与配色都在这里给，app 只负责内容与摆位。 */
@@ -450,6 +452,7 @@ QFrame#duePopup { background: #ffffff; border: 1px solid rgba(0,0,0,26); border-
 QCalendarWidget QWidget#qt_calendar_navigationbar { background: #ffffff; }
 QCalendarWidget QWidget#qt_calendar_calendarview { background: #ffffff; alternate-background-color: #ffffff; }
 QCalendarWidget QTableView { background: #ffffff; gridline-color: transparent; }
+QCalendarWidget QTableView::item { border: none; }   /* 同上：杀掉 windows11 风格的列分隔线 */
 QCalendarWidget QAbstractItemView::item:selected { background: #0067c0; color: #ffffff; }
 QCalendarWidget QAbstractItemView:enabled {
     color: #1b1b1f; background: #ffffff; font: 12px "%CN%"; outline: none;
