@@ -1429,13 +1429,14 @@ def sink_to_desktop(win, anchor=None):
 # ---------------- 设置窗口 ----------------
 
 def round_corners(win):
-    """无边框窗口圆角：Win11 用 DWM（DWMWA_WINDOW_CORNER_PREFERENCE = DWMWCP_ROUND），
-    Win10 降级为圆角遮罩。"""
+    """无边框窗口圆角：圆角遮罩（SetWindowRgn）。
+    原本是「Win11 DWM 圆角 / Win10 遮罩」：Qt6 给无边框窗显式设 DWMWCP_DONOTROUND
+    （Qt5 没有，所以 Qt5 吃到了 Win11 默认圆角），且面板挂进桌面带后
+    DwmSetWindowAttribute 直接 E_HANDLE——DWM 路在 Qt6 走不通，Win11 也统一用遮罩。
+    代价：角边 1-bit 硬边（Win10 用户一直是这个效果）；不能用
+    WA_TranslucentBackground 手绘代替（分层窗口禁用 ClearType，见 FloatingPanel）。"""
     try:
-        if sys.getwindowsversion().build >= 22000:
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                int(win.winId()), 33, ctypes.byref(ctypes.c_int(2)), 4)
-        elif win.width() > 0:
+        if win.width() > 0:
             path = QPainterPath()
             path.addRoundedRect(0.0, 0.0, float(win.width()), float(win.height()), 14.0, 14.0)
             win.setMask(QRegion(path.toFillPolygon().toPolygon()))
@@ -1445,12 +1446,7 @@ def round_corners(win):
 
 def bar_corner_radius(win):
     """栏窗顶角半径（也是底边探进面板的深度）：对齐面板的实际圆角——
-    Win11 DWM 圆角约 8 物理像素（换算成逻辑像素），Win10 遮罩固定 14（同 round_corners）。"""
-    try:
-        if sys.getwindowsversion().build >= 22000:
-            return 8.0 / win.devicePixelRatioF()
-    except Exception:
-        pass
+    面板圆角统一走遮罩后（见 round_corners），半径固定 14。"""
     return 14.0
 
 
@@ -2435,9 +2431,6 @@ class FloatingPanel(QWidget):
         self.setFixedSize(sc(SINGLE_W), sc(PANEL_H))
         self.set_tab(int(cfg.tab or 0), save=False)
 
-        # Qt6 给无边框窗显式设了 DWMWCP_DONOTROUND（Qt5 没有，靠 Win11 默认圆角）；
-        # 且挂带后 DwmSetWindowAttribute 会 E_HANDLE——圆角偏好必须在挂带之前设
-        round_corners(self)
         # 桌面层级：归属桌面带（Win+D 免疫）+ 看门狗维护 z-order 与挂接健康
         self._ensure_band()
         # WinEvent 钩子：桌面整理软件的表层重建时立刻把面板抬回（等看门狗会闪 0.3~0.6s）

@@ -230,7 +230,8 @@ set ZBOX_SHOT=designs\verify && python main.pyw   :: 截图自检
 ### 面板（`app.py`）
 
 `FloatingPanel` 是无边框**不透明**顶层窗口：不用 `WA_TranslucentBackground`（分层窗口禁用
-ClearType，文字发灰），圆角靠 Win11 DWM，Win10 降级为圆角遮罩（`round_corners`）；
+ClearType，文字发灰），圆角统一走遮罩（`round_corners`，SetWindowRgn——Qt6 时代 DWM 路
+走不通，见下方 Qt6 迁移要点⑤）；
 也不用 `QGraphicsDropShadowEffect`（Qt5 下破坏顶层窗合成），所以 `SHADOW = 0`、无阴影留白。
 （`FloatingPanel.__init__` 里那句「阴影改为 paintEvent 手绘」是旧注释，类中已无 `paintEvent`。）
 
@@ -336,9 +337,10 @@ DuePopup 的 QCalendarWidget 行高用 `verticalHeader().setMinimumSectionSize` 
 渲染字重比 Qt5 GDI 细一档（Qt5 Normal ≈ Qt6 Medium 视觉）且字宽紧约 10%，
 `QFont.setWeight()` 对 Bahnschrift/雅黑实测不改变渲染（QSS `font-weight` 路径正常）
 ——日历数字代码字重用 Medium、农历小字 9px→10px 并在 QSS 补 500；⑤ Qt6 给无边框窗
-显式设 DWMWCP_DONOTROUND（Qt5 没有，靠 Win11 默认圆角），且挂带后
-DwmSetWindowAttribute 报 E_HANDLE——面板的 `round_corners()` 必须在
-`_ensure_band()` 挂带之前调用（FloatingPanel.__init__ 里已提前）。
+显式设 DWMWCP_DONOTROUND（Qt5 没有，所以 Qt5 能吃到 Win11 默认圆角）；只设圆角偏好
+不开 NC 渲染 = 「方角 + 一圈圆角轮廓线」，且挂带后 DwmSetWindowAttribute 直接
+E_HANDLE——DWM 路线在 Qt6 走不通，`round_corners()` 已改为 Win10/Win11 统一遮罩
+（SetWindowRgn 与挂带状态无关），代价是角边 1-bit 硬边（Win10 一直是这个效果）。
 
 ### 节假日与农历（`calendar_data.py` + `main.pyw`）
 
