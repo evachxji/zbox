@@ -333,7 +333,7 @@ DuePopup 的 QCalendarWidget 行高用 `verticalHeader().setMinimumSectionSize` 
 `QAbstractItemView::item:selected` 两条；② QSS 的 `background: transparent`
 不再传导到滚动区视口（palette 是不透明黑），BoxList 手动把视口置透明；
 ③ `grab()/render()` 会把透明区填成 palette Window 色（不透明黑）——抓半透明页面前
-临时挂 `WA_TranslucentBackground` 保 alpha（`_freeze_content`）；④ Qt6 DirectWrite
+临时挂 `WA_TranslucentBackground` 保 alpha；④ Qt6 DirectWrite
 渲染字重比 Qt5 GDI 细一档（Qt5 Normal ≈ Qt6 Medium 视觉）且字宽紧约 10%，
 `QFont.setWeight()` 对 Bahnschrift/雅黑实测不改变渲染（QSS `font-weight` 路径正常）
 ——日历数字代码字重用 Medium、农历小字 9px→10px 并在 QSS 补 500；⑤ Qt6 给无边框窗
@@ -427,16 +427,13 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
 IPC 通道（与 `--pick-folder` 同一条）发回面板建格子；`new_folder` 按 normcase 去重——同一路径
 已有格子不新建，改为显示出来并 `flash()` 透明度闪烁提示（「新建文件夹格子」对话框路线同样去重）。
 
-- **缩放快照冻结**：拖边缘缩放起手即把内容页 `grab()` 成位图切到冻结页（`_freeze_content`，
-  左上角对齐、超出裁切），拖动期间只有标题栏 + 一张图在重绘——活列表（`QListWidget.Adjust`）
-  不再逐 mousemove 全量重排，半透明分层窗口也少一层合成；逐次的 `activateWindow()` 已去掉。
-  起手同时 `grabMouse()`：**视口在按下时持有隐式鼠标抓取，冻结页切换把它隐藏后
-  Qt6 会丢弃抓取**——不抢过来的话 move/release 全丢，首次缩放必死且冻结页卡住；
-  松手 `_finish_op` → `_unfreeze_content`（内含 releaseMouse）切回活页、重排、落盘。
-  冻结期间文件监听触发的 `refresh()` 不切页（防中途露回活列表）。格子边框不再随
-  激活态变亮（`isActiveWindow()` 高亮已移除）：任何状态下颜色保持一致。
+- **格子缩放实时渲染**：拖边缘缩放期间活列表随窗口逐帧重排。曾用过快照冻结（起手把内容页
+  `grab()` 成位图占位、松手才切回活页），但窗口拉大后位图外区域留空、图里的滚动条悬在半空，
+  已移除；列表 `setUniformItemSizes(True)` 重排无需逐项测量，逐 mousemove 重排开销可忽略。
+  格子边框不再随激活态变亮（`isActiveWindow()` 高亮已移除）：任何状态下颜色保持一致。
   `paintEvent` 先整窗铺一层 alpha=1 的不可见填充：圆角裁切区（alpha=0）在分层窗口里
   是点击穿透的，右下角缩放命中带大半落在裁切区——不铺的话按进死区事件全漏给桌面。
+
 - **格子内容两种视图**（标题栏 ≡ 菜单「查看」组，`rec['view']` 持久化，与排序组并列）：
   按列表（默认，ListMode + 16px 图标）/ 按图标（IconMode + 32px 图标 + 固定网格
   sc(84)×sc(72) + 名称两行折行）。QSS 里固定行高/左 padding 只对列表生效——
