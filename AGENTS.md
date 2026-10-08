@@ -103,7 +103,7 @@ Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyS
 - `installer.py` — 安装向导（选项/进度/完成页）与卸载向导（可选删除个人数据）；供 setup exe（安装）与程序本体 `--uninstall`（卸载）共用
 - `install.py` — 源码方式的系统集成（只装开机自启）
 - `setup.pyw` — 安装包入口：build.py 把它打成 onefile exe，内嵌 onedir 本体为 payload，双击弹安装向导
-- `build.py` / `build.cmd` — 生成图标与 DPI 清单，两段式 PyInstaller：main.pyw 打 onedir 本体（`dist\build\app\`），setup.pyw 内嵌本体打成单个安装包 `dist\zbox-Setup-v<版本>-<架构>.exe`（架构标识跟随打包用的 Python：x64 / x86 / arm64）
+- `build.py` / `build.cmd` — `build.cmd` 是三端一键入口（PC exe + Android APK + 鸿蒙 HAP，产物带版本号汇总到 `dist\release\`）；`build.py` 只负责 PC：生成图标与 DPI 清单，两段式 PyInstaller——main.pyw 打 onedir 本体（`dist\build\app\`），setup.pyw 内嵌本体打成单个安装包 `dist\zbox-Setup-v<版本>-<架构>.exe`（架构标识跟随打包用的 Python：x64 / x86 / arm64）
 - `native/` — 外壳菜单宿主：`zshell.cpp`（C++ 源码，契约见下方「格子文件右键」）
   + `build_native.cmd`（cl /MT 静态 CRT 编译出 `zshell_host.exe`，需 MSVC Build Tools）；
   exe 随仓库提交，改源码后需重新编译并一起提交
@@ -114,7 +114,6 @@ Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyS
   `deploy-cos.py` 一键上传部署 / `--bind-cert <ID>` 绑定续期证书，细节见 `.claude/skills/site-deploy/`
 - `android/` — Android 端独立 Gradle 工程（Kotlin + Compose，与 PC 代码完全分离）
 - `harmony/` — 鸿蒙端独立 DevEco 工程（ArkTS + ArkUI，HarmonyOS NEXT API 12+，与 PC 代码完全分离；ohpm 依赖 polka/axios/harmony-utils/harmony-dialog；移植计划与验收标准见 `docs/superpowers/plans/2026-10-06-harmonyos-port.md`，构建说明见 `harmony/README.md`）
-- `build-apk.cmd` — 双击打包 Android APK：自动定位 JDK 17 再调 `gradlew assembleDebug`
 - `assets/` — README 引用的图标与功能截图
 - `docs/` — 历史实现计划存档（`superpowers/plans/`）
 
@@ -131,12 +130,12 @@ Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyS
 ```bat
 pip install PySide6          :: 唯一依赖（Qt 6.8 LTS，要求 Win10 1809+）
 pythonw main.pyw             :: 源码方式运行（或双击 run.cmd）
-python build.py              :: 打包 exe 安装包（或双击 build.cmd）
+python build.py              :: 只打包 PC exe 安装包（三端一键请双击 build.cmd，产物在 dist\release\）
 native\build_native.cmd      :: 编译外壳菜单宿主 zshell_host.exe（改 native\zshell.cpp 后必跑）
 python install.py            :: 源码方式开启开机自启
 python install.py --remove   :: 移除自启并清理旧的右键菜单
 python transfer_selftest.py  :: 传输协议自检（全过打印 SELFTEST OK）
-cd android && gradlew.bat assembleDebug   :: 构建 Android debug APK（或双击 build-apk.cmd）
+cd android && gradlew.bat assembleDebug   :: 构建 Android debug APK（build.cmd 已集成）
 cd harmony && hvigorw assembleHap          :: 构建鸿蒙 HAP（需 DevEco Studio 环境，先 ohpm install）
 set ZBOX_SHOT=designs\verify && python main.pyw   :: 截图自检
 ```
@@ -414,11 +413,15 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
 - **截长图**：进长图模式**必须 hide() 遮罩**（否则抓帧抓到的是遮罩自己），
   之后由用户自己滚动页面（滚轮自然落在目标窗口），280ms 定时器抓选区帧，
   用灰度行签名 `_row_sig` 找纵向位移拼接；匹配失败（动画/跳变）只提示不硬拼。
+  匹配是两阶段（`_find_shift`）：整行均值粗筛前 5 个候选 → 行内 8 桶均值复核，
+  同分取最小位移，且搜索范围限半帧以内——列表页行高一致、整行均值周期性撞车，
+  单靠行均值或大位移窄重叠区会锁错对齐（错开整数个行高），把已拼内容当新内容拼出重复段。
   遮罩藏起后取景框轮廓与缩略预览由 `_LongChrome` 贴出：描边外扩 2px 完全落在选区外
   （抓帧不受污染）、`WA_TransparentForMouseEvents` 鼠标穿透滚轮照常落在目标窗口、
-  预览放选区右侧（放不下换左侧，都放不下不显示）、高度随拼接增长、
-  超过取景框高截顶只展示最新部分。
-  `_row_sig` 里 `bits().asarray()` 的对象不支持步长切片，要先 `bytes()` 转换。
+  预览放选区右侧（放不下换左侧，都放不下不显示）、高度随拼接向下延伸、
+  顶到屏幕工作区底边后截顶只展示最新部分；完成只进剪贴板（不弹保存框）。
+  `_row_sig` 里 PySide6 的 `bits()` 直接返回带尺寸的 memoryview（PyQt5 的 `setsize`/`asarray`
+  不存在，照搬会让每个 tick 静默炸在签名计算上、拼接永远不生效），先 `bytes()` 转换再步长切片。
 - **钉图**：`PinWindow` 置顶 Tool 窗，**故意不挂桌面带**（挂带会被应用窗口压住，
   贴图的意义是浮在最上面）；拖拽移动、双击关闭；不持久化，进程退出即消失。
 

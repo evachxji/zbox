@@ -41,9 +41,9 @@ Windows 桌面整理格子工具：把堆在桌面的文件拖进格子即归类
 
 ## 自行构建
 
-- exe 安装包：双击 `build.cmd`（或 `python build.py`），产物为 `dist\zbox-Setup-v<版本>-<架构>.exe`
-- Android APK：双击 `build-apk.cmd`（需 JDK 17 与 Android SDK），产物在 `android\app\build\outputs\apk\debug\`
-- 鸿蒙 HAP：用 DevEco Studio 打开 `harmony\` 构建（ohpm 依赖安装与签名见 `harmony\README.md`）
+- 一键三端：双击 `build.cmd` —— Windows exe 安装包 + Android APK + 鸿蒙 HAP，产物汇总在 `dist\release\`（文件名带版本号）
+  - 依赖：PC 需 PySide6 + PyInstaller（缺了会提示自动装）；Android 需 JDK 17 与 Android SDK；鸿蒙需 DevEco Studio 与 `devecocli`（`npm i -g @deveco/deveco-cli@stable`）
+  - hap 是免签名调试包，只能装模拟器/开发者调试设备；分发真机需签名或上架（见 `harmony\README.md`）
 
 ## 兼容性
 
