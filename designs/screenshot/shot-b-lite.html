@@ -1,0 +1,114 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>方案 B &#183; 浅色极简</title><style>
+html,body{margin:0;padding:0}
+body{width:1600px;height:900px;overflow:hidden;position:relative;font-family:'Segoe UI','Microsoft YaHei',sans-serif}
+.layer{position:absolute;inset:0}
+.scene{position:absolute;inset:0}
+.dim-wrap .scene{filter:brightness(.52) saturate(.75)}
+.veil{background:rgba(6,8,12,.28)}
+.sharp-wrap{clip-path:inset(170px 370px 130px 240px)}
+/* ---- 场景：壁纸 ---- */
+.wp{position:absolute;inset:0;background:linear-gradient(155deg,#33465c 0%,#1d2937 55%,#26313f 100%)}
+.wp::after{content:'';position:absolute;inset:0;background:radial-gradient(1200px 500px at 75% -10%,rgba(120,170,220,.18),transparent 60%)}
+.dicon{position:absolute;left:30px;width:64px;text-align:center}
+.dicon .ic{width:44px;height:44px;margin:0 auto;border-radius:9px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);display:flex;align-items:center;justify-content:center;font-size:20px;color:#fff}
+.dicon .tx{margin-top:5px;font-size:11px;color:rgba(255,255,255,.85);text-shadow:0 1px 2px rgba(0,0,0,.5)}
+/* ---- 场景：假窗口 ---- */
+.win{position:absolute;left:260px;top:100px;width:1000px;height:640px;background:#f6f7f9;border-radius:8px;overflow:hidden;box-shadow:0 18px 50px rgba(0,0,0,.35)}
+.win .t{height:44px;background:#eceef1;display:flex;align-items:center;padding:0 14px;gap:7px}
+.win .dot3{width:11px;height:11px;border-radius:50%}
+.win .addr{margin-left:12px;width:380px;height:24px;background:#fff;border-radius:12px;font-size:11px;color:#888;display:flex;align-items:center;padding-left:14px;border:1px solid #e2e4e8}
+.nav{position:absolute;left:0;top:44px;bottom:0;width:150px;background:#eff1f4;padding:16px 10px}
+.nav .it{height:30px;border-radius:6px;font-size:12px;color:#5c6068;display:flex;align-items:center;padding-left:12px;margin-bottom:4px}
+.nav .it.on{background:#dfe6ee;color:#2b2f36;font-weight:600}
+.main{position:absolute;left:150px;top:44px;right:0;bottom:0;background:#fff;padding:26px 34px}
+.h1bar{width:300px;height:22px;background:#20242b;border-radius:4px}
+.chip{margin-top:14px;width:118px;height:18px;background:#edf1f6;border-radius:9px}
+.pl{margin-top:20px}
+.pl i{display:block;height:10px;background:#e4e7eb;border-radius:5px;margin-bottom:12px}
+.imgb{margin-top:22px;width:560px;height:200px;border-radius:8px;background:linear-gradient(135deg,#41546e,#63809f);position:relative;overflow:hidden}
+.imgb .mock{position:absolute;left:26px;top:24px;width:300px;height:152px;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.35);border-radius:6px}
+.imgb .mock i{display:block;height:9px;background:rgba(255,255,255,.55);border-radius:4px;margin:16px 18px 0}
+.imgb .lb{position:absolute;left:14px;bottom:12px;background:rgba(0,0,0,.45);color:#fff;font-size:11px;padding:4px 10px;border-radius:9px}
+.code{margin-top:24px;width:560px;height:88px;background:#14171c;border-radius:8px;padding:14px 18px;box-sizing:border-box}
+.code i{display:block;height:8px;border-radius:4px;margin-bottom:11px}
+/* ---- 选区 ---- */
+.sel{position:absolute;left:240px;top:170px;width:990px;height:600px;box-sizing:border-box}
+.h{position:absolute;width:8px;height:8px;box-sizing:border-box}
+.h.nw{left:-4px;top:-4px}.h.n{left:50%;margin-left:-4px;top:-4px}.h.ne{right:-4px;top:-4px}
+.h.e{right:-4px;top:50%;margin-top:-4px}.h.se{right:-4px;bottom:-4px}.h.s{left:50%;margin-left:-4px;bottom:-4px}
+.h.sw{left:-4px;bottom:-4px}.h.w{left:-4px;top:50%;margin-top:-4px}
+.sizelabel{position:absolute;left:240px;top:140px;padding:5px 10px;border-radius:4px;font:12px Consolas,'Segoe UI',monospace;letter-spacing:.5px;white-space:nowrap}
+/* ---- 标注示例 ---- */
+.annot{position:absolute;inset:0}
+.atext{position:absolute;left:786px;top:294px;font:600 15px 'Microsoft YaHei';color:#ffd54a;text-shadow:0 1px 3px rgba(0,0,0,.65)}
+.ainv{position:absolute;left:1012px;top:716px;font:600 13px 'Microsoft YaHei';color:#fff;background:#14161c;padding:5px 12px;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,.4);white-space:nowrap}
+/* ---- 工具条 ---- */
+.bar{position:absolute;top:782px;right:370px;display:flex;align-items:center;padding:6px;gap:2px;box-sizing:border-box}
+.tbtn{height:32px;min-width:32px;display:flex;align-items:center;justify-content:center;border:none;background:transparent;border-radius:6px;cursor:pointer;padding:0 5px;gap:5px}
+.tbtn svg{width:17px;height:17px;flex:none}
+.lbl{font-size:12px;font-family:'Microsoft YaHei'}
+.sep{width:1px;height:18px;margin:0 5px;flex:none}
+.confirm{height:32px;border:none;border-radius:6px;padding:0 14px;font:600 12.5px 'Microsoft YaHei';display:flex;align-items:center;gap:6px;cursor:pointer}
+.confirm svg{width:15px;height:15px}
+.subbar{position:absolute;top:836px;right:370px;display:flex;align-items:center;padding:7px 12px;gap:8px;box-sizing:border-box}
+.dot{width:16px;height:16px;border-radius:50%;cursor:pointer;flex:none;box-sizing:border-box}
+.size{width:26px;height:22px;display:flex;align-items:center;justify-content:center;border-radius:4px;font:600 11px Consolas,monospace;cursor:pointer;flex:none}
+.invert{height:23px;padding:0 11px;display:flex;align-items:center;border-radius:12px;font:600 11px 'Microsoft YaHei';cursor:pointer;flex:none;box-sizing:border-box}
+/* ---- 钉图预览卡 ---- */
+.pin-card{position:absolute;left:1316px;top:64px;width:248px}
+.pin-thumb{height:140px;border-radius:4px;position:relative;overflow:hidden;background:linear-gradient(135deg,#3b4c61,#22303f);box-sizing:border-box}
+.pin-thumb .pw{position:absolute;left:26px;top:24px;width:196px;height:92px;background:rgba(246,247,249,.95);border-radius:4px;padding:10px 12px;box-sizing:border-box}
+.pin-thumb .pw i{display:block;height:7px;background:#d7dbe0;border-radius:3px;margin-bottom:8px}
+.pin-thumb .pw i:first-child{width:90px;height:9px;background:#2a2e35}
+.pin-cap{margin-top:9px;text-align:center;font:11px 'Microsoft YaHei';padding:6px 0;border-radius:11px;white-space:nowrap}
+.tag{position:absolute;left:24px;bottom:20px;padding:7px 15px;border-radius:13px;font:600 12px 'Microsoft YaHei';letter-spacing:1px}
+
+
+.sel{border:1px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.5)}
+.h{background:#fff;border:1px solid rgba(0,0,0,.55);border-radius:50%;width:9px;height:9px}
+.h.nw{left:-5px;top:-5px}.h.n{margin-left:-5px;top:-5px}.h.ne{right:-5px;top:-5px}
+.h.e{right:-5px;margin-top:-5px}.h.se{right:-5px;bottom:-5px}.h.s{margin-left:-5px;bottom:-5px}
+.h.sw{left:-5px;bottom:-5px}.h.w{left:-5px;margin-top:-5px}
+.sizelabel{background:#fff;color:#333;border:1px solid #e0e0e4;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+.bar{background:#fff;border:1px solid #e3e3e8;border-radius:9px;box-shadow:0 10px 28px rgba(20,20,30,.22)}
+.tbtn{color:#5a5c63}.tbtn:hover{background:#f1f1f4}
+.tbtn.on{background:#e7f0fd;color:#1a73e8}
+.sep{background:#e0e0e5}
+.confirm{background:#1a73e8;color:#fff}
+.close:hover{background:#fdecea;color:#d93025}
+.subbar{background:#fff;border:1px solid #e3e3e8;border-radius:9px;box-shadow:0 8px 20px rgba(20,20,30,.18)}
+.dot{box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)}.dot.on{box-shadow:0 0 0 2px #fff,0 0 0 4px #1a73e8}
+.size{color:#888}.size.on{background:#eef1f5;color:#222}
+.invert{border:1px solid #d6d6db;color:#555}.invert.on{background:#22262c;color:#fff;border-color:#22262c}
+.pin-thumb{border:1px solid rgba(0,0,0,.15);box-shadow:0 10px 30px rgba(0,0,0,.35)}
+.pin-cap{background:rgba(255,255,255,.92);color:#555;border:1px solid #e3e3e8}
+.tag{background:rgba(255,255,255,.92);color:#333;border:1px solid #e3e3e8}
+
+</style></head><body class="scheme-lite"><template id="scene">
+<div class="wp"></div>
+<div class="dicon" style="top:30px"><div class="ic">&#128193;</div><div class="tx">项目文档</div></div>
+<div class="dicon" style="top:106px"><div class="ic">&#128196;</div><div class="tx">发布说明</div></div>
+<div class="dicon" style="top:182px"><div class="ic">&#128247;</div><div class="tx">截图素材</div></div>
+<div class="dicon" style="top:258px"><div class="ic">&#9881;</div><div class="tx">设置</div></div>
+<div class="win">
+  <div class="t">
+    <span class="dot3" style="background:#ff5f57"></span><span class="dot3" style="background:#febc2e"></span><span class="dot3" style="background:#28c840"></span>
+    <span class="addr">https://zviber.app/releases/v1.4</span>
+  </div>
+  <div class="nav">
+    <div class="it on">更新日志</div><div class="it">使用指南</div><div class="it">主题设计</div><div class="it">桌面格子</div><div class="it">关于</div>
+  </div>
+  <div class="main">
+    <div class="h1bar"></div>
+    <div class="chip"></div>
+    <div class="pl"><i style="width:560px"></i><i style="width:540px"></i><i style="width:400px"></i></div>
+    <div class="imgb"><div class="mock"><i style="width:120px"></i><i style="width:230px"></i><i style="width:180px"></i></div><span class="lb">v1.4 界面预览</span></div>
+    <div class="pl" style="margin-top:24px"><i style="width:560px"></i><i style="width:545px"></i><i style="width:380px"></i></div>
+    <div class="code">
+      <i style="width:200px;background:#7ec699"></i>
+      <i style="width:280px;background:#6ea8d8"></i>
+      <i style="width:150px;background:#d8a35e"></i>
+    </div>
+  </div>
+</div>
+</template><div class="layer dim-wrap"><div class="scene-slot"></div></div><div class="layer veil"></div><div class="layer sharp-wrap"><div class="scene-slot"></div></div><div class="annot"><svg style="position:absolute;inset:0" width="1600" height="900"><rect x="436" y="312" width="576" height="216" fill="none" stroke="#ff4d4f" stroke-width="2.5"/><ellipse cx="503" cy="215" rx="74" ry="20" fill="none" stroke="#ff9f1a" stroke-width="2.5"/></svg><div class="atext">这张图换成新主题截图</div><div class="ainv">注意：卸载向导会清理配置</div></div><div class="sizelabel">990 &#215; 600</div><div class="sel"><span class="h nw"></span><span class="h n"></span><span class="h ne"></span><span class="h e"></span><span class="h se"></span><span class="h s"></span><span class="h sw"></span><span class="h w"></span></div><div class="bar"><button class="tbtn" data-t="rect"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="6" width="16" height="12" rx="1.5"/></svg></button><button class="tbtn" data-t="ellipse"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><ellipse cx="12" cy="12" rx="8.5" ry="6.5"/></svg></button><button class="tbtn on" data-t="text"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 6.5h14M12 6.5V18M9 18h6"/></svg></button><button class="tbtn" data-t="undo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8.5 7L4.5 11l4 4M4.5 11H13a5.5 5.5 0 1 1 0 11h-3"/></svg></button><span class="sep"></span><button class="tbtn" data-t="long"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="8" y="3.5" width="8" height="6" rx="1"/><rect x="8" y="14.5" width="8" height="6" rx="1"/><path d="M9 12h6" stroke-dasharray="2 2"/></svg><span class="lbl">长图</span></button><button class="tbtn" data-t="pin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M9.5 4h5l-.8 5.2 2.8 2.8v2H7.5v-2l2.8-2.8z"/><path d="M12 14.5V20"/></svg><span class="lbl">钉住</span></button><button class="tbtn" data-t="save"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 4v9.5M7.5 10 12 14.5 16.5 10M5 19.5h14"/></svg><span class="lbl">保存</span></button><button class="tbtn" data-t="copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M5.5 15h-1A1.5 1.5 0 0 1 3 13.5v-9A1.5 1.5 0 0 1 4.5 3h9A1.5 1.5 0 0 1 15 4.5v1"/></svg><span class="lbl">复制</span></button><span class="sep"></span><button class="tbtn close" data-t="close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button><button class="confirm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12.5l4.5 4.5L19 7"/></svg><span>完成</span></button></div><div class="subbar"><span class="dot" style="background:#ff4d4f"></span><span class="dot" style="background:#ff9f1a"></span><span class="dot on" style="background:#ffd54a"></span><span class="dot" style="background:#35c759"></span><span class="dot" style="background:#2f9bff"></span><span class="dot" style="background:#ffffff"></span><span class="sep"></span><span class="size">S</span><span class="size on">M</span><span class="size">L</span><span class="sep"></span><span class="invert on">Aa 反色</span></div><div class="pin-card"><div class="pin-thumb"><div class="pw"><i></i><i style="width:150px"></i><i style="width:160px"></i><i style="width:110px"></i></div></div><div class="pin-cap">钉住效果 &#183; 可拖拽移动 &#183; 双击关闭</div></div><div class="tag">方案 B &#183; 浅色极简</div><script>var h=document.getElementById("scene").innerHTML;document.querySelectorAll(".scene-slot").forEach(function(e){e.innerHTML=h});</script></body></html>

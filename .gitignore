@@ -9,7 +9,7 @@ _build_icon.ico
 
 # 自检截图与设计稿渲染图（不上传仓库）
 designs/verify/
-designs/*.png
+designs/**/*.png
 
 /_*.log
 _build_manifest.xml
@@ -19,3 +19,6 @@ website/.file-versions/
 website/.od-frames/
 website/.od-skills/
 website/*.artifact.json
+
+# 截图自检输出（前后对比基线/报告，不上传仓库）
+shots/

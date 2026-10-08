@@ -2,7 +2,7 @@
 '''传输页 UI：本机别名、附近设备列表、文件发送、传输记录与接收确认弹窗。
 
 线程模型：TransferServer / Discovery / send_files 的回调全部发生在后台线程，
-本模块只经 pyqtSignal 把事件送回主线程再动 UI（PyQt5 槽里未捕获异常会让进程
+本模块只经 Signal 把事件送回主线程再动 UI（PySide6 槽里未捕获异常会让进程
 abort，故所有槽函数 try/except 兜底）。on_receive_request 是 HTTP 线程里的
 阻塞调用：发信号给主线程弹确认层，结果经 threading.Event 回传，超时按拒绝。
 '''
@@ -14,10 +14,10 @@ import threading
 import time
 import uuid
 
-from PyQt5.QtCore import (Qt, QTimer, pyqtSignal, QPointF, QRect, QRectF,
+from PySide6.QtCore import (Qt, QTimer, Signal, QPointF, QRect, QRectF,
                           QSize, QPropertyAnimation, QEasingCurve, QUrl)
-from PyQt5.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QDesktopServices
-from PyQt5.QtWidgets import (QWidget, QFrame, QLabel, QToolButton, QPushButton,
+from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QDesktopServices
+from PySide6.QtWidgets import (QWidget, QFrame, QLabel, QToolButton, QPushButton,
                              QVBoxLayout, QHBoxLayout, QLineEdit, QProgressBar,
                              QScrollArea, QFileDialog, QSizePolicy, QMenu,
                              QGraphicsOpacityEffect, QGraphicsBlurEffect, QDialog)
@@ -232,7 +232,7 @@ class _RecvDialog(QDialog):
 
 class _ClickRow(QFrame):
     '''可整行点击的容器（设备选择用）。'''
-    clicked = pyqtSignal()
+    clicked = Signal()
 
     def mouseReleaseEvent(self, e):
         if e.button() == Qt.LeftButton:
@@ -321,18 +321,18 @@ class TransferWidget(QWidget):
     开启后才开始监听端口；启用失败（端口被占）门禁层切「不可用」提示形态。
     服务生命周期（TransferServer / Discovery 的创建与停止）由本类自持。'''
 
-    notify = pyqtSignal(str, str)                       # 托盘气泡（标题, 内容）
-    enabled_changed = pyqtSignal(bool)                  # 开关状态变化（设置窗同步勾选用）
-    sig_devices = pyqtSignal()                          # 设备列表需刷新
-    sig_scan_done = pyqtSignal()                        # 子网扫描结束
-    sig_progress = pyqtSignal(str, str, object, object)       # 接收进度 session_id, file_id, done, total
-    sig_file_done = pyqtSignal(str, str, str)           # session_id, file_id, saved_path
-    sig_session_done = pyqtSignal(str)                  # session_id
-    sig_cancelled = pyqtSignal(str)                     # session_id
-    sig_recv_request = pyqtSignal(object, object, object)   # view, result, event
-    sig_recv_timeout = pyqtSignal(str)                  # 确认超时 session_id
-    sig_send_progress = pyqtSignal(str, object, object)       # 记录 key, done, total
-    sig_send_done = pyqtSignal(str, bool, str)          # 记录 key, ok, err
+    notify = Signal(str, str)                       # 托盘气泡（标题, 内容）
+    enabled_changed = Signal(bool)                  # 开关状态变化（设置窗同步勾选用）
+    sig_devices = Signal()                          # 设备列表需刷新
+    sig_scan_done = Signal()                        # 子网扫描结束
+    sig_progress = Signal(str, str, object, object)       # 接收进度 session_id, file_id, done, total
+    sig_file_done = Signal(str, str, str)           # session_id, file_id, saved_path
+    sig_session_done = Signal(str)                  # session_id
+    sig_cancelled = Signal(str)                     # session_id
+    sig_recv_request = Signal(object, object, object)   # view, result, event
+    sig_recv_timeout = Signal(str)                  # 确认超时 session_id
+    sig_send_progress = Signal(str, object, object)       # 记录 key, done, total
+    sig_send_done = Signal(str, bool, str)          # 记录 key, ok, err
 
     def __init__(self, cfg, device_info, parent=None, auto_start=True):
         super(TransferWidget, self).__init__(parent)
@@ -689,7 +689,7 @@ class TransferWidget(QWidget):
         self.gate_help.setFixedSize(ui.sc(20), ui.sc(20))
         self.gate_help.setCursor(Qt.PointingHandCursor)
         self.gate_help.setToolTip('什么是局域网传输')
-        self.gate_help.clicked.connect(lambda: TransferInfoDialog(self).exec_())
+        self.gate_help.clicked.connect(lambda: TransferInfoDialog(self).exec())
         gl.addWidget(self.gate_help, 0, Qt.AlignCenter)
         gl.addStretch(1)
         self.gate.hide()
@@ -1212,7 +1212,7 @@ class TransferWidget(QWidget):
             self.recv.show()
             self.recv.raise_()
             self.recv.activateWindow()
-            ui.round_corners(self.recv)   # winId 已创建：Win11 DWM 圆角 / Win7/10 遮罩
+            ui.round_corners(self.recv)   # winId 已创建：Win11 DWM 圆角 / Win10 遮罩
             anim = QPropertyAnimation(self.recv, b'geometry', self)
             anim.setDuration(180)
             anim.setEasingCurve(QEasingCurve.OutCubic)
@@ -1506,7 +1506,7 @@ class TransferWidget(QWidget):
             menu = QMenu(self)
             act_reveal = menu.addAction('打开文件位置') if paths else None
             act_del = menu.addAction('删除记录（不删除文件）')
-            act = menu.exec_(rec['row'].mapToGlobal(pos))
+            act = menu.exec(rec['row'].mapToGlobal(pos))
             if act is None:
                 return
             if act_reveal is not None and act is act_reveal:

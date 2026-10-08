@@ -18,25 +18,25 @@ import time
 from datetime import date, datetime, timedelta
 
 
-from PyQt5.QtCore import Qt, QTimer, QThread, QUrl, pyqtSignal, QCoreApplication
-from PyQt5.QtGui import QDesktopServices
-from PyQt5.QtNetwork import QLocalServer, QLocalSocket
-from PyQt5.QtWidgets import QApplication, QFileDialog
+from PySide6.QtCore import Qt, QTimer, QThread, QUrl, Signal, QCoreApplication
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtNetwork import QLocalServer, QLocalSocket
+from PySide6.QtWidgets import QApplication, QFileDialog
 
 import app as ui
 import boxes as bx
 import calendar_data as cd
 import installer
+import screenshot as shotmod
 import sysutil
 import transfer
-from themes import THEME_ORDER
 
 IPC_KEY = sysutil.IPC_KEY
 
-# Qt5 在含非 ASCII 字符的安装路径下会把插件目录里的用户名算成 ??，导致
-# "no Qt platform plugin could be initialized"；这里按真实路径手动补正。
+# Qt5 曾在含非 ASCII 字符的安装路径下把插件目录里的用户名算成 ??，导致
+# "no Qt platform plugin could be initialized"；Qt6 未复现但保留手动补正作防御。
 QCoreApplication.addLibraryPath(
-    os.path.join(os.path.dirname(__import__('PyQt5').__file__), 'Qt5', 'plugins'))
+    os.path.join(os.path.dirname(__import__('PySide6').__file__), 'plugins'))
 
 _worker = []   # 当前后台抓取线程：留引用防 GC，也用来判断是否已在抓
 
@@ -46,7 +46,7 @@ class _HolidayWorker(QThread):
     groups 是若干组候选 (名称, URL)：每组按顺序试，取第一个成功的。
     save_dir 非空时（导入窗「下载并导入」），抓到的原始 JSON 存一份到该目录。"""
 
-    done = pyqtSignal(object)   # {'off': {}, 'work': set(), 'hit': [源名], 'err': '失败原因'}
+    done = Signal(object)   # {'off': {}, 'work': set(), 'hit': [源名], 'err': '失败原因'}
 
     def __init__(self, groups, parent=None, save_dir=None):
         super(_HolidayWorker, self).__init__(parent)
@@ -201,6 +201,12 @@ _crash_log = [None]
 
 def main():
     sys.excepthook = _debug_excepthook
+    shot_dir = os.environ.get('ZBOX_SHOT')
+    if shot_dir:
+        # 截图自检：冻结时间源（日历时钟/倒计时/「今天」高亮/待办日期 tag），
+        # 让同机两次运行出图逐像素可比；必须在 FloatingPanel 构造之前冻结
+        import selfshot
+        selfshot.freeze_time()
     # 原生崩溃（Qt/C++ 层访问冲突直接杀进程）不经过 sys.excepthook，
     # faulthandler 能在崩溃瞬间把 Python 堆栈落盘
     try:
@@ -218,8 +224,10 @@ def main():
     # ⇒ **Qt 所有窗口的拖放目标都注册不上**（实测 RevokeDragDrop：MTA 下 DRAGDROP_E_NOTREGISTERED，
     # STA 下 S_OK）⇒ 往格子里拖任何文件都是红色禁止光标（用户报的 bug 1 真身）。
     ctypes.windll.ole32.CoInitializeEx(None, 0x2)   # COINIT_APARTMENTTHREADED
-    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+    # Qt6 高 DPI 恒开（Qt5 的 AA_EnableHighDpiScaling/AA_UseHighDpiPixmaps 已废弃）；
+    # 取整策略对齐 Qt5.15 默认（Round）：非整数缩放比屏幕的布局与旧版一致
+    QApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.Round)
     QApplication.setQuitOnLastWindowClosed(False)
     qapp = QApplication(sys.argv)
     qapp.setApplicationName(sysutil.APP_NAME)
@@ -307,7 +315,15 @@ def main():
         if boxmgr:
             boxmgr.shutdown()
             sysutil.context_menu_set_running(False)  # 桌面右键切回直链「单击启动」
+        if hotkey:
+            hotkey.shutdown()
     qapp.aboutToQuit.connect(_quit_cleanup)
+
+    # 截图全局热键（配置为空 = 不启用）；设置窗修改后走 hotkey.apply 即时重注册
+    hotkey = None
+    if not shot_dir:   # 自检模式不注册全局热键（也不读用户的热键配置）
+        hotkey = shotmod.HotkeyManager(qapp, lambda: shotmod.start_session(cfg))
+        hotkey.apply(cfg.data.get('shot_hotkey'))
 
     # 无系统托盘，分支的托盘气泡通道整体不进：
     # ① 传输服务起不来（端口被占）——传输页门禁层会给「不可用」提示，无需另提示；
@@ -346,10 +362,11 @@ def main():
         if _auto_update_due(cfg):
             start_holiday_update(hstore, cfg, panel, _holiday_groups(), manual=False)
 
-    auto_timer = QTimer(qapp)
-    auto_timer.timeout.connect(auto_update)
-    auto_timer.start(30 * 60 * 1000)      # 每半小时看一次到没到点
-    QTimer.singleShot(5000, auto_update)  # 启动后先看一次：每天第一次开程序时更新
+    if not shot_dir:   # 自检模式不触网：自动更新会 cfg.save() 把冻结的内存配置写盘
+        auto_timer = QTimer(qapp)
+        auto_timer.timeout.connect(auto_update)
+        auto_timer.start(30 * 60 * 1000)      # 每半小时看一次到没到点
+        QTimer.singleShot(5000, auto_update)  # 启动后先看一次：每天第一次开程序时更新
 
     settings_dlg = []  # 非模态：留住引用，且已开着就不再叠一个
     def open_settings():
@@ -359,7 +376,7 @@ def main():
             return
         dlg = ui.SettingsDialog(panel, fetch_holidays,
                                 lambda: _import_holidays(hstore, panel, download_source),
-                                boxmgr)
+                                boxmgr, hotkey.apply if hotkey else None)
         settings_dlg[:] = [dlg]
         dlg.show()
 
@@ -368,7 +385,7 @@ def main():
     # 桌面右键二级菜单的动作分发表
     actions = {b'toggle': panel.toggle_visible, b'quit': qapp.quit,
                b'settings': open_settings,
-               b'about': lambda: ui.AboutDialog(panel).exec_()}
+               b'about': lambda: ui.AboutDialog(panel).exec()}
     if boxmgr:
         actions[b'new-box'] = boxmgr.new_blank
         actions[b'show-icons'] = boxmgr.show_all
@@ -383,10 +400,9 @@ def main():
         panel.place_initial()
         panel.show()
         QTimer.singleShot(1500, lambda: _grab_screen(panel, qapp))
-        return qapp.exec_()
-    shot_dir = os.environ.get('ZBOX_SHOT')
+        return qapp.exec()
     if shot_dir:
-        QTimer.singleShot(600, lambda: _self_shot(shot_dir, panel, cfg, tstore, qapp))
+        QTimer.singleShot(600, lambda: selfshot.run(shot_dir, panel, cfg, tstore, qapp))
     else:
         panel.place_initial()
         ui._dbg('main: after place_initial pos=(%d,%d) size=(%d,%d) pinned=%s' % (
@@ -397,7 +413,7 @@ def main():
             panel.show()
         ui._dbg('main: after show visible=%s pos=(%d,%d) size=(%d,%d)' % (
             panel.isVisible(), panel.x(), panel.y(), panel.width(), panel.height()))
-    return qapp.exec_()
+    return qapp.exec()
 
 
 def _grab_screen(panel, qapp):
@@ -457,50 +473,6 @@ def _import_holidays(hstore, panel, on_download):
     _import_dlg[:] = [ui.HolidayImportDialog(panel, on_download, pick)]
     _import_dlg[0].show()
 
-
-def _self_shot(shot_dir, panel, cfg, tstore, qapp):
-    """验证用：注入示例待办，导出两主题 × 日历/待办/传输 截图后还原并退出。"""
-    os.makedirs(shot_dir, exist_ok=True)
-    backup = list(tstore.items)
-    today = date.today()
-    tstore.items = [
-        {'id': 1, 'text': '整理 Q3 复盘文档', 'done': False, 'due': (today - timedelta(days=2)).isoformat()},
-        {'id': 2, 'text': '给妈妈回电话', 'done': False, 'due': today.isoformat()},
-        {'id': 3, 'text': '国庆出游订酒店', 'done': False, 'due': (today + timedelta(days=2)).isoformat()},
-        {'id': 4, 'text': '缴纳水电费', 'done': True},
-        {'id': 5, 'text': '周报已提交', 'done': True},
-    ]
-    panel.todo.rebuild()
-    panel.set_tab(0, save=False)
-    panel.show()
-    jobs = []
-    for key in THEME_ORDER:
-        jobs.append((key, 'cal'))
-        jobs.append((key, 'todo'))
-        jobs.append((key, 'transfer'))
-    state = {'i': 0}
-
-    def finish():
-        tstore.items = backup
-        tstore.save()
-        qapp.quit()
-
-    def step():
-        if state['i'] >= len(jobs):
-            finish()
-            return
-        key, view = jobs[state['i']]
-        panel.apply_theme(key, save=False)
-        panel.set_tab({'cal': 0, 'todo': 1, 'transfer': 2}[view], save=False)
-        QApplication.processEvents()
-        state['i'] += 1
-        QTimer.singleShot(250, lambda: _grab(shot_dir, key, view, step))
-
-    def _grab(d, key, view, nxt):
-        panel.grab().save(os.path.join(d, '%s_%s.png' % (key, view)))
-        nxt()
-
-    step()
 
 
 if __name__ == '__main__':

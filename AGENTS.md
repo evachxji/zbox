@@ -81,7 +81,7 @@ LLM 经常默默选择一种解释然后执行。这个原则强制明确推理�
 
 ## Project Structure & Module Organization
 
-Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyQt5，Python 3.8+，Win7 / Win10 / Win11 通用。
+Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PySide6（Qt 6.8），Python 3.10+，Win10 / Win11。
 平铺布局，一个模块一个职责：
 
 - `main.pyw` — 入口：单实例 IPC（`QLocalServer`）、节假日后台更新、局域网传输服务启动、（frozen 时）`--uninstall` 卸载向导入口
@@ -91,9 +91,15 @@ Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyQ
 - `transfer.py` — 局域网文件传输协议核心（参照 LocalSend v2 的私有实例）：UDP 组播发现 + HTTP REST 传输，纯标准库零 Qt
 - `transfer_ui.py` — 面板「传输」tab：设备列表、文件多选 + 拖拽发送、传输记录、接收确认弹窗、发送方取消；传输服务生命周期自持（默认关闭的门禁层、启用/停用、「?」说明弹窗）
 - `transfer_selftest.py` — 传输协议自动化自检（13 用例，动态端口，不依赖组播/Qt）
+- `selfshot.py` — 全界面截图自检 harness（`ZBOX_SHOT` 触发）：时间冻结（patch `ui.date`/`ui.datetime`
+  成固定时刻）+ 示例数据注入（结束还原）+ `widget.grab()` 离屏渲染，两主题约 45 个场景
+- `tools/compare_shots.py` — 截图前后对比：逐像素 diff + 生成带前/后/差异高亮三图的 report.md
+  （Pillow，仅开发依赖）；验收口径见文件头 docstring
 - `themes.py` — 两套主题 QSS（深色 `nocturne` / 浅色 `mica`）加 `auto` 伪主题；`%CN%`/`%NUM%` 为字体占位符
 - `version.py` — 版本号唯一来源：关于窗、设置窗左下角、安装向导、卸载注册表项共用 `APP_VERSION`，发版只改这一个文件
 - `sysutil.py` — 注册表集成：开机自启、桌面右键菜单、应用列表卸载项（默认 HKCU，免管理员）
+- `screenshot.py` — QQ 风格截图：全屏灰罩遮罩（`ShotOverlay`）、框选/8 手柄调整、矩形/椭圆/文字标注（颜色 + 反色）、导出复制/保存/钉图、滚动截长图；`HotkeyManager` 全局热键
+- `pinshot.py` — 钉图窗 `PinWindow`：置顶无边框贴图，拖拽移动、双击关闭，不持久化
 - `installer.py` — 安装向导（选项/进度/完成页）与卸载向导（可选删除个人数据）；供 setup exe（安装）与程序本体 `--uninstall`（卸载）共用
 - `install.py` — 源码方式的系统集成（只装开机自启）
 - `setup.pyw` — 安装包入口：build.py 把它打成 onefile exe，内嵌 onedir 本体为 payload，双击弹安装向导
@@ -122,7 +128,7 @@ Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyQ
 ## Build, Test, and Development Commands
 
 ```bat
-pip install PyQt5            :: 唯一依赖（Win7 需 Python 3.8 + "PyQt5==5.15.*"）
+pip install PySide6          :: 唯一依赖（Qt 6.8 LTS，要求 Win10 1809+）
 pythonw main.pyw             :: 源码方式运行（或双击 run.cmd）
 python build.py              :: 打包 exe 安装包（或双击 build.cmd）
 native\build_native.cmd      :: 编译外壳菜单宿主 zshell_host.exe（改 native\zshell.cpp 后必跑）
@@ -133,7 +139,13 @@ cd android && gradlew.bat assembleDebug   :: 构建 Android debug APK（或双�
 set ZBOX_SHOT=designs\verify && python main.pyw   :: 截图自检
 ```
 
-自检导出两主题 × 日历/待办/传输共 6 张截图后自动退出，改 UI / 主题 / 布局后必跑。
+自检导出两主题全界面约 45 张场景截图（面板三 tab / 顶部栏展开 / 各弹窗 / 格子各形态 / 安装卸载向导）
+后自动退出，改 UI / 主题 / 布局后必跑。截图 harness 在 `selfshot.py`：冻结时间源 + 注入示例数据
+（结束还原，不落盘用户配置）+ 离屏渲染；自检模式下不创建格子、不起传输服务、不注册截图热键、
+不跑节假日自动更新（防网络不确定性与配置写盘）。前后版本对比用
+`python tools/compare_shots.py <before> <after> <报告目录>`（Qt5→Qt6 文字渲染差异在引擎层
+不可消除：排版度量改用字体的 USE_TYPO_METRICS + DirectWrite 版本差异——像素级零差异不可达，
+验收 = 版式/尺寸/字体族/配色一致 + report.md 三图目检）。
 **跑之前先退出正在运行的实例**：否则单实例分支会把这次启动当成一次 `--toggle` 转发给已运行实例
 （用户的面板被显隐一次），本进程直接退出，一张图都不会导出，而且没有任何报错。
 截图目录与设计稿渲染图已 gitignore，不要提交。
@@ -196,10 +208,10 @@ set ZBOX_SHOT=designs\verify && python main.pyw   :: 截图自检
 
 ### 崩溃诊断与日志
 
-⚠️ **PyQt5 里槽函数中未捕获的异常会让进程直接 abort（qFatal），不是打个日志就完事**——实测无自定义
-excepthook 时 exit 127、连输出都没有。`main()` 里那句 `sys.excepthook = _debug_excepthook` 正是挡这个的
-（改成落盘 `debug_due.log`，程序继续跑）；它的注释写着「定位后移除」，但**删掉它 = 任何槽里的异常都会
-静默崩掉整个面板**，要删先确认有别的兜底。反过来说，它也把这类 bug 变成静默的了：后台更新那次
+⚠️ **槽函数中未捕获的异常必须落盘**：PySide6 的默认处理是打到 stderr 然后继续跑（PyQt5 时代是
+直接 qFatal abort、exit 127 连输出都没有），而 pythonw 下 stderr 不可见 = 异常静默消失。
+`main()` 里那句 `sys.excepthook = _debug_excepthook` 正是挡这个的（落盘 `debug_due.log`，程序继续跑）；
+它的注释写着「定位后移除」，但**删掉它 = 槽里的异常全部无声无息**，要删先确认有别的兜底。反过来说，它也把这类 bug 变成静默的了：后台更新那次
 `hstore.merge` 漏写实现，在应用里只会静静地不更新，是离屏脚本才把它揪出来。
 
 日志与诊断手段一览：
@@ -218,7 +230,8 @@ excepthook 时 exit 127、连输出都没有。`main()` 里那句 `sys.excepthoo
 ### 面板（`app.py`）
 
 `FloatingPanel` 是无边框**不透明**顶层窗口：不用 `WA_TranslucentBackground`（分层窗口禁用
-ClearType，文字发灰），圆角靠 Win11 DWM，Win7/10 降级为圆角遮罩（`round_corners`）；
+ClearType，文字发灰），圆角统一走遮罩（`round_corners`，SetWindowRgn——Qt6 时代 DWM 路
+走不通，见下方 Qt6 迁移要点⑤）；
 也不用 `QGraphicsDropShadowEffect`（Qt5 下破坏顶层窗合成），所以 `SHADOW = 0`、无阴影留白。
 （`FloatingPanel.__init__` 里那句「阴影改为 paintEvent 手绘」是旧注释，类中已无 `paintEvent`。）
 
@@ -228,7 +241,7 @@ ClearType，文字发灰），圆角靠 Win11 DWM，Win7/10 降级为圆角遮�
 - 内容区是 `_SlideStack`（横向滑动切页动画）：日历/待办/传输三页**按 tab 顺序入栈**——
   `slide_to` 靠页面在列表里的先后判断左滑/右滑，顺序错了方向就反。
 - 尺寸常量 `SINGLE_W / PANEL_H`；`cfg` 键：`theme` / `tab` / `pos` /
-  `off_noon` / `off_evening`，`Config` 用 `__getattr__` 暴露为属性。
+  `off_noon` / `off_evening` / `shot_hotkey`（截图热键，空串 = 不启用），`Config` 用 `__getattr__` 暴露为属性。
 - **桌面格子模式**：窗口标志是 `FramelessWindowHint | Tool`，**故意不带 `WindowStaysOnTopHint`**
   ——面板就该被别的窗口正常盖住，别再顺手加回去。
 - **顶部栏默认收起**（`_slide_titlebar`）：栏窗高度 0↔`sc(42)` 做动画，靠 `_set_tb_height` 把它摆到
@@ -305,6 +318,30 @@ DPI 约定：**设计尺寸按 100% 基准写死，运行时用 `app.sc(v)` 换�
 `GetDpiForSystem()/96`，钳制在 0.75–3.0）。新增任何尺寸都要过 `sc()`，QSS 里的 px 由
 `build_qss` 统一处理，不要手动乘。
 
+Qt6 迁移要点（2026-10，PyQt5→PySide6 6.8）：高 DPI 恒开（`AA_EnableHighDpiScaling` /
+`AA_UseHighDpiPixmaps` 已废弃删除），缩放比取整策略显式设为 `Round`（对齐 Qt5.15 默认，须在
+QApplication 创建前调，main.pyw 与 setup.pyw 各一处）；`QActionGroup` 从 QtWidgets 挪到 QtGui；
+`QFont.setWeight` 只收 `QFont.Weight` 枚举；事件类型枚举必须类级访问（`QEvent.MouseMove`，
+实例级 `e.MouseMove` 不存在）；`QtWinExtras` 已移除，HICON 转图走 `boxes.py` 的
+`_hicon_to_image`（纯 ctypes：DrawIconEx → 32bpp DIB section → QImage）。
+Qt6 行高度量收紧（改用字体的 USE_TYPO_METRICS），靠字体行高自撑的固定行会变矮、
+弹性区（日历网格）被撑开：日历时钟行/周标签行按 Qt5 实测 `setFixedHeight`，
+DuePopup 的 QCalendarWidget 行高用 `verticalHeader().setMinimumSectionSize` 钳住
+（日历内部按字体度量逐行 resizeSection，只有 minimum 钳得住）。另两处行为差：
+① Qt6.7+ 默认 windows11 风格会给 QCalendarWidget 画网格线、选中态不吃
+`selection-background-color`——QSS 加 `gridline-color: transparent` 与
+`QAbstractItemView::item:selected` 两条；② QSS 的 `background: transparent`
+不再传导到滚动区视口（palette 是不透明黑），BoxList 手动把视口置透明；
+③ `grab()/render()` 会把透明区填成 palette Window 色（不透明黑）——抓半透明页面前
+临时挂 `WA_TranslucentBackground` 保 alpha；④ Qt6 DirectWrite
+渲染字重比 Qt5 GDI 细一档（Qt5 Normal ≈ Qt6 Medium 视觉）且字宽紧约 10%，
+`QFont.setWeight()` 对 Bahnschrift/雅黑实测不改变渲染（QSS `font-weight` 路径正常）
+——日历数字代码字重用 Medium、农历小字 9px→10px 并在 QSS 补 500；⑤ Qt6 给无边框窗
+显式设 DWMWCP_DONOTROUND（Qt5 没有，所以 Qt5 能吃到 Win11 默认圆角）；只设圆角偏好
+不开 NC 渲染 = 「方角 + 一圈圆角轮廓线」，且挂带后 DwmSetWindowAttribute 直接
+E_HANDLE——DWM 路线在 Qt6 走不通，`round_corners()` 已改为 Win10/Win11 统一遮罩
+（SetWindowRgn 与挂带状态无关），代价是角边 1-bit 硬边（Win10 一直是这个效果）。
+
 ### 节假日与农历（`calendar_data.py` + `main.pyw`）
 
 `HolidayStore.info(d)` 的优先级：用户自定义（联网/导入）→ 内置官方数据 → 普通日。
@@ -335,7 +372,7 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
 
 ### 系统集成（`sysutil.py` + `installer.py` + `install.py`）
 
-- 注册表写入默认走 HKCU（**免管理员**，Win7/10/11 通用）；`all_users=True` 才写 HKLM
+- 注册表写入默认走 HKCU（**免管理员**，Win10/11 通用）；`all_users=True` 才写 HKLM
   （exe 安装向导的「此计算机」选项，需管理员）。清理函数对两个根都尝试、无权限时静默跳过。
 - **命名统一为全小写 `zbox`（2026-10 从 `zviber` 改名）**：程序本体 `zbox.exe`、
   安装目录（`%LOCALAPPDATA%\Programs\zbox` / `Program Files\zbox`）、安装包
@@ -357,6 +394,28 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
 - 安装 = 把安装包内嵌的 payload（onefile 运行时解压到 `_MEIPASS\payload` 的 onedir 本体：exe + `_internal\`）**整体复制**到目标位置，按字节回报进度；目标目录已有旧安装（含 `zbox.exe`）时先整体清空再复制——`_check_dir` 只放行空目录/新目录/含 `zbox.exe` 的旧安装目录，别放宽这个签名判断，否则覆盖重装与卸载会误删用户文件。
 - 卸载走与安装同风格的**卸载向导**（确认页 → 进度页 → 完成页）：确认页 checkbox「同时删除个人数据」勾选后连同 `%APPDATA%\zbox`（待办、格子、配置）一起 rmtree，默认保留；程序目录用延迟 `rmdir` 删除（exe 运行中删不掉自己）。
 
+### 截图（`screenshot.py` + `pinshot.py`）
+
+- **会话**：`ShotOverlay` 是覆盖虚拟桌面的无边框置顶 Tool 窗，构造时**先逐屏
+  `grabWindow(0)` 抓底图再显示**（顺序反了遮罩自己会入镜）。灰罩 = 底图上盖
+  `MASK_COLOR`，选区镂空 = 裁剪选区把底图再画一遍——不用 WA_TranslucentBackground。
+- **键盘**：全屏 Tool 窗未必拿得到焦点，遮罩与长图控制条都在 `showEvent` 里
+  `grabKeyboard()`（Esc/Enter/Ctrl+Z 才可靠），`closeEvent` 里配对 release。
+- **标注**：shapes 列表（rect/ellipse/text × 颜色 × 档位 × invert），QPainter 画在
+  底图副本上；导出时按选区矢量重绘一遍（dpr 取覆盖屏幕最大值），撤销 = pop。
+- **主题**：调色板 `PALETTES` 按 `resolve_theme(cfg.theme)` 二选一（nocturne 琥珀 /
+  mica 蓝），工具条 QSS 现拼，不进 themes.py 的面板 QSS 体系。
+- **全局热键**：`HotkeyManager` 用 `RegisterHotKey(HWND=None)`（走线程消息队列，
+  不占钩子线程）+ `QAbstractNativeEventFilter` 收 `WM_HOTKEY`；空串 = 不注册，
+  裸键只放行 F1-F12/PrintScreen；设置窗修改后 `apply()` 即时注销重注册，
+  失败文案显示在设置窗「截图」行右侧。
+- **截长图**：进长图模式**必须 hide() 遮罩**（否则抓帧抓到的是遮罩自己），
+  之后由用户自己滚动页面（滚轮自然落在目标窗口），280ms 定时器抓选区帧，
+  用灰度行签名 `_row_sig` 找纵向位移拼接；匹配失败（动画/跳变）只提示不硬拼。
+  `_row_sig` 里 `bits().asarray()` 的对象不支持步长切片，要先 `bytes()` 转换。
+- **钉图**：`PinWindow` 置顶 Tool 窗，**故意不挂桌面带**（挂带会被应用窗口压住，
+  贴图的意义是浮在最上面）；拖拽移动、双击关闭；不持久化，进程退出即消失。
+
 ### 桌面格子（`boxes.py`）
 
 桌面文件归类格子：`BoxManager` 总管（恢复/新建/解散/显隐），`BoxWindow` 单格，
@@ -367,6 +426,13 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
 退出/卸载/覆盖安装时随 `_delete_shell_tree` 一并删除，崩溃残留被点到静默退出），路径经 `b'folder:'`
 IPC 通道（与 `--pick-folder` 同一条）发回面板建格子；`new_folder` 按 normcase 去重——同一路径
 已有格子不新建，改为显示出来并 `flash()` 透明度闪烁提示（「新建文件夹格子」对话框路线同样去重）。
+
+- **格子缩放实时渲染**：拖边缘缩放期间活列表随窗口逐帧重排。曾用过快照冻结（起手把内容页
+  `grab()` 成位图占位、松手才切回活页），但窗口拉大后位图外区域留空、图里的滚动条悬在半空，
+  已移除；列表 `setUniformItemSizes(True)` 重排无需逐项测量，逐 mousemove 重排开销可忽略。
+  格子边框不再随激活态变亮（`isActiveWindow()` 高亮已移除）：任何状态下颜色保持一致。
+  `paintEvent` 先整窗铺一层 alpha=1 的不可见填充：圆角裁切区（alpha=0）在分层窗口里
+  是点击穿透的，右下角缩放命中带大半落在裁切区——不铺的话按进死区事件全漏给桌面。
 
 - **格子内容两种视图**（标题栏 ≡ 菜单「查看」组，`rec['view']` 持久化，与排序组并列）：
   按列表（默认，ListMode + 16px 图标）/ 按图标（IconMode + 32px 图标 + 固定网格

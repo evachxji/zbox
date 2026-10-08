@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Zbox 桌面悬浮面板：日历 + 待办。PyQt5，兼容 Win7/10/11、Python 3.8+。"""
+"""Zbox 桌面悬浮面板：日历 + 待办。PySide6，Win10 / Win11，Python 3.10+。"""
 import ctypes
 from ctypes import wintypes
 import json
@@ -8,15 +8,15 @@ import sys
 import time
 from datetime import date, datetime, timedelta
 
-from PyQt5.QtCore import (Qt, QTimer, QSize, QPoint, QPointF, QRectF, QDate, QTime,
-                          pyqtSignal, QEvent, QPropertyAnimation, QVariantAnimation, QEasingCurve)
-from PyQt5.QtGui import (QFont, QFontDatabase, QPainter, QColor, QPixmap, QIcon, QPainterPath,
-                         QRegion, QPen, QLinearGradient, QCursor)
-from PyQt5.QtWidgets import (QWidget, QFrame, QLabel, QToolButton, QVBoxLayout, QHBoxLayout,
+from PySide6.QtCore import (Qt, QTimer, QSize, QPoint, QPointF, QRectF, QDate, QTime,
+                          Signal, QEvent, QPropertyAnimation, QVariantAnimation, QEasingCurve)
+from PySide6.QtGui import (QFont, QFontDatabase, QPainter, QColor, QPixmap, QIcon, QPainterPath,
+                         QRegion, QPen, QLinearGradient, QCursor, QKeySequence)
+from PySide6.QtWidgets import (QWidget, QFrame, QLabel, QToolButton, QVBoxLayout, QHBoxLayout,
                              QGridLayout, QListWidget,
                              QListWidgetItem, QLineEdit, QMenu, QApplication, QDialog,
                              QFormLayout, QCheckBox, QRadioButton, QPushButton, QCalendarWidget,
-                             QLayout, QGraphicsOpacityEffect)
+                             QLayout, QGraphicsOpacityEffect, QSizePolicy, QTableView)
 
 import calendar_data as cd
 import sysutil
@@ -185,7 +185,7 @@ class Config(object):
         self.path = path
         self.data = {'theme': THEME_ORDER[0], 'tab': 0, 'pos': None,
                      'off_noon': '12:00-13:00', 'off_evening': '18:00',
-                     'transfer_enabled': False}
+                     'transfer_enabled': False, 'shot_hotkey': ''}
         self.load()
 
     def load(self):
@@ -223,7 +223,9 @@ def resolve_theme(key):
 # ---------------- 日历 ----------------
 
 # 日历数字字体：Qt 用 pixelSize + weight 精确控制，对齐 Win11 日历（字形高 21px / Medium）
-_NUM_FONT = {'name': None, 'size': 19, 'weight': 50}
+_NUM_FONT = {'name': None, 'size': 19, 'weight': QFont.Medium}
+# 重量用 Medium：Qt5 的 Normal 由 GDI 渲染，视觉重量≈Qt6 DirectWrite 的 Medium，
+# 用 Normal 会显得「字小了一圈」（实测渲染对比）
 
 
 def set_num_font(name):
@@ -231,7 +233,7 @@ def set_num_font(name):
 
 
 class DayCell(QFrame):
-    clicked = pyqtSignal()
+    clicked = Signal()
 
     def __init__(self, parent=None):
         super(DayCell, self).__init__(parent)
@@ -394,6 +396,9 @@ class CalendarWidget(QWidget):
         bar.setFixedWidth(sc(3))
         self.clock_hm = QLabel()
         self.clock_hm.setObjectName('clockBig')
+        # Qt6 行高度量收紧（USE_TYPO_METRICS），时钟行不再自己撑到 Qt5 的高度，
+        # 高出的部分会被日历网格分走（周行距变稀）。按 Qt5 实测行高固定（53.6*1.25=67）。
+        self.clock_hm.setFixedHeight(sc(53.6))
         self.sub = QLabel()
         self.sub.setObjectName('calSub')
         self._sub_fm_key = None    # _sync_sub_baseline 的缓存：字体没变就不重复量
@@ -420,6 +425,7 @@ class CalendarWidget(QWidget):
             lb = QLabel()
             lb.setObjectName('weekLabel')
             lb.setAlignment(Qt.AlignCenter)
+            lb.setFixedHeight(sc(15.2))   # 同时钟行：按 Qt5 实测固定（15.2*1.25=19）
             lb.setProperty('we', 'true' if i >= 5 else 'false')
             week.addWidget(lb, 0, i)
             self.week_labels.append(lb)
@@ -801,8 +807,8 @@ class TodoStore(object):
 
 
 class TodoList(QListWidget):
-    emptyDoubleClicked = pyqtSignal()
-    itemEditRequested = pyqtSignal(int)
+    emptyDoubleClicked = Signal()
+    itemEditRequested = Signal(int)
 
     def __init__(self, parent=None):
         super(TodoList, self).__init__(parent)
@@ -836,6 +842,11 @@ class DuePopup(QFrame):
         lay.setSpacing(sc(6))
         cal = QCalendarWidget(self)
         cal.setGridVisible(False)
+        # Qt6 行高度量收紧，日历视口行高跟着矮一截（整个弹层比 Qt5 矮 37px）：
+        # 按 Qt5 的行高固定（24*1.25=30）
+        _cal_view = cal.findChild(QTableView, 'qt_calendar_calendarview')
+        if _cal_view:
+            _cal_view.verticalHeader().setMinimumSectionSize(sc(24.0))
         cal.setVerticalHeaderFormat(QCalendarWidget.NoVerticalHeader)
         cal.setHorizontalHeaderFormat(QCalendarWidget.ShortDayNames)
         cal.setFirstDayOfWeek(Qt.Monday)
@@ -958,7 +969,7 @@ class TodoWidget(QWidget):
         hint = QToolButton()
         hint.setObjectName('addHint')
         hint.setText('＋ 双击空白处新建待办')
-        hint.setSizePolicy(hint.sizePolicy().Expanding, hint.sizePolicy().Fixed)
+        hint.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         hint.clicked.connect(self.start_add)
         pl.addWidget(hint)
 
@@ -1218,7 +1229,7 @@ class TodoWidget(QWidget):
         m = QMenu(self)
         act_edit = m.addAction('编辑')
         act_del = m.addAction('删除')
-        act = m.exec_(self.list.viewport().mapToGlobal(pos))
+        act = m.exec(self.list.viewport().mapToGlobal(pos))
         if act is act_edit:
             for it in self.store.items:
                 if it['id'] == item_id:
@@ -1418,13 +1429,14 @@ def sink_to_desktop(win, anchor=None):
 # ---------------- 设置窗口 ----------------
 
 def round_corners(win):
-    """无边框窗口圆角：Win11 用 DWM（DWMWA_WINDOW_CORNER_PREFERENCE = DWMWCP_ROUND），
-    Win7/10 降级为圆角遮罩。"""
+    """无边框窗口圆角：圆角遮罩（SetWindowRgn）。
+    原本是「Win11 DWM 圆角 / Win10 遮罩」：Qt6 给无边框窗显式设 DWMWCP_DONOTROUND
+    （Qt5 没有，所以 Qt5 吃到了 Win11 默认圆角），且面板挂进桌面带后
+    DwmSetWindowAttribute 直接 E_HANDLE——DWM 路在 Qt6 走不通，Win11 也统一用遮罩。
+    代价：角边 1-bit 硬边（Win10 用户一直是这个效果）；不能用
+    WA_TranslucentBackground 手绘代替（分层窗口禁用 ClearType，见 FloatingPanel）。"""
     try:
-        if sys.getwindowsversion().build >= 22000:
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                int(win.winId()), 33, ctypes.byref(ctypes.c_int(2)), 4)
-        elif win.width() > 0:
+        if win.width() > 0:
             path = QPainterPath()
             path.addRoundedRect(0.0, 0.0, float(win.width()), float(win.height()), 14.0, 14.0)
             win.setMask(QRegion(path.toFillPolygon().toPolygon()))
@@ -1434,12 +1446,7 @@ def round_corners(win):
 
 def bar_corner_radius(win):
     """栏窗顶角半径（也是底边探进面板的深度）：对齐面板的实际圆角——
-    Win11 DWM 圆角约 8 物理像素（换算成逻辑像素），Win7/10 遮罩固定 14（同 round_corners）。"""
-    try:
-        if sys.getwindowsversion().build >= 22000:
-            return 8.0 / win.devicePixelRatioF()
-    except Exception:
-        pass
+    面板圆角统一走遮罩后（见 round_corners），半径固定 14。"""
     return 14.0
 
 
@@ -1659,7 +1666,7 @@ class SettingsDialog(QDialog):
     """齿轮按钮弹出的无边框设置窗口，样式跟随当前主题（themes.py #settingsPanel 区段）。
     on_fetch/on_import 为节假日数据回调（由入口提供）。
     改动即时生效并写入 config.json。"""
-    def __init__(self, panel, on_fetch, on_import, boxmgr=None):
+    def __init__(self, panel, on_fetch, on_import, boxmgr=None, on_hotkey=None):
         super(SettingsDialog, self).__init__(panel)
         self.setObjectName('settingsDlg')
         self.setWindowTitle('设置')
@@ -1669,6 +1676,8 @@ class SettingsDialog(QDialog):
         self._drag = None
         self._panel = panel
         cfg = panel.cfg
+        self._cfg = cfg
+        self._on_hotkey = on_hotkey
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -1737,6 +1746,43 @@ class SettingsDialog(QDialog):
         dbl.toggled.connect(commit_dblclick)
         form.addRow(row_label('格子'), dbl)
 
+        # 截图快捷键（留空 = 不启用）：外框复用时间框的 #timeField 交互样式
+        # （hover/focus 描边由 _time_rows 驱动），点框后按组合键录入，框内 ✕ 清空
+        self._time_rows = []
+        self.key_edit = QLineEdit(cfg.data.get('shot_hotkey') or '')
+        self.key_edit.setReadOnly(True)
+        self.key_edit.setPlaceholderText('点击后按组合键')
+        self.key_edit.setToolTip('按下组合键录入；留空 = 不启用截图热键')
+        key_field = QWidget()
+        key_field.setObjectName('timeField')
+        key_field.setFocusProxy(self.key_edit)
+        key_field.setFixedSize(sc(180), sc(30))
+        kf = QHBoxLayout(key_field)
+        kf.setContentsMargins(0, 0, sc(3), 0)
+        kf.setSpacing(0)
+        kf.addWidget(self.key_edit, 1)
+        self.key_clear = QToolButton()
+        self.key_clear.setObjectName('timeBtn')
+        self.key_clear.setText('✕')
+        self.key_clear.setStyleSheet('color: #8a8a90;')
+        self.key_clear.setFixedSize(sc(24), sc(24))
+        self.key_clear.setCursor(Qt.PointingHandCursor)
+        self.key_clear.setToolTip('清空快捷键')
+        self.key_clear.clicked.connect(self._clear_hotkey)
+        self.key_clear.setVisible(bool(cfg.data.get('shot_hotkey')))
+        kf.addWidget(self.key_clear)
+        self.key_edit.installEventFilter(self)
+        self.key_clear.installEventFilter(self)
+        self._time_rows.append((self.key_edit, self.key_clear, key_field))
+        key_row = QHBoxLayout()
+        key_row.setSpacing(sc(8))
+        key_row.addWidget(key_field)
+        self.key_warn = QLabel('')
+        self.key_warn.setStyleSheet('color: #e05252;')
+        key_row.addWidget(self.key_warn)
+        key_row.addStretch(1)
+        form.addRow(row_label('截图'), key_row)
+
         # 分隔线：通用设置 / 日历与时间
         sep1 = QFrame()
         sep1.setObjectName('setSep')
@@ -1760,7 +1806,6 @@ class SettingsDialog(QDialog):
         # 下班倒计时（自由文本输入 + 时钟弹层）
         # 用 QLineEdit 而非 QTimeEdit：QTimeEdit 是按时/分分段校验的，全选后直接打字会被
         # 校验器拒掉（要么必须先选中某一段，要么根本打不进冒号）
-        self._time_rows = []
 
         def time_field(text):
             """一个时间输入框 + 时钟按钮，返回 (外框, 输入框)。外框顺带接好 hover/焦点描边。"""
@@ -1856,7 +1901,7 @@ class SettingsDialog(QDialog):
         tr_help.setFixedSize(sc(20), sc(20))
         tr_help.setCursor(Qt.PointingHandCursor)
         tr_help.setToolTip('什么是局域网传输')
-        tr_help.clicked.connect(lambda: transfer_ui.TransferInfoDialog(self).exec_())
+        tr_help.clicked.connect(lambda: transfer_ui.TransferInfoDialog(self).exec())
         tr_row.addWidget(tr_help)
         tr_row.addStretch(1)
         form.addRow(row_label('传输'), tr_row)
@@ -1898,6 +1943,37 @@ class SettingsDialog(QDialog):
         except RuntimeError:
             pass  # 设置窗已关，按钮随窗口销毁
 
+    _MOD_KEYS = (Qt.Key_Control, Qt.Key_Shift, Qt.Key_Alt, Qt.Key_Meta)
+
+    def _record_hotkey(self, ev):
+        """热键录入（eventFilter 转发来的 KeyPress）：单按修饰键不结算，等组合键；
+        Esc 放弃录入；Backspace/Delete = 清空；其余组合直接落盘即时重注册。"""
+        key = ev.key()
+        if key in self._MOD_KEYS:
+            return True
+        if key == Qt.Key_Escape:
+            self.key_edit.clearFocus()
+            return True
+        if key in (Qt.Key_Backspace, Qt.Key_Delete):
+            self._clear_hotkey()
+            return True
+        seq = QKeySequence(ev.modifiers().value | key).toString(QKeySequence.PortableText)
+        self.key_edit.setText(seq)
+        self._commit_hotkey()
+        return True
+
+    def _commit_hotkey(self):
+        """录入完成即落盘并即时重注册；注册失败（被占用/不识别）在右侧红字提示。"""
+        seq = self.key_edit.text().strip()
+        self._cfg.set('shot_hotkey', seq)
+        self.key_clear.setVisible(bool(seq))
+        if self._on_hotkey:
+            self.key_warn.setText(self._on_hotkey(seq) or '')
+
+    def _clear_hotkey(self):
+        self.key_edit.clear()
+        self._commit_hotkey()
+
     def _sync_transfer_chk(self):
         """传输页门禁层改动开关后，同步这里的勾选状态。"""
         try:
@@ -1927,7 +2003,15 @@ class SettingsDialog(QDialog):
         pop.move(max(x, ag.left()), max(y, ag.top()))
 
     def eventFilter(self, obj, ev):
-        """时间输入框的 hover/焦点态同步到外框，驱动描边与底色变化。"""
+        """时间/热键输入框的 hover/焦点态同步到外框，驱动描边与底色变化；
+        热键框另吃 KeyPress 做组合键录入，焦点进出切换提示文案。"""
+        if obj is getattr(self, 'key_edit', None):
+            if ev.type() == QEvent.KeyPress:
+                return self._record_hotkey(ev)
+            if ev.type() == QEvent.FocusIn:
+                self.key_edit.setPlaceholderText('请按组合键…')
+            elif ev.type() == QEvent.FocusOut:
+                self.key_edit.setPlaceholderText('点击后按组合键')
         for te, btn, field in getattr(self, '_time_rows', []):
             if obj is te or obj is btn:
                 t = ev.type()
@@ -2232,8 +2316,8 @@ def _hide_toast_on(win, seq):
 
 
 class FloatingPanel(QWidget):
-    toggled = pyqtSignal()
-    settingsRequested = pyqtSignal()   # 顶部栏齿轮按钮 → 入口 open_settings（非模态去重在那里）
+    toggled = Signal()
+    settingsRequested = Signal()   # 顶部栏齿轮按钮 → 入口 open_settings（非模态去重在那里）
 
     def __init__(self, cfg, hstore, tstore, device_info=None, transfer_autostart=True):
         super(FloatingPanel, self).__init__()
@@ -2241,7 +2325,7 @@ class FloatingPanel(QWidget):
         self.cn_font, self.num_font = pick_fonts()
         set_num_font(self.num_font)
         # 不用 WA_TranslucentBackground：分层窗口禁用 ClearType，文字灰糊。
-        # 不透明窗口 + Win11 DWM 圆角（Win7/10 降级为圆角遮罩），文字锐利度对齐系统组件。
+        # 不透明窗口 + Win11 DWM 圆角（Win10 降级为圆角遮罩），文字锐利度对齐系统组件。
         # 桌面格子模式：不置顶，可被其它窗口覆盖；移动靠顶部栏（悬浮滑出）或日历左侧时分秒拖拽。
         # 桌面层级（见 _ensure_band）：属主设为桌面图标窗加入「桌面带」，Win+D 收不走；
         # z-order 由看门狗维护在桌面带之上、应用窗口之下
@@ -2448,7 +2532,7 @@ class FloatingPanel(QWidget):
         return False
 
     def _grab_input_focus(self, _old, new):
-        """桌面带窗口的键盘焦点兜底（Win7/10 用；Win11 实测点击即自然获得焦点）。
+        """桌面带窗口的键盘焦点兜底（Win10 用；Win11 实测点击即自然获得焦点）。
         焦点不在面板上时不动。"""
         if not self._desk_pinned or new is None or new.window() is not self:
             return
