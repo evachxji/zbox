@@ -98,7 +98,7 @@ Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyS
 - `themes.py` — 两套主题 QSS（深色 `nocturne` / 浅色 `mica`）加 `auto` 伪主题；`%CN%`/`%NUM%` 为字体占位符
 - `version.py` — 版本号唯一来源：关于窗、设置窗左下角、安装向导、卸载注册表项共用 `APP_VERSION`，发版只改这一个文件
 - `sysutil.py` — 注册表集成：开机自启、桌面右键菜单、应用列表卸载项（默认 HKCU，免管理员）
-- `screenshot.py` — QQ 风格截图：全屏灰罩遮罩（`ShotOverlay`）、框选/8 手柄调整、矩形/椭圆/文字标注（颜色 + 反色）、导出复制/保存/钉图、滚动截长图；`HotkeyManager` 全局热键
+- `screenshot.py` — QQ 风格截图：全屏灰罩遮罩（`ShotOverlay`）、框选/8 手柄调整、矩形/椭圆/文字标注（颜色 + 反色）、导出复制/保存/钉图、滚动截长图（`_LongChrome` 提供取景框轮廓 + 右侧缩略预览）；`HotkeyManager` 全局热键
 - `pinshot.py` — 钉图窗 `PinWindow`：置顶无边框贴图，拖拽移动、双击关闭，不持久化
 - `installer.py` — 安装向导（选项/进度/完成页）与卸载向导（可选删除个人数据）；供 setup exe（安装）与程序本体 `--uninstall`（卸载）共用
 - `install.py` — 源码方式的系统集成（只装开机自启）
@@ -113,6 +113,7 @@ Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyS
 - `website/` — 产品介绍页（纯静态无构建），线上 https://zbox.wzyjc.cn（腾讯云 COS 静态托管）；
   `deploy-cos.py` 一键上传部署 / `--bind-cert <ID>` 绑定续期证书，细节见 `.claude/skills/site-deploy/`
 - `android/` — Android 端独立 Gradle 工程（Kotlin + Compose，与 PC 代码完全分离）
+- `harmony/` — 鸿蒙端独立 DevEco 工程（ArkTS + ArkUI，HarmonyOS NEXT API 12+，与 PC 代码完全分离；ohpm 依赖 polka/axios/harmony-utils/harmony-dialog；移植计划与验收标准见 `docs/superpowers/plans/2026-10-06-harmonyos-port.md`，构建说明见 `harmony/README.md`）
 - `build-apk.cmd` — 双击打包 Android APK：自动定位 JDK 17 再调 `gradlew assembleDebug`
 - `assets/` — README 引用的图标与功能截图
 - `docs/` — 历史实现计划存档（`superpowers/plans/`）
@@ -136,6 +137,7 @@ python install.py            :: 源码方式开启开机自启
 python install.py --remove   :: 移除自启并清理旧的右键菜单
 python transfer_selftest.py  :: 传输协议自检（全过打印 SELFTEST OK）
 cd android && gradlew.bat assembleDebug   :: 构建 Android debug APK（或双击 build-apk.cmd）
+cd harmony && hvigorw assembleHap          :: 构建鸿蒙 HAP（需 DevEco Studio 环境，先 ohpm install）
 set ZBOX_SHOT=designs\verify && python main.pyw   :: 截图自检
 ```
 
@@ -412,6 +414,10 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
 - **截长图**：进长图模式**必须 hide() 遮罩**（否则抓帧抓到的是遮罩自己），
   之后由用户自己滚动页面（滚轮自然落在目标窗口），280ms 定时器抓选区帧，
   用灰度行签名 `_row_sig` 找纵向位移拼接；匹配失败（动画/跳变）只提示不硬拼。
+  遮罩藏起后取景框轮廓与缩略预览由 `_LongChrome` 贴出：描边外扩 2px 完全落在选区外
+  （抓帧不受污染）、`WA_TransparentForMouseEvents` 鼠标穿透滚轮照常落在目标窗口、
+  预览放选区右侧（放不下换左侧，都放不下不显示）、高度随拼接增长、
+  超过取景框高截顶只展示最新部分。
   `_row_sig` 里 `bits().asarray()` 的对象不支持步长切片，要先 `bytes()` 转换。
 - **钉图**：`PinWindow` 置顶 Tool 窗，**故意不挂桌面带**（挂带会被应用窗口压住，
   贴图的意义是浮在最上面）；拖拽移动、双击关闭；不持久化，进程退出即消失。
@@ -782,6 +788,17 @@ HTTP 模式无加密，只面向可信局域网。组播失效时有 /24 子网�
 - Android 端在 `android/`：独立 Gradle 工程（Kotlin + Compose + OkHttp + NanoHTTPD，minSdk 26），
   与 PC 代码完全分离；指纹/别名/保存目录存 SharedPreferences，SAF 落盘，仅前台传输
   （`onStop` 即停服务）。
+- 鸿蒙端在 `harmony/`：ArkTS + ArkUI 单 UIAbility；polka 起 53327 HTTP 服务端（5 端点），组播 `addMembership` 监听失败退化为 /24 子网扫描；发送走 TCPSocket 手写流式 POST（64KB 分块带进度/取消），接收经 polka 落沙箱 `files/received/` 后由记录页「导出」到公共目录；指纹/别名存 preferences；分享入口走 Share Kit（`ohos.want.action.sendData`）；传输中切后台申请 DATA_TRANSFER 长时任务保活。协议常量（组播 224.0.0.168 / 端口 53327）与 PC/Android 逐字节一致，与官方 LocalSend 不互通。
+  另有「手动添加」入口输 IP 走 GET /info 登记（组播/扫描失效兜底，模拟器联调填 10.0.2.2）。
+  实测坑位（2026-10 CLI + 模拟器联调验证）：① UDPSocket 必须先 bind 再 send（直接发报 Bad file descriptor）；
+  ② 组播监听要用 constructMulticastSocketInstance + addMembership(NetAddress)，模拟器上 EINVAL 不可用（真机待验），
+  失效时自动退化子网扫描；③ 本机 IP 用 connection.getConnectionPropertiesSync（harmony-utils 的
+  NetworkUtil.getIpAddress 走 Wi-Fi GetIpInfo，模拟器返回 0.0.0.0）；④ fs.writeSync 的 WriteOptions.offset
+  是**文件位置**而非 buffer 偏移（分块写必须 buf.slice 后顺序写，readSync 的 offset 才是文件读位置）；
+  ⑤ 记录行刷新必须 @Observed + @ObjectLink 子组件（ForEach 按 key 复用时 @Builder 行不刷新）；
+  ⑥ polka 的 getRemoteIpAddress 在 prepare/upload 两条连接上可能一个 undefined 一个正常，session IP 为空时跳过校验。
+  CLI 自主调试：devecocli build / run / log --bundle-name com.zbox.transfer / ui screenshot|layout|click|text
+  （模拟器免签名直装；devecocli 子命令详见 devecocli --help）。
 - `config.json` 新增键：`transfer_fingerprint` / `transfer_alias` / `transfer_dir` / `transfer_enabled`（默认 false；zviber→zbox 迁移时旧值被 `_reset_migrated_transfer` 重置为关闭，升级用户需手动启用一次）。
 
 

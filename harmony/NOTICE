@@ -1,0 +1,9 @@
+本项目的鸿蒙端实现参考了以下开源项目的 API 用法：
+
+  LocalSendLite_HarmonyOS_NEXT
+  https://github.com/Gokr-ble/LocalSendLite_HarmonyOS_NEXT
+  Copyright (c) 2024 Gokr-ble
+  License: MIT
+
+协议为 LocalSend v2 的私有实例（组播 224.0.0.168 / 端口 53327，与官方不互通），
+协议语义以本仓库 PC 端 transfer.py 与 transfer_selftest.py 为准。
