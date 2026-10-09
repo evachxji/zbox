@@ -11,3 +11,4 @@
 **/.test
 /.appanalyzer
 /signing
+/build-profile.json5
