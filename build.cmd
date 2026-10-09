@@ -2,12 +2,11 @@
 chcp 936 >nul
 setlocal
 cd /d "%~dp0"
-title Zbox 三端一键打包
+title Zbox 一键打包
 
 echo.
-echo   Zbox 一键打包（Windows 安装包 + Android APK + 鸿蒙 HAP）
+echo   Zbox 一键打包
 echo   ---------------------------------------------
-echo.
 
 rem ---- 定位 Python：优先 python.exe，退回到 py 启动器 ----
 set "PY=python"
@@ -23,8 +22,37 @@ for /f %%v in ('%PY% -c "from version import APP_VERSION; print(APP_VERSION)"') 
 echo   版本号：v%VER%
 echo.
 
-rem ============ 1/3 Windows exe 安装包 ============
-echo   [1/3] Windows exe 安装包（首次打包较慢）...
+rem ---- 选择构建目标 ----
+echo   请选择构建目标：
+echo     1. Win端（EXE）
+echo     2. 安卓端（APK）
+echo     3. 鸿蒙端（HAP）
+echo     4. Win端 + 安卓端
+echo     5. Win端 + 鸿蒙端
+echo     6. 安卓端 + 鸿蒙端
+echo     7. Win端 + 安卓端 + 鸿蒙端（默认）
+echo.
+set /p "CHOICE=请输入 1-7 后回车 [7]: "
+if "%CHOICE%"=="" set "CHOICE=7"
+rem set /p 从管道读入会残留 \r；选项本来就是单个数字，只取首字符（交互输入无影响）
+set "CHOICE=%CHOICE:~0,1%"
+set "DO_PC="
+set "DO_APK="
+set "DO_HAP="
+if "%CHOICE%"=="1" set "DO_PC=1"
+if "%CHOICE%"=="2" set "DO_APK=1"
+if "%CHOICE%"=="3" set "DO_HAP=1"
+if "%CHOICE%"=="4" (set "DO_PC=1" & set "DO_APK=1")
+if "%CHOICE%"=="5" (set "DO_PC=1" & set "DO_HAP=1")
+if "%CHOICE%"=="6" (set "DO_APK=1" & set "DO_HAP=1")
+if "%CHOICE%"=="7" (set "DO_PC=1" & set "DO_APK=1" & set "DO_HAP=1")
+rem 七个分支都没命中 = 非法输入
+if not defined DO_PC if not defined DO_APK if not defined DO_HAP goto :bad_choice
+echo.
+
+rem ============ Windows exe 安装包 ============
+if not defined DO_PC goto :skip_pc
+echo   [exe] Windows 安装包（首次打包较慢）...
 %PY% -c "import PySide6" >nul 2>nul
 if errorlevel 1 goto :need_deps
 %PY% -c "import PyInstaller" >nul 2>nul
@@ -43,9 +71,11 @@ echo.
 %PY% "%~dp0build.py"
 if errorlevel 1 goto :pc_failed
 echo.
+:skip_pc
 
-rem ============ 2/3 Android APK ============
-echo   [2/3] Android APK ...
+rem ============ Android APK ============
+if not defined DO_APK goto :skip_apk
+echo   [APK] Android 安装包 ...
 where java.exe >nul 2>nul
 if errorlevel 1 goto :no_java
 if not exist "%~dp0android\gradlew.bat" goto :no_gradlew
@@ -77,9 +107,11 @@ set "APK_ERR=%ERRORLEVEL%"
 if defined LP_MOVED move /y "%LP_BAK%" "%LP%" >nul
 if not "%APK_ERR%"=="0" goto :apk_failed
 echo.
+:skip_apk
 
-rem ============ 3/3 鸿蒙 HAP ============
-echo   [3/3] 鸿蒙 HAP ...
+rem ============ 鸿蒙 HAP ============
+if not defined DO_HAP goto :skip_hap
+echo   [HAP] 鸿蒙安装包 ...
 where devecocli.cmd >nul 2>nul
 if errorlevel 1 goto :no_deveco
 pushd "%~dp0harmony"
@@ -87,17 +119,17 @@ call devecocli.cmd build
 if errorlevel 1 (popd & goto :hap_failed)
 popd
 echo.
+:skip_hap
 
 rem ============ 汇总产物（带版本号） ============
 echo   正在汇总产物到 dist\release\ ...
 if not exist "%~dp0dist\release" mkdir "%~dp0dist\release"
-del /q "%~dp0dist\release\*" >nul 2>nul
-for %%f in ("%~dp0dist\zbox-Setup-v%VER%-*.exe") do copy /y "%%f" "%~dp0dist\release\" >nul
-copy /y "%~dp0android\app\build\outputs\apk\debug\app-debug.apk" "%~dp0dist\release\zbox-Android-v%VER%.apk" >nul
-copy /y "%~dp0harmony\entry\build\default\outputs\default\entry-default-unsigned.hap" "%~dp0dist\release\zbox-HarmonyOS-v%VER%-unsigned.hap" >nul
+if defined DO_PC for %%f in ("%~dp0dist\zbox-Setup-v%VER%-*.exe") do copy /y "%%f" "%~dp0dist\release\" >nul
+if defined DO_APK copy /y "%~dp0android\app\build\outputs\apk\debug\app-debug.apk" "%~dp0dist\release\zbox-Android-v%VER%.apk" >nul
+if defined DO_HAP copy /y "%~dp0harmony\entry\build\default\outputs\default\entry-default-unsigned.hap" "%~dp0dist\release\zbox-HarmonyOS-v%VER%-unsigned.hap" >nul
 
 echo.
-echo   [完成] 三端产物（dist\release\）：
+echo   [完成] 本次产物（dist\release\）：
 dir /b "%~dp0dist\release\"
 echo.
 echo   说明：exe 发给别人双击即装；apk 发手机点开安装；
@@ -106,6 +138,13 @@ echo         分发真机需先签名或上架 AppGallery（见 harmony\README.md）。
 echo.
 pause
 exit /b 0
+
+:bad_choice
+echo.
+echo   [错误] 输入无效，请输入 1-7 的数字。
+echo.
+pause
+exit /b 1
 
 :pc_failed
 echo.
@@ -124,6 +163,9 @@ exit /b 1
 :hap_failed
 echo.
 echo   [错误] 鸿蒙 HAP 打包失败，请查看上方 hvigor 的输出排查。
+echo          若报错与 SignHap / profile 有关：build-profile.json5 配了 release 签名，
+echo          但 signing\ 下的证书材料不全（缺 .cer / .p7b，需从 AppGallery Connect 下载）。
+echo          把材料补全，或把 signingConfig 改回空（免签名调试包）即可恢复构建。
 echo.
 pause
 exit /b 1

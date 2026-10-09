@@ -98,12 +98,12 @@ Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyS
 - `themes.py` — 两套主题 QSS（深色 `nocturne` / 浅色 `mica`）加 `auto` 伪主题；`%CN%`/`%NUM%` 为字体占位符
 - `version.py` — 版本号唯一来源：关于窗、设置窗左下角、安装向导、卸载注册表项共用 `APP_VERSION`，发版只改这一个文件
 - `sysutil.py` — 注册表集成：开机自启、桌面右键菜单、应用列表卸载项（默认 HKCU，免管理员）
-- `screenshot.py` — QQ 风格截图：全屏灰罩遮罩（`ShotOverlay`）、框选/8 手柄调整、矩形/椭圆/文字标注（颜色 + 反色）、导出复制/保存/钉图、滚动截长图（`_LongChrome` 提供取景框轮廓 + 右侧缩略预览）；`HotkeyManager` 全局热键
+- `screenshot.py` — QQ 风格截图：全屏灰罩遮罩（`ShotOverlay`）、框选/8 手柄调整、矩形/椭圆/文字标注（颜色 + 反色）、导出复制/保存/钉图、滚动截长图（`_LongChrome` 取景框轮廓 + 右侧缩略预览；`_WheelClamp` 滚轮限速）；`HotkeyManager` 全局热键
 - `pinshot.py` — 钉图窗 `PinWindow`：置顶无边框贴图，拖拽移动、双击关闭，不持久化
 - `installer.py` — 安装向导（选项/进度/完成页）与卸载向导（可选删除个人数据）；供 setup exe（安装）与程序本体 `--uninstall`（卸载）共用
 - `install.py` — 源码方式的系统集成（只装开机自启）
 - `setup.pyw` — 安装包入口：build.py 把它打成 onefile exe，内嵌 onedir 本体为 payload，双击弹安装向导
-- `build.py` / `build.cmd` — `build.cmd` 是三端一键入口（PC exe + Android APK + 鸿蒙 HAP，产物带版本号汇总到 `dist\release\`）；`build.py` 只负责 PC：生成图标与 DPI 清单，两段式 PyInstaller——main.pyw 打 onedir 本体（`dist\build\app\`），setup.pyw 内嵌本体打成单个安装包 `dist\zbox-Setup-v<版本>-<架构>.exe`（架构标识跟随打包用的 Python：x64 / x86 / arm64）
+- `build.py` / `build.cmd` — `build.cmd` 是三端一键入口（启动后选 1-7 构建单端或组合，默认 7 全量：PC exe + Android APK + 鸿蒙 HAP，产物带版本号汇总到 `dist\release\`）；`build.py` 只负责 PC：生成图标与 DPI 清单，两段式 PyInstaller——main.pyw 打 onedir 本体（`dist\build\app\`），setup.pyw 内嵌本体打成单个安装包 `dist\zbox-Setup-v<版本>-<架构>.exe`（架构标识跟随打包用的 Python：x64 / x86 / arm64）
 - `native/` — 外壳菜单宿主：`zshell.cpp`（C++ 源码，契约见下方「格子文件右键」）
   + `build_native.cmd`（cl /MT 静态 CRT 编译出 `zshell_host.exe`，需 MSVC Build Tools）；
   exe 随仓库提交，改源码后需重新编译并一起提交
@@ -420,6 +420,10 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
   （抓帧不受污染）、`WA_TransparentForMouseEvents` 鼠标穿透滚轮照常落在目标窗口、
   预览放选区右侧（放不下换左侧，都放不下不显示）、高度随拼接向下延伸、
   顶到屏幕工作区底边后截顶只展示最新部分；完成只进剪贴板（不弹保存框）。
+  滚轮经 `_WheelClamp`（WH_MOUSE_LL，仅截长图期间安装）限速：吞掉原始滚轮事件、
+  按配额（120 delta/150ms）`mouse_event` 补发（自补发带 dwExtraInfo 标记直接放行）——
+  一 tick 滚超半帧时行签名匹配必然失败（只提示不硬拼 = 白滚），从源头限速；
+  预览高度变化走 220ms OutCubic 动画平顺延伸。
   `_row_sig` 里 PySide6 的 `bits()` 直接返回带尺寸的 memoryview（PyQt5 的 `setsize`/`asarray`
   不存在，照搬会让每个 tick 静默炸在签名计算上、拼接永远不生效），先 `bytes()` 转换再步长切片。
 - **钉图**：`PinWindow` 置顶 Tool 窗，**故意不挂桌面带**（挂带会被应用窗口压住，
