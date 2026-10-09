@@ -280,6 +280,45 @@ QLabel#recvFileMore { color: #6d6a62; font: 11px "%CN%"; background: transparent
 QLabel#recvDir { color: #8d8a82; font: 11px "%CN%"; background: transparent; }
 QToolButton#linkBtn { background: transparent; border: none; color: #e8a33d; font: 11px "%CN%"; padding: 2px 4px; }
 QToolButton#linkBtn:hover { color: #f2b45a; }
+
+/* ---- 视频解析页 ---- */
+QFrame#videoRoot { background: transparent; }
+QLabel#videoLabel { color: #8d8a82; font: 12px "%CN%"; background: transparent; }
+QLabel#videoVer { color: #6d6a62; font: 11.5px "%CN%"; background: transparent; }
+QLabel#videoDir { color: #6d6a62; font: 11.5px "%CN%"; background: transparent; }
+QLineEdit#urlEdit {
+    background: rgba(255,255,255,12); border: 1px solid rgba(255,255,255,28); border-radius: 7px;
+    color: #f0ede6; font: 12px "%CN%"; padding: 4px 8px; selection-background-color: rgba(232,163,61,90);
+}
+QLineEdit#urlEdit:focus { border-color: #e8a33d; }
+QToolButton#qualityBtn {
+    background: transparent; border: 1px solid rgba(255,255,255,30); border-radius: 6px;
+    color: #8d8a82; font: 12px "%CN%"; padding: 3px 10px;
+}
+QToolButton#qualityBtn:hover { border-color: rgba(232,163,61,130); color: #e8a33d; }
+QFrame#videoRow { background: transparent; border-radius: 8px; }
+QFrame#videoRow QProgressBar { background: rgba(255,255,255,16); border: none; border-radius: 3px; }
+QFrame#videoRow QProgressBar::chunk { background: #e8a33d; border-radius: 3px; }
+QLabel#videoState { color: #6d6a62; font: 10.5px "%CN%"; background: transparent; }
+QLabel#videoState[state="busy"] { color: #e8a33d; }
+QLabel#videoState[state="done"] { color: #7fb069; }
+QLabel#videoState[state="fail"] { color: #e05252; }
+QFrame#videoCard {
+    background: rgba(255,255,255,10); border: 1px solid rgba(255,255,255,22); border-radius: 9px;
+}
+QLabel#videoTitle { color: #f0ede6; font: 600 12.5px "%CN%"; background: transparent; }
+QLabel#videoMeta { color: #9d9a92; font: 11px "%CN%"; background: transparent; }
+QScrollArea#videoScroll { background: transparent; border: none; }
+QWidget#videoBox { background: transparent; }
+QFrame#videoRecRow { background: transparent; border-radius: 7px; }
+QFrame#videoRecRow:hover { background: rgba(255,255,255,10); }
+QLabel#videoRecName { color: #cfccc4; font: 11.5px "%CN%"; background: transparent; }
+QToolButton#parseBtn {
+    background: transparent; border: 1px solid rgba(232,163,61,110); border-radius: 7px;
+    color: #e8a33d; font: 600 12px "%CN%"; padding: 4px 12px;
+}
+QToolButton#parseBtn:hover { background: rgba(232,163,61,22); border-color: #e8a33d; }
+QToolButton#parseBtn:disabled { border-color: rgba(255,255,255,20); color: #57554f; }
 """,
 }
 
@@ -298,7 +337,7 @@ QFrame#titlebar { background: #f7f8fa; }
 QFrame#tabBox { background: rgba(0,0,0,14); border-radius: 8px; }
 QToolButton#tab {
     background: transparent; border: none; border-radius: 6px;
-    color: #5b5b60; font: 600 12px "%CN%"; padding: 5px 16px;
+    color: #5b5b60; font: 600 12px "%CN%"; padding: 5px 10px;
 }
 QToolButton#tab[active="true"] { background: #ffffff; color: #1b1b1f; border: 1px solid rgba(0,0,0,10); }
 QToolButton#closeBtn {
@@ -547,6 +586,45 @@ QLabel#recvFileMore { color: #8a8a90; font: 11px "%CN%"; background: transparent
 QLabel#recvDir { color: #8a8a90; font: 11px "%CN%"; background: transparent; }
 QToolButton#linkBtn { background: transparent; border: none; color: #0067c0; font: 11px "%CN%"; padding: 2px 4px; }
 QToolButton#linkBtn:hover { color: #1a77cc; }
+
+/* ---- 视频解析页 ---- */
+QFrame#videoRoot { background: transparent; }
+QLabel#videoLabel { color: #8a8a90; font: 12px "%CN%"; background: transparent; }
+QLabel#videoVer { color: #8a8a90; font: 11.5px "%CN%"; background: transparent; }
+QLabel#videoDir { color: #8a8a90; font: 11.5px "%CN%"; background: transparent; }
+QLineEdit#urlEdit {
+    background: #ffffff; border: 1px solid rgba(0,0,0,26); border-radius: 7px;
+    color: #1b1b1f; font: 12px "%CN%"; padding: 4px 8px; selection-background-color: rgba(0,103,192,60);
+}
+QLineEdit#urlEdit:focus { border-color: #0067c0; }
+QToolButton#qualityBtn {
+    background: #ffffff; border: 1px solid rgba(0,0,0,26); border-radius: 6px;
+    color: #5b5b60; font: 12px "%CN%"; padding: 3px 10px;
+}
+QToolButton#qualityBtn:hover { border-color: #0067c0; color: #0067c0; }
+QFrame#videoRow { background: transparent; border-radius: 8px; }
+QFrame#videoRow QProgressBar { background: rgba(0,0,0,16); border: none; border-radius: 3px; }
+QFrame#videoRow QProgressBar::chunk { background: #0067c0; border-radius: 3px; }
+QLabel#videoState { color: #8a8a90; font: 10.5px "%CN%"; background: transparent; }
+QLabel#videoState[state="busy"] { color: #0067c0; }
+QLabel#videoState[state="done"] { color: #107c10; }
+QLabel#videoState[state="fail"] { color: #c42b1c; }
+QFrame#videoCard {
+    background: #ffffff; border: 1px solid rgba(0,0,0,22); border-radius: 9px;
+}
+QLabel#videoTitle { color: #1b1b1f; font: 600 12.5px "%CN%"; background: transparent; }
+QLabel#videoMeta { color: #6f6f75; font: 11px "%CN%"; background: transparent; }
+QScrollArea#videoScroll { background: transparent; border: none; }
+QWidget#videoBox { background: transparent; }
+QFrame#videoRecRow { background: transparent; border-radius: 7px; }
+QFrame#videoRecRow:hover { background: rgba(0,0,0,8); }
+QLabel#videoRecName { color: #3c3c41; font: 11.5px "%CN%"; background: transparent; }
+QToolButton#parseBtn {
+    background: #ffffff; border: 1px solid rgba(0,103,192,110); border-radius: 7px;
+    color: #0067c0; font: 600 12px "%CN%"; padding: 4px 12px;
+}
+QToolButton#parseBtn:hover { background: rgba(0,103,192,13); border-color: #0067c0; }
+QToolButton#parseBtn:disabled { border-color: rgba(0,0,0,16); color: #a8a8ae; }
 """,
 }
 

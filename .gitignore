@@ -1,5 +1,8 @@
-﻿__pycache__/
+__pycache__/
 *.pyc
+
+# 视频解析下载的 yt-dlp / ffmpeg 组件（源码运行时落在仓库根目录，体积大且可自动重下）
+tools/
 
 # 构建产物（exe 安装包）
 build/

@@ -18,7 +18,8 @@ import time
 from datetime import date, datetime, timedelta
 
 
-from PySide6.QtCore import Qt, QTimer, QThread, QUrl, Signal, QCoreApplication
+from PySide6.QtCore import (Qt, QTimer, QThread, QUrl, Signal, QCoreApplication,
+                              QTranslator, QLibraryInfo)
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QFileDialog
@@ -231,6 +232,11 @@ def main():
     QApplication.setQuitOnLastWindowClosed(False)
     qapp = QApplication(sys.argv)
     qapp.setApplicationName(sysutil.APP_NAME)
+    # Qt 自带控件文案中文化：QLineEdit 右键菜单（Undo/Redo/Cut/Copy...）来自 qtbase 翻译，
+    # Qt 不会自动加载，需手动装；源码与打包后路径都由 QLibraryInfo 给出（PyInstaller 会收进 qt/qtbase 全系 .qm）
+    _tr = QTranslator(qapp)
+    if _tr.load('qtbase_zh_CN', QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)):
+        qapp.installTranslator(_tr)
     # 通知归属独立应用身份：Windows 按进程/AUMID 缓存气泡图标，
     # 旧版「黄底日期」图标就是这么残留在通知里的；独立 AUMID 绕开旧缓存
     try:
@@ -291,7 +297,8 @@ def main():
     device_info = transfer.DeviceInfo.local(alias, fingerprint)
     # 截图自检不起服务（避免网络发现/对端接入让截图不确定），传输页按功能态渲染
     panel = ui.FloatingPanel(cfg, hstore, tstore, device_info,
-                             transfer_autostart=not os.environ.get('ZBOX_SHOT'))
+                             transfer_autostart=not os.environ.get('ZBOX_SHOT'),
+                             video_autostart=not os.environ.get('ZBOX_SHOT'))
     # 桌面格子：截图自检模式不创建，避免格子入镜干扰面板截图
     boxmgr = None
     if not os.environ.get('ZBOX_SHOT') and not os.environ.get('ZBOX_GRABSCREEN'):
@@ -347,6 +354,13 @@ def main():
         except Exception:
             pass
     qapp.aboutToQuit.connect(_stop_transfer)
+
+    def _stop_video():
+        try:
+            panel.video.shutdown()   # 终止进行中的 yt-dlp 子进程
+        except Exception:
+            pass
+    qapp.aboutToQuit.connect(_stop_video)
 
     # 节假日数据：设置窗「联网更新」与导入窗里各源的「下载并导入」都走同一条后台通道
     def fetch_holidays(on_finish=None, toast_win=None):

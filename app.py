@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (QWidget, QFrame, QLabel, QToolButton, QVBoxLayout
 import calendar_data as cd
 import sysutil
 import transfer_ui
+import video_ui
 from themes import THEMES, THEME_ORDER, THEME_CHOICES, AUTO, build_qss
 from version import APP_VERSION, GITHUB_URL
 
@@ -185,7 +186,8 @@ class Config(object):
         self.path = path
         self.data = {'theme': THEME_ORDER[0], 'tab': 0, 'pos': None,
                      'off_noon': '12:00-13:00', 'off_evening': '18:00',
-                     'transfer_enabled': False, 'shot_hotkey': ''}
+                     'transfer_enabled': False, 'shot_hotkey': '',
+                     'video_enabled': False, 'video_dir': '', 'video_quality': '1080P'}
         self.load()
 
     def load(self):
@@ -1912,6 +1914,30 @@ class SettingsDialog(QDialog):
         self.transfer_chk.toggled.connect(commit_transfer)
         panel.transfer.enabled_changed.connect(lambda _on: self._sync_transfer_chk())
 
+        # 视频解析：默认关闭；开启时后台下载 yt-dlp/ffmpeg 组件到程序目录 tools\。
+        # 组件下载是异步的，失败经 enabled_changed(False) 把勾选弹回去
+        vd_row = QHBoxLayout()
+        vd_row.setSpacing(sc(6))
+        self.video_chk = QCheckBox('开启视频解析')
+        self.video_chk.setChecked(panel.video.service_enabled())
+        vd_row.addWidget(self.video_chk)
+        vd_help = QToolButton()
+        vd_help.setObjectName('gateHelpBtn')
+        vd_help.setText('?')
+        vd_help.setFixedSize(sc(20), sc(20))
+        vd_help.setCursor(Qt.PointingHandCursor)
+        vd_help.setToolTip('什么是视频解析')
+        vd_help.clicked.connect(lambda: video_ui.VideoInfoDialog(self).exec())
+        vd_row.addWidget(vd_help)
+        vd_row.addStretch(1)
+        form.addRow(row_label('视频解析'), vd_row)
+
+        def commit_video(on):
+            if panel.video.set_enabled(bool(on)) != bool(on):
+                self._sync_video_chk()   # 开启失败：弹回勾选
+        self.video_chk.toggled.connect(commit_video)
+        panel.video.enabled_changed.connect(lambda _on: self._sync_video_chk())
+
         # 改动即时生效，无需保存按钮；左下角版本号与关于窗/安装程序一致
         ver_row = QHBoxLayout()
         ver_row.setContentsMargins(0, sc(12), sc(4), 0)
@@ -1980,6 +2006,15 @@ class SettingsDialog(QDialog):
             self.transfer_chk.blockSignals(True)
             self.transfer_chk.setChecked(self._panel.transfer.service_enabled())
             self.transfer_chk.blockSignals(False)
+        except (RuntimeError, AttributeError):
+            pass  # 设置窗已销毁
+
+    def _sync_video_chk(self):
+        """视频解析页门禁层改动开关后，同步这里的勾选状态。"""
+        try:
+            self.video_chk.blockSignals(True)
+            self.video_chk.setChecked(self._panel.video.service_enabled())
+            self.video_chk.blockSignals(False)
         except (RuntimeError, AttributeError):
             pass  # 设置窗已销毁
 
@@ -2319,7 +2354,8 @@ class FloatingPanel(QWidget):
     toggled = Signal()
     settingsRequested = Signal()   # 顶部栏齿轮按钮 → 入口 open_settings（非模态去重在那里）
 
-    def __init__(self, cfg, hstore, tstore, device_info=None, transfer_autostart=True):
+    def __init__(self, cfg, hstore, tstore, device_info=None, transfer_autostart=True,
+                 video_autostart=True):
         super(FloatingPanel, self).__init__()
         self.cfg = cfg
         self.cn_font, self.num_font = pick_fonts()
@@ -2368,7 +2404,7 @@ class FloatingPanel(QWidget):
         bx.setContentsMargins(sc(3), sc(3), sc(3), sc(3))
         bx.setSpacing(sc(6 if resolve_theme(cfg.theme) == 'nocturne' else 2))
         self.tabs = []
-        for i, name in enumerate(['日历', '待办', '传输']):
+        for i, name in enumerate(['日历', '待办', '传输', '视频解析']):
             b = QToolButton()
             b.setObjectName('tab')
             b.setText(name)
@@ -2409,6 +2445,8 @@ class FloatingPanel(QWidget):
         self.transfer = transfer_ui.TransferWidget(cfg, device_info,
                                                    auto_start=transfer_autostart)
         self.transfer.set_theme(resolve_theme(cfg.theme))
+        self.video = video_ui.VideoWidget(cfg, auto_start=video_autostart)
+        self.video.set_theme(resolve_theme(cfg.theme))
         # 顶部栏平时隐藏：日历左侧的时分秒 / 日期行充当窗口拖拽把手
         self.cal.clock_hm.installEventFilter(self)
         self.cal.sub.installEventFilter(self)
@@ -2418,6 +2456,7 @@ class FloatingPanel(QWidget):
         self.single_stack.addWidget(self.cal)
         self.single_stack.addWidget(self.todo)
         self.single_stack.addWidget(self.transfer)
+        self.single_stack.addWidget(self.video)
         pl.addWidget(self.single_stack, 1)
 
         self._today = date.today()
@@ -2555,12 +2594,24 @@ class FloatingPanel(QWidget):
             QTimer.singleShot(300, self._ensure_desktop_level)   # 失焦后压回桌面层
         return super(FloatingPanel, self).event(e)
 
+    def _child_window_in_use(self):
+        """面板的子窗口（设置/关于等无边框对话框）正在使用：激活或悬停。
+        面板沉底会把属主是自己的子窗口一并拽进桌面层（owned window 恒在 owner 之上），
+        设置窗开着时鼠标一移上去、面板 underMouse 过期，面板一沉设置窗就被其它
+        应用窗口盖住——子窗口使用中不沉。"""
+        for w in QApplication.topLevelWidgets():
+            if (w is not self and w.parent() is self and w.isVisible()
+                    and (w.isActiveWindow() or w.underMouse())):
+                return True
+        return False
+
     def _ensure_desktop_level(self):
         """面板被点击激活后会浮到普通窗口之上；空闲（未激活/未悬停/未拖拽）时压回桌面层，
         让其它窗口可以正常遮挡它。正在使用时不动，避免打字/拖拽途中被其它窗口盖住。
         没浮起过就不动——z-order 变动会触发桌面整理软件的表层反压，空发会振荡闪烁。"""
         if (not self._floating or not self.isVisible() or self.isActiveWindow() or self.underMouse()
-                or self._drag is not None or self.titlebar.underMouse()):
+                or self._drag is not None or self.titlebar.underMouse()
+                or self._child_window_in_use()):
             return
         self._floating = False
         sink_to_desktop(self, self._desk_surface)
@@ -2569,7 +2620,7 @@ class FloatingPanel(QWidget):
 
     # --- 布局模式 ---
     def set_tab(self, idx, save=True):
-        pages = (self.cal, self.todo, self.transfer)
+        pages = (self.cal, self.todo, self.transfer, self.video)
         idx = idx if 0 <= idx < len(pages) else 0   # 持久化的 tab 越界时回退日历
         self.single_stack.slide_to(pages[idx])
         for i, b in enumerate(self.tabs):
@@ -2588,6 +2639,7 @@ class FloatingPanel(QWidget):
         self.cal.set_theme(real)
         self.todo.set_theme(real)
         self.transfer.set_theme(real)
+        self.video.set_theme(real)
         if save:
             self.cfg.set('theme', key)
 

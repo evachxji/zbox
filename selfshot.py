@@ -16,7 +16,7 @@ import tempfile
 import threading
 from datetime import date, datetime, timedelta
 
-from PySide6.QtCore import Qt, QTimer, QPoint
+from PySide6.QtCore import Qt, QTimer, QPoint, QBuffer
 from PySide6.QtGui import QImage, QPainter, QColor, QFont
 from PySide6.QtWidgets import QApplication, QMenu
 
@@ -26,6 +26,7 @@ import installer
 import pinshot
 import sysutil
 import transfer_ui
+import video_ui
 from themes import THEME_ORDER
 
 # 冻结的时间点：日历页时钟、倒计时、「今天」高亮、待办日期 tag 全部由它推出
@@ -151,6 +152,22 @@ class _Runner(object):
         self.qapp.quit()
 
     # ---------------- 场景清单 ----------------
+    def _video_thumb_bytes(self):
+        """离线生成封面样图字节：琥珀底 + 播放三角，注入视频卡封面渲染路径。"""
+        pm = QImage(128, 128, QImage.Format_ARGB32)
+        pm.fill(QColor('#e8a33d'))
+        pt = QPainter(pm)
+        pt.setRenderHint(QPainter.Antialiasing)
+        pt.setPen(Qt.NoPen)
+        pt.setBrush(QColor('#1a1610'))
+        from PySide6.QtGui import QPolygon
+        pt.drawPolygon(QPolygon([QPoint(48, 38), QPoint(48, 90), QPoint(92, 64)]))
+        pt.end()
+        buf = QBuffer()
+        buf.open(QBuffer.ReadWrite)
+        pm.save(buf, 'PNG')
+        return bytes(buf.data())
+
     def _build_jobs(self):
         p = self.panel
         for theme in THEME_ORDER:
@@ -162,6 +179,25 @@ class _Runner(object):
                      lambda: p.set_tab(1, save=False), lambda: p)
             self.job('%s_transfer' % theme, 400,
                      lambda: p.set_tab(2, save=False), lambda: p)
+            self.job('%s_video' % theme, 400,
+                     lambda: p.set_tab(3, save=False), lambda: p)
+            self.job('%s_video_parsed' % theme, 400,
+                     lambda: (p.video.url_edit.setText(
+                                  'https://www.bilibili.com/video/BV1GJ411x7h7'),
+                              p.video._on_parse_done(True, {
+                         'url': 'https://www.bilibili.com/video/BV1GJ411x7h7',
+                         'title': '【官方 MV】Never Gonna Give You Up - Rick Astley',
+                         'duration': 213, 'heights': [1080, 720, 480, 360]}),
+                              p.video._add_record(
+                                  '袁腾飞大方公开个人生活，陈一发儿：起码很坦荡 [-53xVjZimxw].mp4',
+                                  r'C:\dl\b.mp4'),
+                              p.video._add_record(
+                                  '【官方 MV】Never Gonna Give You Up - Rick Astley [BV1GJ411x7h7].mp4',
+                                  r'C:\dl\a.mp4'),
+                              p.video._on_thumb(self._video_thumb_bytes())),
+                     lambda: p,
+                     teardown=lambda: (p.video.url_edit.clear(), p.video.card.hide(),
+                                       p.video._clear_records()))
             self.job('%s_titlebar' % theme, 500,
                      lambda: p._slide_titlebar(True), lambda: p.titlebar)
             self.job('%s_todo_edit' % theme, 400,
@@ -191,6 +227,8 @@ class _Runner(object):
                      lambda: ui.TimePickerPopup(p, '18:30', lambda t: None))
             self.job('%s_transfer_info' % theme, 300, None,
                      lambda: transfer_ui.TransferInfoDialog(p))
+            self.job('%s_video_info' % theme, 300, None,
+                     lambda: video_ui.VideoInfoDialog(p))
             # 接收确认弹窗放每主题最后：_show_recv 会往传输记录区加一条记录，
             # 之后的 transfer tab 场景（下一主题）会带上它——两批截图顺序一致即可比
             self.job('%s_recv_dialog' % theme, 600, None,

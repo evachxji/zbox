@@ -11,7 +11,7 @@ import sys
 # 反而把线程初始化成 MTA，Qt 的 OleInitialize 会失败 RPC_E_CHANGED_MODE）。
 ctypes.windll.ole32.CoInitializeEx(None, 0x2)   # COINIT_APARTMENTTHREADED
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTranslator, QLibraryInfo
 from PySide6.QtWidgets import QApplication
 
 
@@ -21,6 +21,10 @@ def main():
         Qt.HighDpiScaleFactorRoundingPolicy.Round)
     qapp = QApplication(sys.argv)
     qapp.setApplicationName('zboxSetup')
+    # 同 main.pyw：Qt 自带控件文案中文化（安装向导路径输入框的右键菜单）
+    _tr = QTranslator(qapp)
+    if _tr.load('qtbase_zh_CN', QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)):
+        qapp.installTranslator(_tr)
     import installer
     return installer.setup_main()
 
