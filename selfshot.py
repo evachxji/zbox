@@ -178,6 +178,9 @@ class _Runner(object):
                      lambda: p.set_tab(1, save=False), lambda: p)
             self.job('%s_transfer' % theme, 400,
                      lambda: p.set_tab(2, save=False), lambda: p)
+            self.job('%s_transfer_busy' % theme, 400,
+                     lambda: (p.set_tab(2, save=False), self._make_busy_transfer()),
+                     lambda: p, teardown=self._clear_busy_transfer)
             self.job('%s_video' % theme, 400,
                      lambda: p.set_tab(3, save=False), lambda: p)
             self.job('%s_video_parsed' % theme, 400,
@@ -301,6 +304,33 @@ class _Runner(object):
             'duration': 213, 'heights': [1080, 720, 480, 360]})
         t._on_thumb(self._video_thumb_bytes())
         return t
+
+    def _make_busy_transfer(self):
+        '''注入一条「传输中」记录：进度 42%，记录行应亮起彩色跑马灯轮廓。'''
+        t = self.panel.transfer
+        key = t._add_record('down', ['画质核爆？2077秒变2088.mp4'], 100 * 2 ** 20,
+                            peer='Pixel 6')
+        rec = t._records[key]
+        rec['state'] = 'busy'
+        rec['done'] = 42 * 2 ** 20
+        rec['_speed'] = 3.2 * 2 ** 20
+        t._update_record(rec)
+        self._busy_key = key
+
+    def _clear_busy_transfer(self):
+        try:
+            t = self.panel.transfer
+            key = getattr(self, '_busy_key', None)
+            rec = t._records.pop(key, None)
+            if key in t._rec_keys:
+                t._rec_keys.remove(key)
+            if rec is not None:
+                rec['row'].set_glow('')
+                t.rec_lay.removeWidget(rec['row'])
+                rec['row'].deleteLater()
+        except Exception:
+            pass
+
     def _hide_toast(self):
         p = self.panel
         if getattr(p, '_toast_anim', None) is not None:
@@ -396,7 +426,7 @@ class _Runner(object):
         p.setFont(QFont(ui.pick_fonts()[0], 14))
         p.drawText(img.rect(), Qt.AlignCenter, '钉图示例\n2026-10-15 10:08')
         p.end()
-        return pinshot.PinWindow(img, QPoint(0, 0), '#e05252')
+        return pinshot.PinWindow(img, QPoint(0, 0), '#999999')
 
     # ---- 全隐藏单项菜单 ----
     def _make_icons_menu(self):

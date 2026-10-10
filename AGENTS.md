@@ -1,4 +1,4 @@
-# 解决方案
+﻿# 解决方案
 
 四个原则，集中在一个文件中，直接解决这些问题：
 
@@ -89,7 +89,7 @@ Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyS
 - `boxes.py` — 桌面格子：空白格子（桌面文件的收纳视图，不搬文件、只隐藏桌面图标）与文件夹映射格子、双击桌面显隐
 - `calendar_data.py` — 内置国务院节假日数据、农历换算、三源联网回退与离线导入
 - `transfer.py` — 局域网文件传输协议核心（参照 LocalSend v2 的私有实例）：UDP 组播发现 + HTTP REST 传输，纯标准库零 Qt
-- `transfer_ui.py` — 面板「传输」tab：设备列表、文件多选 + 拖拽发送、传输记录、接收确认弹窗、发送方取消；传输服务生命周期自持（默认关闭的门禁层、启用/停用、「?」说明弹窗）
+- `transfer_ui.py` — 面板「传输」tab：设备列表、文件多选 + 拖拽发送、传输记录（「传输中」的记录行亮彩色跑马灯轮廓）、接收确认弹窗、发送方取消；传输服务生命周期自持（默认关闭的门禁层、启用/停用、「?」说明弹窗）
 - `video_dl.py` — 视频解析核心：yt-dlp / ffmpeg 组件下载（ghproxy 镜像优先、GitHub 直连兜底；ffmpeg 优先 npmmirror 的 ffmpeg-static 单文件 gz）、版本查询（本地 `--version` + PyPI JSON / GitHub API，比较走 `version_key` 数值化——本地输出 `2026.08.19`、PyPI 归一成 `2026.8.19`，字符串直接比会误报有新版）、视频下载子进程（照搬参考脚本 `bestvideo[height<=N]+bestaudio` 合并 mp4，`--newline` 逐行进度解析并映射成**单趟进度条**：下载段 0→95%（分流源 视频 0–85 / 音频 85–95，合流源 0–95），95→100 留给合并（done 置 100）——不再每路流各走一遍；阶段文案仍按 Destination 计数标「(1/3) 下载视频/(2/3) 下载音频/(3/3) 合并中」（合流源不带计数，由解析时的 `split_heights` 判定；`-f` 带 `/best` 兜底合流单文件）；中间流文件下在保存目录，成功由 yt-dlp 自删，失败/中止由 `_cleanup_parts` 清掉本次 Destination 及 .part/.ytdl 边车；同名成品撞车被 yt-dlp 跳过时自动追加 `-2160P` 式分辨率后缀重试一次，后缀也撞车才报「未重复下载」）；浏览器 cookie：`tools\cookies.txt` 存在即随解析/下载命令带 `--cookies`（抖音等站点匿名请求 403 必需，`import_cookies` 做 Netscape 格式轻校验、缺 douyin.com 条目仅警告，卸载组件时一并删除）。纯标准库零 Qt，回调全在后台线程
 - `glow.py` — 共享轮廓灯效控件 `GlowCard`（待机呼吸灯 / 彩色跑马灯，自绘描边 + 定时器相位；跑马灯是把圆角矩形边框 toSubpathPolygons 离散成折线再按 ~6px 细分（折线只细分圆弧，直边是一整段，不细分就一条边一个颜色）、逐段按「累计周长位置 − 相位」取色——别用线性渐变+转色相，那样上下边同向变色不像追跑；独立成模块而非放 app.py——基类在 import 期就要被求值，放 app.py 会撞三方循环 import；`_sc` 运行期惰性取 app.sc）。传输记录行（`_ClickRow` 继承）与视频解析视频卡共用
 - `video_ui.py` — 面板「视频解析」tab：底栏组件状态（不显示组件名/版本号，检查更新覆盖 yt-dlp 与 ffmpeg 两者、一键更新、卸载）、网址输入（先「解析」yt-dlp -J 出标题/时长/封面/实际档位再选清晰度下载，封面居中裁方圆角、加载前/取不到显示 `_placeholder_pm` 占位图（半透明灰圆角方块+播放三角，卡片高度恒定），偏好档记 `video_quality`）、保存目录（默认桌面，注册表 User Shell Folders 兼容 OneDrive 重定向）、多任务模型：输入框+「解析」即创建一个任务卡（`_VideoTask`，卡片即任务）插到列表顶部（`task_lay` 滚动区，QSS `#videoScroll/#videoBox`），解析/下载进行中输入框不锁、可随时加新任务；重复网址拒建并提示；卡片一经创建留到程序重启（`_clear_tasks` 仅供 selfshot 清场）；parsed / done / downloading 态卡片标题行右侧显示 ✕ 关闭钮（`#cardCloseBtn`，accent 色 hover 变红）：parsed/done 点击直接移出列表销毁；downloading（含暂停）先弹 `_ConfirmDialog` 二次确认（已泛化为标题/正文/确认文案参数化，组件卸载确认同款），确认后 terminate——start() 收尾的 `_cleanup_parts` 会删掉下载到一半的 .part/.ytdl 缓存；parsing/failed 态不显示。下载中右键不再弹「取消下载」（取消唯一入口是 ✕ 二次确认），右键只剩完成态的「打开所在目录」。任务列表容器是 `_TaskBox`（宽度方向 minimumSizeHint 归零——QScrollArea 按内容 minSizeHint 放大容器而横向滚动条禁用会硬裁卡片右侧，归零后恢复布局软压缩；高度照常传递供垂直滚动）；卡片标题/URL 一律按 `ui.sc(172)` elide（更宽会撑爆容器）。任务卡状态机：parsing（转圈+正在解析）→ parsed（时长+清晰度下拉+「下载」，淡蓝 `#6ea8fe` 呼吸灯）→ downloading（跑马灯；meta 行换 `dl_box` 进度区：进度条+「暂停/继续」（yt-dlp 握手期没出真实进度时该按钮位换成 `_Spinner` 自绘旋转环，首个进度到达换回），下方从左到右 已下载/总大小（`_fmt_pair` 按百分比折算同单位）·剩余时间·下载速度三栏 busy 强调色，阶段提示「合并中…」借剩余时间栏）→ done（无轮廓灯，meta 行 时长·文件大小（`_fmt_size`）+「打开」，单击打开文件）/ failed（meta 行红/灰提示文字）。暂停=杀进程树但留 .part、继续=同命令重启靠 yt-dlp 默认 --continue 断点续传（`Download.pause/resume` + `_resume_evt` 挂起等待，暂停中取消走 terminate 唤醒后正常清理 .part）；取消回 parsed 态（取消与完成竞速时完成优先）。右键任务卡：下载中弹「取消下载」、完成态弹「打开所在目录」（explorer /select, 选中文件）。卡外状态行只剩全局提示（组件更新经 `sig_msg`、网址为空/重复），cookie 类报错浮出「查看解决办法」链接开 `CookieGuideDialog`；任一任务忙（`_any_busy`）时卸载/检查更新被挡。默认关闭的门禁层与传输同款（复用 `#transferGate`/`#transferHint`/`#gateHelpBtn`/`#setSave` QSS）；开启是异步的（门禁层显示组件下载进度），失败切「不可用」形态并经 `enabled_changed(False)` 弹回设置窗勾选；`video_autostart=False`（ZBOX_SHOT）时不下组件不盖门禁层；cookie 类报错（`video_dl.is_cookie_error`）在状态行右侧浮出「查看解决办法」链接，点开 `CookieGuideDialog` 四步引导（装导出扩展 → 刷 douyin.com → 导出 cookies.txt → 弹窗内导入/移除；弹窗开头有风控警示——2026-09 起抖音详情接口要网页端实时签名 uifid + x-secsdk-web-signature，yt-dlp 上游未实现，导入 cookie 也解析不了抖音，报错文案按 `has_cookies()` 分两态）
@@ -101,8 +101,8 @@ Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyS
 - `themes.py` — 两套主题 QSS（深色 `nocturne` / 浅色 `mica`）加 `auto` 伪主题；`%CN%`/`%NUM%` 为字体占位符
 - `version.py` — 版本号唯一来源：关于窗、设置窗左下角、安装向导、卸载注册表项共用 `APP_VERSION`，发版只改这一个文件
 - `sysutil.py` — 注册表集成：开机自启、桌面右键菜单、应用列表卸载项（默认 HKCU，免管理员）
-- `screenshot.py` — QQ 风格截图：全屏灰罩遮罩（`ShotOverlay`）、框选/8 手柄调整、矩形/椭圆/文字标注（颜色 + 反色）、导出复制/保存/钉图、滚动截长图（`_LongChrome` 灰罩 + 轮廓 + 缩略预览；「自动下滚」借鉴 SnowShot 直投 WM_MOUSEWHEEL；`_WheelGuard` 手动限长/自动期回退检测 + Esc 拦截）；`HotkeyManager` 全局热键
-- `pinshot.py` — 钉图窗 `PinWindow`：置顶无边框贴图，拖拽移动、双击关闭，不持久化
+- `screenshot.py` — QQ 风格截图：全屏灰罩遮罩（`ShotOverlay`）、框选/8 手柄调整（框选后点选区外灰罩无反应，防误点毁标注，右键清空才能重框）、矩形/椭圆/文字标注（颜色 + 反色 + 多行）、导出复制/保存/钉图、滚动截长图（`_LongMask` 静态灰罩 + `_LongChrome` 轮廓 + 缩略预览；「自动下滚」借鉴 SnowShot 直投 WM_MOUSEWHEEL；`_WheelGuard` 手动限长/自动期回退检测 + Esc 拦截）；`HotkeyManager` 全局热键
+- `pinshot.py` — 钉图窗 `PinWindow`：置顶无边框贴图，拖拽移动、滚轮等比缩放（窗口中心为锚点，0.1–10 倍）、双击关闭，不持久化
 - `installer.py` — 安装向导（选项/进度/完成页）与卸载向导（可选删除个人数据）；供 setup exe（安装）与程序本体 `--uninstall`（卸载）共用
 - `install.py` — 源码方式的系统集成（只装开机自启）
 - `setup.pyw` — 安装包入口：build.py 把它打成 onefile exe，内嵌 onedir 本体为 payload，双击弹安装向导
@@ -144,7 +144,7 @@ cd harmony && hvigorw assembleHap          :: 构建鸿蒙 HAP（需 DevEco Stud
 set ZBOX_SHOT=designs\verify && python main.pyw   :: 截图自检
 ```
 
-自检导出两主题全界面约 51 张场景截图（面板四 tab / 顶部栏展开 / 各弹窗 / 格子各形态 / 安装卸载向导）
+自检导出两主题全界面约 53 张场景截图（面板四 tab / 顶部栏展开 / 各弹窗 / 格子各形态 / 安装卸载向导）
 后自动退出，改 UI / 主题 / 布局后必跑。截图 harness 在 `selfshot.py`：冻结时间源 + 注入示例数据
 （结束还原，不落盘用户配置）+ 离屏渲染；自检模式下不创建格子、不起传输服务、不注册截图热键、
 不跑节假日自动更新（防网络不确定性与配置写盘）。前后版本对比用
@@ -420,8 +420,25 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
   所以即使遮罩键鼠全被挡死，再按热键也一定能退出。
 - **键盘**：全屏 Tool 窗未必拿得到焦点，遮罩与长图控制条都在 `showEvent` 里
   `grabKeyboard()`（Esc/Enter/Ctrl+Z 才可靠），`closeEvent` 里配对 release。
-- **标注**：shapes 列表（rect/ellipse/text × 颜色 × 档位 × invert），QPainter 画在
+  **文字编辑器打开期间必须 releaseKeyboard、提交/取消后抓回**：grab 会把窗口级键事件
+  重定向给遮罩——Delete/Backspace/方向键全失灵、Enter 误触发 `_finish_copy` 直接完成截图
+  （中文输入走输入法事件不受 grab 影响，"能打字但按键全坏"就是这个特征）。
+- **标注**：shapes 列表（rect/ellipse/text × 颜色 × 滑动条粗细/字号 × invert——
+  反色按钮只有文字工具可见），QPainter 画在
   底图副本上；导出时按选区矢量重绘一遍（dpr 取覆盖屏幕最大值），撤销 = pop。
+  已有标注都可再点选：文字（多行，Enter 换行，编辑器随行数长高；`_hit_text` 命中框与 `_draw_shape` 外框一致，
+  都由 `_text_block` 度量）点击未拖动 = 进编辑
+  （内容回填、字号/颜色/反色同步进工具条，清空内容即删除；编辑中点反色/换颜色即时回填
+  编辑器样式不等提交——`_style_editor`；反色底色贴最长行宽、空文字不给色块——`_editor_wh`）；
+  点击别处只提交输入框——
+  FocusOut 提交时置 `_eat_press`，随即送达遮罩的那一按吞掉（不会在落点又弹新输入框），
+  无后续点击时 singleShot(0) 兜底清标志；矩形/椭圆（`_hit_shape` 描边带
+  ±4px 容差；椭圆必须按归一化距离 `|d-1|·min(a,b)` 判定——外接矩形描边带会在斜角处落空
+  （椭圆轮廓除四个极点外都在矩形内侧，线上选不中、偏一点反而选中，2026-10 实测））点击/拖动后选中进编辑（`_edit_shape`：颜色/线宽回填工具条，
+  调色板与滑动条直接改它；选中态画 1px 虚线框 + 8 个缩放手柄，拖手柄走 `shape_resize` 缩放、
+  最小边长 6px，换工具/画新的/撤销时清掉选中）；三者拖动都钳在选区内（`text_move` /
+  `shape_move`）；光标引导：悬停已有标注变回普通箭头、手柄上为对应缩放样式
+  （`_update_cursor` 命中手柄优先于标注命中）。
 - **主题**：调色板 `PALETTES` 按 `resolve_theme(cfg.theme)` 二选一（nocturne 琥珀 /
   mica 蓝），工具条 QSS 现拼，不进 themes.py 的面板 QSS 体系。
 - **全局热键**：`HotkeyManager` 用 `RegisterHotKey(HWND=None)`（走线程消息队列，
@@ -429,7 +446,8 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
   裸键只放行 F1-F12/PrintScreen；设置窗修改后 `apply()` 即时注销重注册，
   失败文案显示在设置窗「截图」行右侧。
 - **截长图**：进长图模式**必须 hide() 遮罩本体**（它画的是冻结底图，留着会污染抓帧）；
-  灰罩改由 `_LongChrome` 全屏贴出（半透明点击穿透、选区裁剪留空透出活页面），
+  灰罩由 `_LongMask` 全屏贴出（半透明点击穿透、选区裁剪留空透出活页面，静态只画一次——
+  全屏分层窗每次 repaint 都整窗上传 DWM，把预览动画放进去会卡到鼠标移动，2026-10 实测），
   之后默认用户手动滚轮（守卫令牌桶限速），或点控制条「自动下滚」自动滚动目标页面
   （借鉴 SnowShot：找选区中心处最上层的可滚窗口——z 序跳过本进程与穿透遮罩、逐级下钻
   子窗口——定时 `PostMessageW` 直投 WM_MOUSEWHEEL 一格/320ms，不动用户光标；
@@ -438,7 +456,7 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
   匹配是两阶段（`_find_shift`）：整行均值粗筛前 5 个候选 → 行内 8 桶均值复核，
   同分取最小位移，且搜索范围限半帧以内——列表页行高一致、整行均值周期性撞车，
   单靠行均值或大位移窄重叠区会锁错对齐（错开整数个行高），把已拼内容当新内容拼出重复段。
-  取景框轮廓与缩略预览同样由 `_LongChrome` 贴出：描边外扩 2px 完全落在选区外
+  取景框轮廓与缩略预览由小窗 `_LongChrome` 贴出（轮廓 ∪ 预览，动画 repaint 只碰小窗）：描边外扩 2px 完全落在选区外
   （抓帧不受污染）、`WA_TransparentForMouseEvents` 鼠标穿透、
   预览放选区右侧（放不下换左侧，都放不下不显示）、高度随拼接向下延伸、
   顶到屏幕工作区底边后截顶只展示最新部分；完成只进剪贴板（不弹保存框）。

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """钉图：把截图钉在桌面上的无边框贴图窗（Snipaste F3 / QQ 钉在桌面同款）。
-拖拽移动、双击关闭；置顶 Tool 窗——故意不挂桌面带（挂带会被应用窗口压住，
+拖拽移动、滚轮等比缩放、双击关闭；置顶 Tool 窗——故意不挂桌面带（挂带会被应用窗口压住，
 贴图的意义就是浮在最上面随时对照）；不持久化，进程退出即消失。"""
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPainter, QColor, QPen
@@ -17,12 +17,13 @@ class PinWindow(QWidget):
                                         | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_DeleteOnClose)
         self.setCursor(Qt.SizeAllCursor)
-        self.setToolTip('拖拽移动 · 双击关闭')
         self._img = image
         self._border = QColor(border_color)
         dpr = image.devicePixelRatio() or 1.0
-        self.resize(max(1, int(round(image.width() / dpr))),
-                    max(1, int(round(image.height() / dpr))))
+        self._base_w = max(1, int(round(image.width() / dpr)))
+        self._base_h = max(1, int(round(image.height() / dpr)))
+        self._scale = 1.0
+        self.resize(self._base_w, self._base_h)
         self.move(pos)
         self._drag = None
         self.destroyed.connect(self._forget)
@@ -33,6 +34,7 @@ class PinWindow(QWidget):
 
     def paintEvent(self, e):
         p = QPainter(self)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)   # 滚轮缩放后重采样不发虚
         p.drawImage(self.rect(), self._img)
         p.setPen(QPen(self._border, 1))
         p.drawRect(self.rect().adjusted(0, 0, -1, -1))
@@ -61,6 +63,21 @@ class PinWindow(QWidget):
             self.close()   # 双击关闭（QQ 同款）
         else:
             super(PinWindow, self).mouseDoubleClickEvent(e)
+
+    def wheelEvent(self, e):
+        """悬停滚轮 = 以窗口中心为锚点等比缩放（长宽同倍率，不变形）。"""
+        d = e.angleDelta().y()
+        if not d:
+            return
+        s = min(max(self._scale * 1.25 ** (d / 120.0), 0.1), 10.0)
+        if s == self._scale:
+            return
+        self._scale = s
+        w = max(1, int(round(self._base_w * s)))
+        h = max(1, int(round(self._base_h * s)))
+        c = self.geometry().center()
+        self.setGeometry(c.x() - w // 2, c.y() - h // 2, w, h)
+        e.accept()
 
 
 def pin(image, pos, border_color):

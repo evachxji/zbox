@@ -25,9 +25,9 @@ QFrame#titlebar { background: #1e2028; }
 QFrame#tabBox { background: transparent; }
 QToolButton#tab {
     background: transparent; border: none; border-bottom: 2px solid transparent;
-    color: #7d7a72; font: 600 13px "%CN%"; padding: 4px 2px 5px;
+    color: #7d7a72; font: 600 13px "%CN%"; padding: 6px 2px 4px;
 }
-QToolButton#tab[active="true"] { color: #f0ede6; border-bottom: 2px solid #e8a33d; }
+QToolButton#tab[active="true"] { color: #e8a33d; border-bottom: 2px solid #e8a33d; }
 QToolButton#closeBtn {
     background: transparent; border: none; border-radius: 6px; color: #7d7a72; font: 12px "%CN%";
 }
@@ -339,7 +339,7 @@ QToolButton#tab {
     background: transparent; border: none; border-radius: 6px;
     color: #5b5b60; font: 600 12px "%CN%"; padding: 5px 10px;
 }
-QToolButton#tab[active="true"] { background: #ffffff; color: #1b1b1f; border: 1px solid rgba(0,0,0,10); }
+QToolButton#tab[active="true"] { background: #ffffff; color: #e8a33d; border: 1px solid rgba(0,0,0,10); }
 QToolButton#closeBtn {
     background: transparent; border: none; border-radius: 6px; color: #5b5b60; font: 12px "%CN%";
 }

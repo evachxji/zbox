@@ -5,10 +5,11 @@
   （nocturne 深色磨砂 / mica 浅色磨砂）现拼，不进 themes.py 的面板 QSS 体系。
 - 全局热键 HotkeyManager：ctypes RegisterHotKey + QAbstractNativeEventFilter 收
   WM_HOTKEY；配置为空 = 不注册；apply() 即时注销重注册。
-- 截长图：灰罩不切走——选区外保持灰罩、选区留空透出活页面（抓帧抓合成屏，
-  选区内画任何东西都会污染拼接帧）；自动滚动（PostMessageW 直投 WM_MOUSEWHEEL）
-  驱动页面，滚轮被守卫全部吞掉只作调速；定时器抓选区帧、按行签名纵向拼接；
-  ✓ 完成导出，Esc 退出（键盘钩子拦截）。
+- 截长图：灰罩由静态全屏窗 _LongMask 贴出（选区裁剪留空透出活页面——抓帧抓
+  合成屏，选区内画任何东西都会污染拼接帧；全屏分层窗只画一次，会动的内容
+  放进来每次 repaint 整窗上传 DWM 会卡鼠标）；默认手动滚轮（守卫令牌桶限速），
+  或点「自动下滚」由 PostMessageW 直投 WM_MOUSEWHEEL 驱动页面；定时器抓选区帧、
+  按行签名纵向拼接；✓ 完成导出，Esc 退出（键盘钩子拦截）。
 """
 import ctypes
 import io
@@ -24,7 +25,7 @@ from PySide6.QtCore import (Qt, QRect, QRectF, QPoint, QPointF, QSize, QTimer, Q
 from PySide6.QtGui import (QPainter, QColor, QPen, QPixmap, QImage, QFont, QFontMetrics,
                          QKeySequence, QPainterPath, QCursor, QGuiApplication, QIcon, QRegion)
 from PySide6.QtWidgets import (QWidget, QApplication, QFrame, QHBoxLayout, QToolButton,
-                             QLabel, QLineEdit, QPushButton, QFileDialog)
+                             QLabel, QPlainTextEdit, QPushButton, QFileDialog, QSlider)
 
 import app as ui          # sc / ui_scale / pick_fonts / resolve_theme
 import pinshot
@@ -61,8 +62,8 @@ _u32.PostThreadMessageW.argtypes = [wintypes.DWORD, wintypes.UINT,
 
 MASK_COLOR = QColor(0, 0, 0, 120)          # 灰罩
 DOT_COLORS = ['#ff4d4f', '#ff9f1a', '#ffd54a', '#35c759', '#2f9bff', '#ffffff']
-SHAPE_W = {'s': 2.0, 'm': 3.5, 'l': 5.0}   # 矩形/椭圆线宽（逻辑 px）
-TEXT_PX = {'s': 13, 'm': 16, 'l': 20}      # 文字字号（逻辑 px）
+STROKE_RANGE = (1, 10)     # 矩形/椭圆线宽滑动条量程（逻辑 px）
+TEXT_RANGE = (10, 32)        # 文字字号滑动条量程（逻辑 px）
 HANDLES = ('nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w')
 MIN_SEL = 4                                # 小于这个尺寸视为误点，不成选区
 LONG_MAX_H = 30000                         # 长图物理像素上限，超出自动完成
@@ -71,7 +72,7 @@ LONG_MAX_H = 30000                         # 长图物理像素上限，超出�
 PALETTES = {
     'nocturne': {
         'accent': '#e8a33d', 'accent_text': '#1a1610', 'accent_soft': 'rgba(232,163,61,40)',
-        'accent_border': 'rgba(232,163,61,128)', 'bar_solid': '#1b1d24',
+        'accent_border': 'rgba(232,163,61,128)',
         'bar_bg': 'rgba(27,29,36,242)', 'bar_border': 'rgba(255,255,255,18)',
         'icon': '#7d7a72', 'icon_hov_bg': 'rgba(255,255,255,20)',
         'sep': 'rgba(255,255,255,26)',
@@ -81,7 +82,7 @@ PALETTES = {
     },
     'mica': {
         'accent': '#0067c0', 'accent_text': '#ffffff', 'accent_soft': 'rgba(0,103,192,30)',
-        'accent_border': 'rgba(0,103,192,115)', 'bar_solid': '#f7f8fa',
+        'accent_border': 'rgba(0,103,192,115)',
         'bar_bg': 'rgba(247,248,250,245)', 'bar_border': 'rgba(0,0,0,23)',
         'icon': '#8a8a90', 'icon_hov_bg': 'rgba(0,0,0,15)',
         'sep': 'rgba(0,0,0,30)',
@@ -92,7 +93,7 @@ PALETTES = {
 }
 
 
-def _icon(kind, color, fill=None):
+def _icon(kind, color):
     """工具条线性图标：24 虚拟网格矢量绘制（对齐 app.make_cal_icon 的画法）。"""
     s = ui.sc(20)
     pm = QPixmap(s, s)
@@ -111,22 +112,17 @@ def _icon(kind, color, fill=None):
         p.drawLine(QPointF(5, 6.5), QPointF(19, 6.5))
         p.drawLine(QPointF(12, 6.5), QPointF(12, 18))
         p.drawLine(QPointF(9, 18), QPointF(15, 18))
-    elif kind == 'undo':
-        path = QPainterPath(QPointF(8.5, 7))
-        path.lineTo(QPointF(4.5, 11))
-        path.lineTo(QPointF(8.5, 15))
-        p.drawPath(path)
-        path = QPainterPath(QPointF(4.5, 11))
-        path.lineTo(QPointF(13, 11))
-        path.arcTo(QRectF(7.5, 11, 11, 11), 90, -180)
-        path.lineTo(QPointF(10, 22))
-        p.drawPath(path)
     elif kind == 'long':
         p.drawRoundedRect(QRectF(8, 3.5, 8, 6), 1, 1)
         p.drawRoundedRect(QRectF(8, 14.5, 8, 6), 1, 1)
         p.setPen(QPen(QColor(color), 1.5, Qt.DashLine, Qt.RoundCap))
         p.drawLine(QPointF(9, 12), QPointF(15, 12))
     elif kind == 'pin':
+        # 斜 45° 图钉（大头朝右上、针尖朝左下）——竖直的钉子和下载箭头撞脸
+        p.save()
+        p.translate(12, 12)
+        p.rotate(45)
+        p.translate(-12, -12)
         path = QPainterPath(QPointF(9.5, 4))
         path.lineTo(QPointF(14.5, 4))
         path.lineTo(QPointF(13.7, 9.2))
@@ -138,16 +134,12 @@ def _icon(kind, color, fill=None):
         path.closeSubpath()
         p.drawPath(path)
         p.drawLine(QPointF(12, 14), QPointF(12, 20))
+        p.restore()
     elif kind == 'save':
         p.drawLine(QPointF(12, 4), QPointF(12, 13.5))
         p.drawLine(QPointF(7.5, 10), QPointF(12, 14.5))
         p.drawLine(QPointF(16.5, 10), QPointF(12, 14.5))
         p.drawLine(QPointF(5, 19.5), QPointF(19, 19.5))
-    elif kind == 'copy':
-        p.drawRoundedRect(QRectF(4, 4, 11, 11), 1.5, 1.5)
-        if fill:
-            p.setBrush(QColor(fill))
-        p.drawRoundedRect(QRectF(9, 9, 11, 11), 1.5, 1.5)
     elif kind == 'close':
         p.drawLine(QPointF(6.5, 6.5), QPointF(17.5, 17.5))
         p.drawLine(QPointF(17.5, 6.5), QPointF(6.5, 17.5))
@@ -180,8 +172,10 @@ QPushButton#shotGhost:hover { background: %(icon_hov_bg)s; }
 QFrame#shotSep { background: %(sep)s; }
 QToolButton#shotDot { border-radius: 8px; border: 2px solid %(dot_ring)s; }
 QToolButton#shotDot[on="true"] { border-color: %(dot_ring_on)s; }
-QToolButton#shotSz { background: transparent; border: none; border-radius: 4px; color: %(icon)s; font: 600 11px "%(num)s"; }
-QToolButton#shotSz[on="true"] { background: %(accent_soft)s; color: %(accent)s; }
+QSlider#shotSlider::groove:horizontal { height: 4px; background: %(sep)s; border-radius: 2px; }
+QSlider#shotSlider::sub-page:horizontal { background: %(accent)s; border-radius: 2px; }
+QSlider#shotSlider::handle:horizontal { width: 12px; margin: -5px 0; border-radius: 6px; background: %(icon)s; }
+QSlider#shotSlider::handle:horizontal:hover { background: %(accent)s; }
 QToolButton#shotInvert {
     background: transparent; border: 1px solid %(accent_border)s; border-radius: 11px;
     color: %(accent)s; font: 600 11px "%(cn)s"; padding: 0 10px;
@@ -200,6 +194,12 @@ def _contrast(color):
     c = QColor(color)
     lum = (0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()) / 255.0
     return '#1a1610' if lum > 0.55 else '#ffffff'
+
+
+def _text_block(text, fm):
+    """多行文字度量：(各行, 最大行宽, 总高)。绘制与命中检测共用，保证外框一致。"""
+    lines = text.split('\n')
+    return lines, max(fm.horizontalAdvance(ln) for ln in lines), fm.height() * len(lines)
 
 # ---------------- 长图拼接：行签名匹配 ----------------
 
@@ -327,10 +327,33 @@ class _LongBar(QWidget):
 # ---------------- 截图会话 ----------------
 
 
+class _LongMask(QWidget):
+    """截长图期间的灰罩：全屏半透明窗把选区外压暗，选区裁剪留空透出活页面
+    （抓帧抓的是合成屏，选区内画任何东西都会污染拼接帧）。
+    静态内容只画一次、永不 update——别把会动的内容放进来：全屏分层窗每次
+    repaint 都整窗上传 DWM，移动鼠标都会卡（2026-10 实测教训）。"""
+
+    def __init__(self, sel_g, vg, parent=None):
+        super(_LongMask, self).__init__(parent, Qt.FramelessWindowHint | Qt.Tool
+                                        | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WA_DeleteOnClose)
+        self._sel = sel_g.translated(-vg.topLeft())
+        self.setGeometry(vg)
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setClipRegion(QRegion(self.rect()).subtracted(QRegion(self._sel)))
+        p.fillRect(self.rect(), MASK_COLOR)
+        p.end()
+
+
 class _LongChrome(QWidget):
-    """截长图期间的全屏灰罩 + 取景框轮廓 + 缩略预览：纯展示（鼠标穿透、不抢焦点）。
-    灰罩把选区裁剪留空，活页面直接透出——抓帧抓的是合成屏，选区内画任何东西都会
-    污染拼接帧；轮廓描边外扩 2px 完全落在选区外；预览放选区右侧
+    """截长图期间的取景框轮廓 + 缩略预览：纯展示（鼠标穿透、不抢焦点、不入镜）。
+    灰罩在独立的 _LongMask（静态全屏窗）；本窗保持小（轮廓 ∪ 预览），动画只碰小窗。
+    轮廓描边外扩 2px 完全落在选区外；预览放选区右侧
     （放不下换左侧，两侧都放不下则不显示预览），顶到屏幕底边或完成按钮条顶边
     （按钮与缩略图不能互相遮挡，让不出空间就不显示预览）后截顶只展示最新部分。
     窗口几何固定（轮廓 ∪ 预览满高区域），延伸动画只 repaint 不动窗口——
@@ -339,7 +362,7 @@ class _LongChrome(QWidget):
     _TW = 160          # 预览宽（逻辑 px）
     _GAP = 8           # 预览与选区间距（逻辑 px）
 
-    def __init__(self, sel_g, pal, avoid_g=None, vg=None, parent=None):
+    def __init__(self, sel_g, pal, avoid_g=None, parent=None):
         super(_LongChrome, self).__init__(parent, Qt.FramelessWindowHint | Qt.Tool
                                           | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
@@ -368,15 +391,12 @@ class _LongChrome(QWidget):
                 self._max_h = avoid_g.top() - gap - self._ring_g.top()
                 if self._max_h < ui.sc(60):
                     self._side = None   # 让完太小：不显示预览
-        # 几何一次算死后不再变：全屏虚拟桌面（灰罩要罩住选区外所有区域）
-        if vg is None:
-            vg = QRect()
-            for scr_ in QGuiApplication.screens():
-                vg = vg.united(scr_.geometry())
-        geo = QRect(vg)
+        # 几何一次算死后不再变：轮廓 ∪ 预览满高区域（灰罩是独立的 _LongMask）
+        geo = QRect(self._ring_g)
         self._prev = None
         if self._side:
             self._prev = QRect(x, self._ring_g.top(), tw, self._max_h)
+            geo = geo.united(self._prev)
         self.setGeometry(geo)
         self._ring = self._ring_g.translated(-geo.topLeft())
         if self._prev is not None:
@@ -431,11 +451,6 @@ class _LongChrome(QWidget):
 
     def paintEvent(self, e):
         p = QPainter(self)
-        # 选区外灰罩；选区留空透出活页面（抓帧区域，这里画任何东西都会入镜）
-        p.setClipRegion(QRegion(self.rect()).subtracted(
-            QRegion(self._ring.adjusted(2, 2, -2, -2))))
-        p.fillRect(self.rect(), MASK_COLOR)
-        p.setClipping(False)
         p.setRenderHint(QPainter.Antialiasing)
         p.setPen(QPen(QColor(self._pal['sel']), 2))
         p.setBrush(Qt.NoBrush)
@@ -676,12 +691,15 @@ class ShotOverlay(QWidget):
         self._drag = None          # (种类, 附加数据)
         self._sel = QRect()
         self._shapes = []          # 已完成的标注
+        self._edit_shape = None    # 选中进编辑的图形（调色板/滑动条直接改它）
         self._cur = None           # 绘制中的矩形/椭圆
         self._tool = None          # None / rect / ellipse / text
         self._color = DOT_COLORS[0]
-        self._size = 'm'
+        self._stroke = 4        # 矩形/椭圆线宽（滑动条）
+        self._text_size = 16    # 文字字号（滑动条）
         self._invert = False
-        self._editor = None        # (QLineEdit, QPointF 落点)
+        self._editor = None        # (QPlainTextEdit, QPointF 落点)
+        self._eat_press = False      # 点击别处关输入框的那一按只保存、不触发新动作
         self._long = None          # 长图模式状态 dict
 
         self._idle_timer = QTimer(self)   # 无框选兜底：灰罩晾着 IDLE_TIMEOUT_MS 自动退出
@@ -715,19 +733,14 @@ class ShotOverlay(QWidget):
         lay.setContentsMargins(ui.sc(6), ui.sc(6), ui.sc(6), ui.sc(6))
         lay.setSpacing(2)
         self._tool_btns = {}
-        for kind, tip in (('rect', '矩形'), ('ellipse', '椭圆'), ('text', '文字'),
-                          ('undo', '撤销 (Ctrl+Z)')):
+        for kind, tip in (('rect', '矩形'), ('ellipse', '椭圆'), ('text', '文字')):
             b = self._mk_btn(kind, tip, lay)
-            if kind != 'undo':
-                self._tool_btns[kind] = b
-                b.clicked.connect(lambda _=False, k=kind: self._set_tool(k))
-            else:
-                b.clicked.connect(self._undo)
+            self._tool_btns[kind] = b
+            b.clicked.connect(lambda _=False, k=kind: self._set_tool(k))
         lay.addWidget(self._sep())
         for kind, tip, fn in (('long', '截长图', self._start_long),
                               ('pin', '钉在桌面', self._finish_pin),
-                              ('save', '保存', self._finish_save),
-                              ('copy', '复制到剪贴板', self._finish_copy)):
+                              ('save', '保存', self._finish_save)):
             b = self._mk_btn(kind, tip, lay)
             b.clicked.connect(fn)
         lay.addWidget(self._sep())
@@ -762,19 +775,18 @@ class ShotOverlay(QWidget):
             sl.addWidget(d)
             self._dots.append((c, d))
         sl.addWidget(self._sep())
-        self._sz_btns = {}
-        for k, t in (('s', 'S'), ('m', 'M'), ('l', 'L')):
-            b = QToolButton()
-            b.setObjectName('shotSz')
-            b.setText(t)
-            b.setFixedSize(ui.sc(24), ui.sc(22))
-            b.setCursor(Qt.PointingHandCursor)
-            b.setFocusPolicy(Qt.NoFocus)
-            b.setProperty('on', 'true' if k == self._size else 'false')
-            b.clicked.connect(lambda _=False, kk=k: self._set_size(kk))
-            sl.addWidget(b)
-            self._sz_btns[k] = b
-        sl.addWidget(self._sep())
+        self._size_slider = QSlider(Qt.Horizontal)
+        self._size_slider.setObjectName('shotSlider')
+        self._size_slider.setFixedSize(ui.sc(90), ui.sc(22))
+        self._size_slider.setCursor(Qt.PointingHandCursor)
+        self._size_slider.setFocusPolicy(Qt.NoFocus)
+        self._size_slider.setRange(*STROKE_RANGE)
+        self._size_slider.setValue(self._stroke)
+        self._size_slider.setToolTip('粗细 / 字号')
+        self._size_slider.valueChanged.connect(self._slider_changed)
+        sl.addWidget(self._size_slider)
+        self._sep2 = self._sep()
+        sl.addWidget(self._sep2)
         self._invert_btn = QToolButton()
         self._invert_btn.setObjectName('shotInvert')
         self._invert_btn.setText('Aa 反色')
@@ -813,7 +825,7 @@ class ShotOverlay(QWidget):
                 continue
             on = b.property('on') == 'true'
             color = p['accent'] if on else p['icon']
-            b.setIcon(QIcon(_icon(kind, color, fill=p['bar_solid'])))
+            b.setIcon(QIcon(_icon(kind, color)))
             b.setIconSize(QSize(ui.sc(16), ui.sc(16)))
 
     # ---------- 状态操作 ----------
@@ -821,38 +833,69 @@ class ShotOverlay(QWidget):
     def _set_tool(self, t):
         if self._editor:
             self._commit_editor()
+        self._edit_shape = None
         self._tool = None if self._tool == t else t
         for k, b in self._tool_btns.items():
             b.setProperty('on', 'true' if k == self._tool else 'false')
             b.style().unpolish(b)
             b.style().polish(b)
-        self._invert_btn.setEnabled(self._tool == 'text')
+        is_text = self._tool == 'text'
+        self._invert_btn.setVisible(is_text)   # 反色只有文字工具才有
+        self._sep2.setVisible(is_text)
+        self._size_slider.blockSignals(True)   # 滑动条随工具换量程：图形 = 线宽，文字 = 字号
+        if is_text:
+            self._size_slider.setRange(*TEXT_RANGE)
+            self._size_slider.setValue(self._text_size)
+        else:
+            self._size_slider.setRange(*STROKE_RANGE)
+            self._size_slider.setValue(self._stroke)
+        self._size_slider.blockSignals(False)
         self._refresh_icons()
         self._update_chrome()
         self._update_cursor(QCursor.pos())
 
+    def _select_shape(self, sh):
+        """选中图形进编辑：颜色/线宽回填工具条，之后调色板/滑动条直接改它。"""
+        self._edit_shape = sh
+        self._set_color(sh['color'])
+        self._stroke = int(round(sh['w']))
+        self._size_slider.blockSignals(True)
+        self._size_slider.setValue(self._stroke)
+        self._size_slider.blockSignals(False)
+
     def _set_color(self, c):
         self._color = c
+        if self._edit_shape is not None:
+            self._edit_shape['color'] = c
+            self.update()
         for cc, d in self._dots:
             d.setProperty('on', 'true' if cc == c else 'false')
             d.style().unpolish(d)
             d.style().polish(d)
+        if self._editor:   # 编辑中换颜色同样立刻生效
+            self._style_editor(self._editor[0])
 
-    def _set_size(self, k):
-        self._size = k
-        for kk, b in self._sz_btns.items():
-            b.setProperty('on', 'true' if kk == k else 'false')
-            b.style().unpolish(b)
-            b.style().polish(b)
+    def _slider_changed(self, v):
+        if self._tool == 'text':
+            self._text_size = v
+        else:
+            self._stroke = v
+            if self._edit_shape is not None:
+                self._edit_shape['w'] = float(v)
+                self.update()
 
     def _toggle_invert(self):
         self._invert = not self._invert
         self._invert_btn.setProperty('on', 'true' if self._invert else 'false')
         self._invert_btn.style().unpolish(self._invert_btn)
         self._invert_btn.style().polish(self._invert_btn)
+        if self._editor:   # 编辑中点反色立刻生效，不等提交
+            self._style_editor(self._editor[0])
+            self._fit_editor(self._editor[0], self._editor[0].pos())
 
     def _undo(self):
         if self._shapes:
+            self._edit_shape = None
             self._shapes.pop()
             self.update()
 
@@ -874,6 +917,15 @@ class ShotOverlay(QWidget):
                 self._draw_shape(p, sh)
             if self._cur:
                 self._draw_shape(p, self._cur)
+            if self._edit_shape is not None and self._edit_shape in self._shapes:
+                p.setPen(QPen(QColor(self.pal['sel']), 1, Qt.DashLine))
+                p.setBrush(Qt.NoBrush)
+                p.drawRect(self._edit_shape['rect'].adjusted(-4, -4, 4, 4))
+                if self._edit_shape['kind'] in ('rect', 'ellipse'):
+                    p.setPen(QPen(QColor(self.pal['sel']), 1))
+                    p.setBrush(QColor(self.pal['handle_bg']))
+                    for h in HANDLES:
+                        p.drawRect(self._shape_handle_rect(h))
             p.restore()
             p.setPen(QPen(QColor(self.pal['sel']), 1))
             p.setBrush(Qt.NoBrush)
@@ -895,15 +947,14 @@ class ShotOverlay(QWidget):
                 p.drawEllipse(sh['rect'])
         else:
             f = QFont(self._cn)
-            f.setPixelSize(TEXT_PX[sh['size']])
+            f.setPixelSize(sh['size'])
             p.setFont(f)
             fm = QFontMetrics(f)
-            text = sh['text']
-            w = fm.horizontalAdvance(text)
+            lines, w, h = _text_block(sh['text'], fm)
             pos = sh['pos']          # 文字外框左上角
             if sh['invert']:
                 pad, rad = 5.0, 4.0
-                r = QRectF(pos.x() - pad, pos.y() - pad, w + pad * 2, fm.height() + pad * 2)
+                r = QRectF(pos.x() - pad, pos.y() - pad, w + pad * 2, h + pad * 2)
                 path = QPainterPath()
                 path.addRoundedRect(r, rad, rad)
                 p.setPen(Qt.NoPen)
@@ -914,9 +965,11 @@ class ShotOverlay(QWidget):
                 # 亮色文字垫一层错位暗影，压在亮内容上也可读
                 if _contrast(sh['color']) == '#1a1610':
                     p.setPen(QColor(0, 0, 0, 170))
-                    p.drawText(QPointF(pos.x() + 1, pos.y() + fm.ascent() + 1), text)
+                    for i, ln in enumerate(lines):
+                        p.drawText(QPointF(pos.x() + 1, pos.y() + i * fm.height() + fm.ascent() + 1), ln)
                 p.setPen(col)
-            p.drawText(QPointF(pos.x(), pos.y() + fm.ascent()), text)
+            for i, ln in enumerate(lines):
+                p.drawText(QPointF(pos.x(), pos.y() + i * fm.height() + fm.ascent()), ln)
 
     def _handle_rect(self, h):
         s = ui.sc(7)
@@ -930,6 +983,73 @@ class ShotOverlay(QWidget):
             x = xm[h]      # n/s/e/w：另一轴取中线
             y = ym[h]
         return QRect(int(x - s / 2), int(y - s / 2), s, s)
+
+    def _shape_handle_rect(self, h):
+        s = ui.sc(7)
+        r = self._edit_shape['rect']
+        xm = {'w': r.left(), 'e': r.right(), 'n': r.center().x(), 's': r.center().x()}
+        ym = {'n': r.top(), 's': r.bottom(), 'w': r.center().y(), 'e': r.center().y()}
+        if len(h) == 2:
+            x, y = xm[h[1]], ym[h[0]]
+        else:
+            x, y = xm[h], ym[h]
+        return QRect(int(x - s / 2), int(y - s / 2), s, s)
+
+    def _hit_shape_handle(self, pos):
+        """选中图形的缩放手柄命中（仅当工具与图形同类）。"""
+        sh = self._edit_shape
+        if sh is None or sh['kind'] not in ('rect', 'ellipse') or sh['kind'] != self._tool:
+            return None
+        grow = ui.sc(5)
+        for h in HANDLES:
+            if self._shape_handle_rect(h).adjusted(-grow, -grow, grow, grow).contains(pos):
+                return h
+        return None
+
+    def _shape_fixed_point(self, h):
+        r = self._edit_shape['rect']
+        fx = r.right() if 'w' in h else (r.left() if 'e' in h else r.center().x())
+        fy = r.bottom() if 'n' in h else (r.top() if 's' in h else r.center().y())
+        return QPointF(fx, fy)
+
+    def _hit_shape(self, pos, kind):
+        """图形工具点按的命中检测：返回最上层的 kind 图形（描边带容差，无则 None）。
+        矩形用外接矩形描边带；椭圆按归一化距离（外接矩形带会在斜角处落空——
+        椭圆轮廓除四个极点外都在矩形内侧，线上选不中、偏一点反而选中）。"""
+        p = QPointF(pos)
+        for sh in reversed(self._shapes):
+            if sh['kind'] != kind:
+                continue
+            m = max(4.0, sh['w'] / 2 + 3)
+            r = sh['rect']
+            if sh['kind'] == 'ellipse':
+                a, b = r.width() / 2, r.height() / 2
+                if a < 1 or b < 1:
+                    continue
+                nx = (p.x() - r.center().x()) / a
+                ny = (p.y() - r.center().y()) / b
+                d = (nx * nx + ny * ny) ** 0.5
+                if abs(d - 1) * min(a, b) <= m:
+                    return sh
+            elif r.adjusted(-m, -m, m, m).contains(p) and not r.adjusted(m, m, -m, -m).contains(p):
+                return sh
+        return None
+
+    def _hit_text(self, pos):
+        """文字工具点按的命中检测：返回最上层的文字标注（无则 None）。
+        命中框与 _draw_shape 的外框一致（invert 带 5px 垫色边距）。"""
+        for sh in reversed(self._shapes):
+            if sh['kind'] != 'text':
+                continue
+            f = QFont(self._cn)
+            f.setPixelSize(sh['size'])
+            fm = QFontMetrics(f)
+            pad = 5.0 if sh['invert'] else 0.0
+            _lines, w, h = _text_block(sh['text'], fm)
+            r = QRectF(sh['pos'].x() - pad, sh['pos'].y() - pad, w + pad * 2, h + pad * 2)
+            if r.contains(QPointF(pos)):
+                return sh
+        return None
 
     def _hit_handle(self, pos):
         if self._mode != 'ready':
@@ -946,6 +1066,9 @@ class ShotOverlay(QWidget):
         if self._long is not None:
             return
         pos = e.pos()
+        if self._eat_press:
+            self._eat_press = False
+            return
         if e.button() == Qt.RightButton:
             if self._editor:
                 self._cancel_editor()
@@ -965,17 +1088,37 @@ class ShotOverlay(QWidget):
                 return
             if self._tool and self._sel.contains(pos):
                 if self._tool == 'text':
-                    self._open_editor(pos)
+                    hit = self._hit_text(pos)
+                    if hit is not None:
+                        # 点到已有文字：拖动 = 移动，松手没怎么动 = 进编辑
+                        self._drag = ('text_move', (hit, QPointF(pos) - hit['pos'], QPointF(pos)))
+                    else:
+                        self._open_editor(pos)
                 else:
-                    self._cur = {'kind': self._tool, 'rect': QRectF(QPointF(pos), QPointF(pos)),
-                                 'color': self._color, 'w': SHAPE_W[self._size]}
-                    self._drag = ('draw', QPointF(pos))
+                    h = self._hit_shape_handle(pos)
+                    if h:
+                        self._drag = ('shape_resize', (h, self._shape_fixed_point(h)))
+                        return
+                    hit = self._hit_shape(pos, self._tool)
+                    if hit is not None:
+                        # 点到已有图形：拖动 = 移动，松手 = 选中进编辑
+                        r = hit['rect']
+                        self._drag = ('shape_move', (hit, QPointF(pos) - r.topLeft(), QPointF(pos)))
+                    else:
+                        self._edit_shape = None
+                        self._cur = {'kind': self._tool, 'rect': QRectF(QPointF(pos), QPointF(pos)),
+                                     'color': self._color, 'w': float(self._stroke)}
+                        self._drag = ('draw', QPointF(pos))
                 return
             if self._sel.contains(pos):
                 self._drag = ('move', pos - self._sel.topLeft())
                 return
-        # 空闲或点在选区外：重新框选（旧标注随旧选区一起作废）
+            # 已有选区时点选区外灰罩不再重新框选（误点会连选区带标注一起毁掉），
+            # 想换区域先右键清空（回 idle）再框
+            return
+        # 空闲：框选新区域
         self._shapes = []
+        self._edit_shape = None
         self._cur = None
         self._sel = QRect(pos, QSize(0, 0))
         self._mode = 'creating'
@@ -1001,6 +1144,35 @@ class ShotOverlay(QWidget):
             self._sel = self._resized(h, fixed, pos)
         elif kind == 'draw':
             self._cur['rect'] = QRectF(data, QPointF(pos)).normalized()
+        elif kind == 'text_move':
+            sh, off, _start = data
+            np = QPointF(pos) - off   # 钳在选区内
+            sh['pos'] = QPointF(min(max(np.x(), float(self._sel.left())), float(self._sel.right())),
+                                min(max(np.y(), float(self._sel.top())), float(self._sel.bottom())))
+        elif kind == 'shape_resize':
+            h, fixed = data
+            r = QRectF(self._edit_shape['rect'])
+            if len(h) == 2:
+                nr = QRectF(fixed, QPointF(pos)).normalized()
+            else:
+                nr = QRectF(r)
+                if h == 'n':
+                    nr.setTop(min(pos.y(), r.bottom() - 6))
+                elif h == 's':
+                    nr.setBottom(max(pos.y(), r.top() + 6))
+                elif h == 'w':
+                    nr.setLeft(min(pos.x(), r.right() - 6))
+                else:
+                    nr.setRight(max(pos.x(), r.left() + 6))
+            self._edit_shape['rect'] = nr
+        elif kind == 'shape_move':
+            sh, off, _start = data
+            tl = QPointF(pos) - off   # 钳在选区内
+            w, h = sh['rect'].width(), sh['rect'].height()
+            sh['rect'] = QRectF(min(max(tl.x(), float(self._sel.left())),
+                                    float(self._sel.right()) - w + 1),
+                                min(max(tl.y(), float(self._sel.top())),
+                                    float(self._sel.bottom()) - h + 1), w, h)
         self._update_chrome()
         self.update()
 
@@ -1020,6 +1192,13 @@ class ShotOverlay(QWidget):
             if r.width() >= 3 and r.height() >= 3:
                 self._shapes.append(self._cur)
             self._cur = None
+        elif kind == 'text_move':
+            sh, _off, start = _d
+            if (QPointF(e.pos()) - start).manhattanLength() < 4:
+                self._shapes.remove(sh)   # 先摘下来，提交时按工具条状态重建（清空 = 删除）
+                self._open_editor(sh['pos'].toPoint(), edit=sh)
+        elif kind == 'shape_move':
+            self._select_shape(_d[0])   # 点击/拖动后都选中：调色板、滑动条接着改
         self._arm_idle_timer()
         self._update_chrome()
         self.update()
@@ -1052,6 +1231,8 @@ class ShotOverlay(QWidget):
     def _update_cursor(self, gpos):
         pos = self.mapFromGlobal(gpos)
         h = self._hit_handle(pos)
+        if h is None and self._edit_shape is not None:
+            h = self._hit_shape_handle(pos)
         if h in ('nw', 'se'):
             cur = Qt.SizeFDiagCursor
         elif h in ('ne', 'sw'):
@@ -1061,7 +1242,9 @@ class ShotOverlay(QWidget):
         elif h in ('e', 'w'):
             cur = Qt.SizeHorCursor
         elif self._tool == 'text' and self._mode == 'ready' and self._sel.contains(pos):
-            cur = Qt.IBeamCursor
+            cur = Qt.ArrowCursor if self._hit_text(pos) else Qt.IBeamCursor
+        elif self._tool in ('rect', 'ellipse') and self._mode == 'ready' and self._sel.contains(pos):
+            cur = Qt.ArrowCursor if self._hit_shape(pos, self._tool) else Qt.CrossCursor
         elif self._mode == 'ready' and self._sel.contains(pos) and not self._tool:
             cur = Qt.SizeAllCursor
         else:
@@ -1097,40 +1280,92 @@ class ShotOverlay(QWidget):
 
     # ---------- 文字工具 ----------
 
-    def _open_editor(self, pos):
-        ed = QLineEdit(self)
+    def _open_editor(self, pos, edit=None):
+        if edit is not None:
+            # 编辑已有文字：字号/颜色/反色回填进工具条状态，提交时从状态重建
+            self._text_size = edit['size']
+            self._set_color(edit['color'])
+            self._invert = edit['invert']
+            self._invert_btn.setProperty('on', 'true' if self._invert else 'false')
+            self._invert_btn.style().unpolish(self._invert_btn)
+            self._invert_btn.style().polish(self._invert_btn)
+            self._size_slider.blockSignals(True)
+            self._size_slider.setValue(self._text_size)
+            self._size_slider.blockSignals(False)
+        ed = QPlainTextEdit(self)
+        ed.setFrameShape(QFrame.NoFrame)
+        ed.setLineWrapMode(QPlainTextEdit.NoWrap)   # 不换行：所见即所得（绘制端也只认显式换行）
+        ed.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        ed.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        ed.document().setDocumentMargin(0)
         f = QFont(self._cn)
-        f.setPixelSize(TEXT_PX[self._size])
+        f.setPixelSize(self._text_size)
         ed.setFont(f)
-        if self._invert:
-            ed.setStyleSheet('QLineEdit { background: %s; color: %s; border: none;'
+        if edit is not None:
+            ed.setPlainText(edit['text'])
+            ed.selectAll()
+        ed.installEventFilter(self)
+        ed.textChanged.connect(lambda: self._grow_editor(ed))
+        self._editor = (ed, QPointF(pos))
+        self._style_editor(ed)
+        self._fit_editor(ed, pos)
+        ed.show()
+        ed.setFocus()
+        # 遮罩在 showEvent 里 grabKeyboard() 抢了整个键盘：编辑期间必须松手，
+        # 否则 Delete/Enter/方向键全被重定向给遮罩（中文 IME 走输入法事件不受影响，
+        # 才显得"能打字"），Enter 甚至会误触发 _finish_copy 直接完成截图
+        self.releaseKeyboard()
+
+    def _style_editor(self, ed):
+        """按当前颜色/反色上样式。反色但还没输入时不给色块——空色块是一整行底色，
+        输入后才显示，文字多宽背景多宽（宽度在 _editor_wh 里跟着贴）。"""
+        if self._invert and ed.toPlainText():
+            ed.setStyleSheet('QPlainTextEdit { background: %s; color: %s; border: none;'
                              ' border-radius: 3px; padding: 2px 5px; }'
                              % (self._color, _contrast(self._color)))
         else:
-            ed.setStyleSheet('QLineEdit { background: rgba(0,0,0,50); color: %s; border: none;'
+            ed.setStyleSheet('QPlainTextEdit { background: rgba(0,0,0,50); color: %s; border: none;'
                              ' border-radius: 3px; padding: 2px 5px; }' % self._color)
-        fm = QFontMetrics(f)
-        w, h = ui.sc(200), fm.height() + 6
+
+    def _editor_wh(self, ed):
+        """编辑器尺寸：高度随行数；反色且有字时宽度贴最长行（+padding/光标余量），否则固定宽。"""
+        fm = QFontMetrics(ed.font())
+        lines = ed.toPlainText().split('\n')
+        h = fm.height() * len(lines) + 4
+        if self._invert and ed.toPlainText():
+            w = max(fm.horizontalAdvance(ln) for ln in lines) + 12
+        else:
+            w = ui.sc(200)
+        return w, h
+
+    def _fit_editor(self, ed, pos):
+        """按内容尺寸把编辑器钳进选区摆好，落点随几何更新。"""
+        w, h = self._editor_wh(ed)
         x = min(max(pos.x(), self._sel.left()), max(self._sel.left(), self._sel.right() - w))
         y = min(max(pos.y(), self._sel.top()), max(self._sel.top(), self._sel.bottom() - h))
-        ed.setGeometry(x, y, w, h)
-        ed.installEventFilter(self)
+        ed.setGeometry(int(x), int(y), int(w), int(h))
         self._editor = (ed, QPointF(x, y))
-        ed.show()
-        ed.setFocus()
+
+    def _grow_editor(self, ed):
+        """输入变化：刷新样式（空 ↔ 有字切换反色底色）并重摆尺寸。"""
+        if not self._editor or ed is not self._editor[0]:
+            return
+        self._style_editor(ed)
+        self._fit_editor(ed, ed.pos())
 
     def _commit_editor(self):
         if not self._editor:
             return
         ed, pos = self._editor
         self._editor = None
-        text = ed.text().strip()
+        text = ed.toPlainText().strip()
         ed.removeEventFilter(self)
         ed.close()
         ed.deleteLater()
+        self.grabKeyboard()   # 编辑结束，键盘抓回遮罩（Esc/Enter/Ctrl+Z 恢复全局快捷键）
         if text:
             self._shapes.append({'kind': 'text', 'pos': pos, 'text': text,
-                                 'color': self._color, 'size': self._size,
+                                 'color': self._color, 'size': self._text_size,
                                  'invert': self._invert})
         self.update()
 
@@ -1142,6 +1377,7 @@ class ShotOverlay(QWidget):
         ed.removeEventFilter(self)
         ed.close()
         ed.deleteLater()
+        self.grabKeyboard()   # 同 _commit_editor
 
     def eventFilter(self, obj, ev):
         if self._editor and obj is self._editor[0]:
@@ -1150,8 +1386,15 @@ class ShotOverlay(QWidget):
                 return True
             if ev.type() == QEvent.FocusOut:
                 self._commit_editor()
+                # 这次失焦多半是"点击别处"引起的：随即送达遮罩的那一按只负责保存，
+                # 不能再在落点新开输入框/画图形（singleShot 兜底：切窗口失焦没有后续点击）
+                self._eat_press = True
+                QTimer.singleShot(0, self._clear_eat_press)
                 return True
         return super(ShotOverlay, self).eventFilter(obj, ev)
+
+    def _clear_eat_press(self):
+        self._eat_press = False
 
     # ---------- 工具条摆位 ----------
 
@@ -1246,7 +1489,7 @@ class ShotOverlay(QWidget):
             self._commit_editor()
         if not (self._mode == 'ready' and self._sel.isValid()):
             return
-        pinshot.pin(self._result_image(), self._global_sel().topLeft(), self.pal['sel'])
+        pinshot.pin(self._result_image(), self._global_sel().topLeft(), '#999999')
         self._close()
 
     def _default_name(self):
@@ -1295,9 +1538,12 @@ class ShotOverlay(QWidget):
             by = g.top() - bar.height() - ui.sc(8)
         bar.move(bx, max(vg.top(), by))
         self._long['bar'] = bar
-        chrome = _LongChrome(g, self.pal, avoid_g=bar.geometry(), vg=vg)
+        mask = _LongMask(g, vg)
+        self._long['mask'] = mask
+        mask.show()     # 灰罩最底（静态窗，只画一次）
+        chrome = _LongChrome(g, self.pal, avoid_g=bar.geometry())
         self._long['chrome'] = chrome
-        chrome.show()   # 灰罩先上，完成按钮条后上才不会被罩住
+        chrome.show()   # 轮廓/预览其上，完成按钮条最上
         bar.show()
         guard = _WheelGuard()
         dpr = scr.devicePixelRatio() or 1.0
@@ -1396,6 +1642,7 @@ class ShotOverlay(QWidget):
         L['guard'].stop()
         L['bar'].close()
         L['chrome'].close()
+        L['mask'].close()
         if save and L['chunks']:
             dpr = L['screen'].devicePixelRatio() or 1.0
             w = L['chunks'][0].width()

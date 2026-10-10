@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (QWidget, QFrame, QLabel, QToolButton, QPushButton
 import app as ui            # 仅运行期用 ui.sc()，import 期无依赖（app 也 import 本模块）
 import transfer
 from transfer import send_files
+import glow
 
 RECV_CONFIRM_TIMEOUT = 170   # 接收确认等待秒数：须小于协议端 prepare-upload 的 180s
 MAX_RECORDS = 50             # 传输记录条数上限，超出丢弃最旧
@@ -230,8 +231,9 @@ class _RecvDialog(QDialog):
             self.hide()
 
 
-class _ClickRow(QFrame):
-    '''可整行点击的容器（设备选择用）。'''
+class _ClickRow(glow.GlowCard):
+    '''可整行点击的容器（设备选择用）。继承共享灯效卡片：默认无光，
+    传输记录行在「传输中」时由 _update_record 点亮彩色跑马灯。'''
     clicked = Signal()
 
     def mouseReleaseEvent(self, e):
@@ -1586,6 +1588,7 @@ class TransferWidget(QWidget):
             rec['state_lab'].setProperty('state', state)
             rec['state_lab'].style().unpolish(rec['state_lab'])
             rec['state_lab'].style().polish(rec['state_lab'])
+        rec['row'].set_glow('run' if state == 'busy' else '')
         rec['bar'].setVisible(state in ('busy', 'cancelling'))
         target = 1000 if state == 'done' else (int(rec['done'] * 1000 / total) if total else 0)
         self._animate_bar(rec, target)
