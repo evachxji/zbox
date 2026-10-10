@@ -295,7 +295,12 @@ QToolButton#qualityBtn {
     background: transparent; border: 1px solid rgba(255,255,255,30); border-radius: 6px;
     color: #8d8a82; font: 12px "%CN%"; padding: 3px 10px;
 }
+QToolButton#qualityBtn::menu-indicator { image: none; width: 0px; }
 QToolButton#qualityBtn:hover { border-color: rgba(232,163,61,130); color: #e8a33d; }
+QScrollArea#videoScroll { background: transparent; border: none; }
+QWidget#videoBox { background: transparent; }
+QToolButton#cardCloseBtn { color: #e8a33d; background: transparent; border: none; font: 12px "%CN%"; padding: 0 4px; }
+QToolButton#cardCloseBtn:hover { color: #e05252; }
 QFrame#videoRow { background: transparent; border-radius: 8px; }
 QFrame#videoRow QProgressBar { background: rgba(255,255,255,16); border: none; border-radius: 3px; }
 QFrame#videoRow QProgressBar::chunk { background: #e8a33d; border-radius: 3px; }
@@ -308,11 +313,6 @@ QFrame#videoCard {
 }
 QLabel#videoTitle { color: #f0ede6; font: 600 12.5px "%CN%"; background: transparent; }
 QLabel#videoMeta { color: #9d9a92; font: 11px "%CN%"; background: transparent; }
-QScrollArea#videoScroll { background: transparent; border: none; }
-QWidget#videoBox { background: transparent; }
-QFrame#videoRecRow { background: transparent; border-radius: 7px; }
-QFrame#videoRecRow:hover { background: rgba(255,255,255,10); }
-QLabel#videoRecName { color: #cfccc4; font: 11.5px "%CN%"; background: transparent; }
 QToolButton#parseBtn {
     background: transparent; border: 1px solid rgba(232,163,61,110); border-radius: 7px;
     color: #e8a33d; font: 600 12px "%CN%"; padding: 4px 12px;
@@ -601,7 +601,12 @@ QToolButton#qualityBtn {
     background: #ffffff; border: 1px solid rgba(0,0,0,26); border-radius: 6px;
     color: #5b5b60; font: 12px "%CN%"; padding: 3px 10px;
 }
+QToolButton#qualityBtn::menu-indicator { image: none; width: 0px; }
 QToolButton#qualityBtn:hover { border-color: #0067c0; color: #0067c0; }
+QScrollArea#videoScroll { background: transparent; border: none; }
+QWidget#videoBox { background: transparent; }
+QToolButton#cardCloseBtn { color: #0067c0; background: transparent; border: none; font: 12px "%CN%"; padding: 0 4px; }
+QToolButton#cardCloseBtn:hover { color: #c42b1c; }
 QFrame#videoRow { background: transparent; border-radius: 8px; }
 QFrame#videoRow QProgressBar { background: rgba(0,0,0,16); border: none; border-radius: 3px; }
 QFrame#videoRow QProgressBar::chunk { background: #0067c0; border-radius: 3px; }
@@ -614,11 +619,6 @@ QFrame#videoCard {
 }
 QLabel#videoTitle { color: #1b1b1f; font: 600 12.5px "%CN%"; background: transparent; }
 QLabel#videoMeta { color: #6f6f75; font: 11px "%CN%"; background: transparent; }
-QScrollArea#videoScroll { background: transparent; border: none; }
-QWidget#videoBox { background: transparent; }
-QFrame#videoRecRow { background: transparent; border-radius: 7px; }
-QFrame#videoRecRow:hover { background: rgba(0,0,0,8); }
-QLabel#videoRecName { color: #3c3c41; font: 11.5px "%CN%"; background: transparent; }
 QToolButton#parseBtn {
     background: #ffffff; border: 1px solid rgba(0,103,192,110); border-radius: 7px;
     color: #0067c0; font: 600 12px "%CN%"; padding: 4px 12px;

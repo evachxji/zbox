@@ -184,20 +184,10 @@ class _Runner(object):
             self.job('%s_video_parsed' % theme, 400,
                      lambda: (p.video.url_edit.setText(
                                   'https://www.bilibili.com/video/BV1GJ411x7h7'),
-                              p.video._on_parse_done(True, {
-                         'url': 'https://www.bilibili.com/video/BV1GJ411x7h7',
-                         'title': '【官方 MV】Never Gonna Give You Up - Rick Astley',
-                         'duration': 213, 'heights': [1080, 720, 480, 360]}),
-                              p.video._add_record(
-                                  '袁腾飞大方公开个人生活，陈一发儿：起码很坦荡 [-53xVjZimxw].mp4',
-                                  r'C:\dl\b.mp4'),
-                              p.video._add_record(
-                                  '【官方 MV】Never Gonna Give You Up - Rick Astley [BV1GJ411x7h7].mp4',
-                                  r'C:\dl\a.mp4'),
-                              p.video._on_thumb(self._video_thumb_bytes())),
+                              self._add_parsed_video(p)),
                      lambda: p,
-                     teardown=lambda: (p.video.url_edit.clear(), p.video.card.hide(),
-                                       p.video._clear_records()))
+                     teardown=lambda: (p.video.url_edit.clear(),
+                                       p.video._clear_tasks()))
             self.job('%s_titlebar' % theme, 500,
                      lambda: p._slide_titlebar(True), lambda: p.titlebar)
             self.job('%s_todo_edit' % theme, 400,
@@ -300,6 +290,18 @@ class _Runner(object):
             QTimer.singleShot(0, self._step)
 
     # ---------------- 各场景的构造辅助 ----------------
+
+    def _add_parsed_video(self, p):
+        t = video_ui._VideoTask(p.video, 'https://www.bilibili.com/video/BV1GJ411x7h7')
+        p.video.tasks.insert(0, t)
+        p.video.task_lay.insertWidget(0, t)
+        t.show()
+        t._on_parse_done(True, {
+            'url': t.url,
+            'title': '【官方 MV】Never Gonna Give You Up - Rick Astley',
+            'duration': 213, 'heights': [1080, 720, 480, 360]})
+        t._on_thumb(self._video_thumb_bytes())
+        return t
     def _hide_toast(self):
         p = self.panel
         if getattr(p, '_toast_anim', None) is not None:

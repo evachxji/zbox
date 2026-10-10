@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import zipfile
 from urllib.request import Request, urlopen
 
@@ -309,27 +310,39 @@ def parse_video(url, timeout=60):
         lines = [l.replace('ERROR:', '').strip() for l in text.splitlines() if 'ERROR' in l]
         raise RuntimeError(lines[-1][:120] if lines else '解析失败（退出码 %d）' % r.returncode)
     j = json.loads(r.stdout.decode(LOCALE_ENC, 'replace'))
-    heights = sorted({f['height'] for f in j.get('formats', [])
+    fmts = j.get('formats', [])
+    heights = sorted({f['height'] for f in fmts
                       if f.get('height') and f.get('vcodec') != 'none'},
                      reverse=True)
+    # 分流判定：该高度有纯视频流（acodec=none），且整站有纯音频流可配
+    has_audio_only = any(f.get('acodec') != 'none' and f.get('vcodec') in (None, 'none')
+                         for f in fmts)
+    split_heights = sorted({f['height'] for f in fmts
+                            if f.get('height') and f.get('vcodec') != 'none'
+                            and f.get('acodec') == 'none'},
+                           reverse=True) if has_audio_only else []
     return {'title': j.get('title') or '',
             'duration': j.get('duration') or 0,
             'heights': heights[:8],
+            'split_heights': split_heights,
             'thumbnail': j.get('thumbnail') or ''}
 
 
 # ---------------- 视频下载 ----------------
 
-_PROGRESS_RE = re.compile(r'\[download\]\s+([\d.]+)%.*?at\s+(\S+)(?:\s+ETA\s+(\S+))?')
+_PROGRESS_RE = re.compile(
+    r'\[download\]\s+([\d.]+)%(?:\s+of\s+~?(\S+))?.*?at\s+(\S+)(?:\s+ETA\s+(\S+))?')
 _MERGE_RE = re.compile(r'\[Merger\] Merging formats into "(.+?)"')
 _DEST_RE = re.compile(r'\[download\] Destination: (.+)$')
 
 
 def download_cmd(url, height, out_dir):
     """照搬参考脚本的参数：bestvideo[height<=N]+bestaudio 合并 mp4，
-    补 --ffmpeg-location / -P / --newline（逐行进度便于解析）/ --no-color。
+    补 --ffmpeg-location / -P / --newline（逐行进度便于解析，映射成单趟：下载 0→95%、合并 95→100）/ --no-color。
     height=None 为「自动」档：bestvideo+bestaudio 不限高度。"""
-    fmt = 'bestvideo[height<=%d]+bestaudio' % height if height else 'bestvideo+bestaudio'
+    # fmt 见下方：/best 兜底合流源
+    # /best 兜底：合流单文件平台（直链 mp4 等）没有分离流，不兜底会直接报格式不可用
+    fmt = ('bestvideo[height<=%d]+bestaudio/best' % height) if height else 'bestvideo+bestaudio/best'
     return [ytdlp_path(),
             '-f', fmt,
             '--merge-output-format', 'mp4',
@@ -339,51 +352,154 @@ def download_cmd(url, height, out_dir):
 
 
 class Download(object):
-    """一次视频下载：start() 在当前线程阻塞执行，terminate() 可随时中止。"""
+    """一次视频下载：start() 在当前线程阻塞执行，terminate() 可随时中止。
+    同名成品已存在时 yt-dlp 会直接跳过（rc=0 但什么都没下），检测到跳过后
+    自动给文件名追加「-2160P」式分辨率后缀重试一次；后缀名也撞车才报「未重复下载」。"""
 
-    def __init__(self, url, height, out_dir):
+    def __init__(self, url, height, out_dir, split=True):
         self.cmd = download_cmd(url, height, out_dir)
+        self._height = height
+        self._split = split   # 音视频分流下载（三段）；合流单文件一段到底
+        self._out_dir = out_dir
         self._proc = None
+        self._terminated = False
+        self._paused = False              # 暂停中（进程已杀、.part 保留，等「继续」）
+        self._resume_evt = threading.Event()
+
+    def _cleanup_parts(self, dests):
+        """失败/中止时清掉本次下载的中间文件（视频/音频流本体及 .part / .ytdl 边车文件）。
+        只动本次会话亲眼看到的 Destination 路径；成功的完整 mp4 不在其列。"""
+        for p in dests:
+            if not os.path.isabs(p):
+                p = os.path.join(self._out_dir, p)
+            for suffix in ('', '.part', '.ytdl'):
+                try:
+                    os.remove(p + suffix)
+                except OSError:
+                    pass
+
+    def _run_once(self, progress_cb, dests):
+        """执行一次下载进程。返回 (退出码, 输出文件, 是否因同名被跳过, 错误行)。"""
+        outfile = ''
+        skipped = False
+        err_lines = []
+        stream_idx = 0      # 第几路流：1=视频 2=音频（bestvideo+bestaudio 先视频后音频）
+        stage = ''          # 当前阶段名，前缀进进度文案
+        self._proc = subprocess.Popen(
+            self.cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding=LOCALE_ENC, errors='replace',
+            creationflags=CREATE_NO_WINDOW)
+        for line in self._proc.stdout:
+            line = line.strip()
+            m = _PROGRESS_RE.search(line)
+            if m:
+                raw = float(m.group(1))
+                # 进度条单趟走完：下载段 0→95%（分流源 视频 0–85 / 音频 85–95），
+                # 95→100 留给合并（done 时置 100）——不再每路流各走一遍
+                if self._split:
+                    pct = raw * 0.85 if stream_idx <= 1 else 85.0 + raw * 0.10
+                else:
+                    pct = raw * 0.95
+                detail = '%.1f%% · %s' % (raw, m.group(3))
+                if m.group(4):
+                    detail += ' · 剩 ' + m.group(4)
+                if stage:
+                    detail = '%s · %s' % (stage, detail)
+                progress_cb(min(pct, 95.0), detail, m.group(2) or '',
+                            m.group(3) or '', m.group(4) or '')
+                continue
+            m = _DEST_RE.search(line)
+            if m:
+                stream_idx += 1
+                if self._split:
+                    stage = '(1/3) 下载视频' if stream_idx == 1 else '(2/3) 下载音频'
+                outfile = m.group(1)
+                dests.append(m.group(1))
+            else:
+                m = _MERGE_RE.search(line)
+                if m:
+                    outfile = m.group(1)
+                    stage = ''
+                    # pct=None + 非空文案 = 阶段提示（合并只在分流时发生）
+                    progress_cb(None, '(3/3) 合并中…' if self._split else '合并中…')
+            if 'has already been downloaded' in line:
+                skipped = True
+            if 'ERROR' in line:
+                err_lines.append(line)
+        rc = self._proc.wait()
+        self._proc = None
+        return rc, outfile, skipped, err_lines
 
     def start(self, progress_cb, done_cb):
         """progress_cb(percent_or_None, detail)；done_cb(ok, 文件名或错误摘要)。"""
-        outfile = ''
-        err_lines = []
+        rc, outfile, err_lines, dests = 1, '', [], []
+        retried = False
         try:
-            self._proc = subprocess.Popen(
-                self.cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, encoding=LOCALE_ENC, errors='replace',
-                creationflags=CREATE_NO_WINDOW)
-            for line in self._proc.stdout:
-                line = line.strip()
-                m = _PROGRESS_RE.search(line)
-                if m:
-                    detail = '%.1f%% · %s' % (float(m.group(1)), m.group(2))
-                    if m.group(3):
-                        detail += ' · 剩 ' + m.group(3)
-                    progress_cb(float(m.group(1)), detail)
+            while True:
+                rc, outfile, skipped, err_lines = self._run_once(progress_cb, dests)
+                if self._terminated:
+                    break
+                if self._paused:
+                    # 暂停：进程已杀但 .part 中间文件保留；「继续」后同一条命令
+                    # 重跑，yt-dlp 默认 --continue 会从 .part 断点续传
+                    self._paused = False
+                    self._resume_evt.wait()
+                    self._resume_evt.clear()
+                    if self._terminated:
+                        break
                     continue
-                m = _MERGE_RE.search(line) or _DEST_RE.search(line)
-                if m:
-                    outfile = m.group(1)
-                if 'ERROR' in line:
-                    err_lines.append(line)
-            rc = self._proc.wait()
+                if rc == 0 and skipped and not retried:
+                    retried = True
+                    suffix = '-%dP' % self._height if self._height else '-auto'
+                    self.cmd = (self.cmd[:-1] +
+                                ['-o', '%%(title)s [%%(id)s]%s.%%(ext)s' % suffix,
+                                 self.cmd[-1]])
+                    progress_cb(None, '检测到同名文件，以 %s 后缀重新下载' % suffix)
+                    continue
+                break
         except Exception as e:
+            self._proc = None
+            self._cleanup_parts(dests)
             done_cb(False, str(e))
             return
-        finally:
-            self._proc = None
         if rc == 0:
-            done_cb(True, outfile)   # 完整路径（抓不到输出名时为空串）
+            if outfile:
+                done_cb(True, outfile)   # 完整路径（抓不到输出名时为空串）
+            else:
+                done_cb(False, '同名文件已存在（含分辨率后缀），未重复下载')
         else:
+            self._cleanup_parts(dests)
             tail = err_lines[-1] if err_lines else 'yt-dlp 退出码 %d' % rc
             done_cb(False, tail.replace('ERROR:', '').strip())
 
+    def pause(self):
+        """暂停：杀掉下载进程树但保留 .part 中间文件，resume() 后自动断点续传。"""
+        if self._terminated or self._paused:
+            return
+        self._paused = True
+        self._kill_tree()
+
+    def resume(self):
+        """继续：唤醒 start() 里挂起的下载线程，同一条命令重跑（续传 .part）。"""
+        self._resume_evt.set()
+
     def terminate(self):
+        self._terminated = True
+        self._resume_evt.set()   # 暂停中等「继续」的线程也要唤醒走取消收尾
+        self._kill_tree()
+
+    def _kill_tree(self):
         p = self._proc
         if p is not None:
+            # yt-dlp.exe 是 PyInstaller 双进程结构（引导器 + 真正的下载子进程），
+            # 只 terminate 父进程会让子进程带着 stdout 管道继续跑（点了取消却还在下载），
+            # 必须 taskkill /T 整棵树
             try:
-                p.terminate()
+                subprocess.run(['taskkill', '/PID', str(p.pid), '/T', '/F'],
+                               capture_output=True, timeout=10,
+                               creationflags=CREATE_NO_WINDOW)
             except Exception:
-                pass
+                try:
+                    p.terminate()
+                except Exception:
+                    pass
