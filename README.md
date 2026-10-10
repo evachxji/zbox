@@ -10,9 +10,14 @@ Windows 桌面整理工具：桌面格子 + 悬浮面板（日历 / 待办 / 传
 
 <table>
   <tr>
-    <td align="center"><a href="assets/box.png"><img src="assets/box.png" width="260" alt="桌面格子"></a><br><b>桌面格子</b></td>
-    <td align="center"><a href="assets/transfer.png"><img src="assets/transfer.png" width="260" alt="文件传输"></a><br><b>文件传输</b></td>
-    <td align="center"><a href="assets/video.png"><img src="assets/video.png" width="260" alt="视频解析"></a><br><b>视频解析</b></td>
+    <th align="center">桌面格子</th>
+    <th align="center">文件传输</th>
+    <th align="center">视频解析</th>
+  </tr>
+  <tr>
+    <td><a href="assets/box.png"><img src="assets/box.png" width="260" alt="桌面格子"></a></td>
+    <td><a href="assets/transfer.png"><img src="assets/transfer.png" width="260" alt="文件传输"></a></td>
+    <td><a href="assets/video.png"><img src="assets/video.png" width="260" alt="视频解析"></a></td>
   </tr>
 </table>
 

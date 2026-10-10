@@ -17,7 +17,7 @@ import threading
 from datetime import date, datetime, timedelta
 
 from PySide6.QtCore import Qt, QTimer, QPoint, QBuffer
-from PySide6.QtGui import QImage, QPainter, QColor, QFont
+from PySide6.QtGui import QImage, QPainter, QColor, QFont, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu
 
 import app as ui
@@ -58,6 +58,34 @@ def run(shot_dir, panel, cfg, tstore, qapp):
     os.makedirs(shot_dir, exist_ok=True)
     runner = _Runner(shot_dir, panel, cfg, tstore, qapp)
     runner.start()
+
+
+class _ComboShot(object):
+    """标题栏 + 面板拼成一张图：标题栏是独立顶层窗口，分别 grab 后纵向拼接。"""
+
+    def __init__(self, panel):
+        self._p = panel
+
+    def ensurePolished(self):
+        self._p.titlebar.ensurePolished()
+        self._p.ensurePolished()
+
+    def width(self):
+        return max(self._p.titlebar.width(), self._p.width())
+
+    def height(self):
+        return self._p.titlebar.height() + self._p.height()
+
+    def grab(self):
+        tb = self._p.titlebar.grab()
+        pn = self._p.grab()
+        pm = QPixmap(max(tb.width(), pn.width()), tb.height() + pn.height())
+        pm.fill(Qt.transparent)
+        pt = QPainter(pm)
+        pt.drawPixmap(0, 0, tb)
+        pt.drawPixmap(0, tb.height(), pn)
+        pt.end()
+        return pm
 
 
 class _FakeBoxMgr(object):
@@ -182,8 +210,9 @@ class _Runner(object):
                      lambda: (p.set_tab(2, save=False), self._make_busy_transfer()),
                      lambda: p, teardown=self._clear_busy_transfer)
             self.job('%s_transfer_records' % theme, 400,
-                     lambda: (p.set_tab(2, save=False), self._make_records_transfer()),
-                     lambda: p, teardown=self._clear_records_transfer)
+                     lambda: (p.set_tab(2, save=False), self._make_records_transfer(),
+                              p._slide_titlebar(True)),
+                     lambda: _ComboShot(p), teardown=self._clear_records_transfer)
             self.job('%s_video' % theme, 400,
                      lambda: p.set_tab(3, save=False), lambda: p)
             self.job('%s_video_parsed' % theme, 400,
@@ -344,6 +373,7 @@ class _Runner(object):
             self._rec_keys.append(key)
 
     def _clear_records_transfer(self):
+        self.panel._slide_titlebar(False)
         try:
             t = self.panel.transfer
             for key in getattr(self, '_rec_keys', []):
