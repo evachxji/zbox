@@ -368,7 +368,7 @@ def uninstall_reg_install(exe_path, all_users=False, size_kb=None):
     if size_kb is None:
         size_kb = os.path.getsize(exe_path) // 1024
     vals = [
-        ('DisplayName', winreg.REG_SZ, 'Zbox 桌面日历'),
+        ('DisplayName', winreg.REG_SZ, 'zbox桌面格子'),
         ('DisplayVersion', winreg.REG_SZ, APP_VERSION),
         ('Publisher', winreg.REG_SZ, 'Zbox'),
         ('DisplayIcon', winreg.REG_SZ, exe_path),

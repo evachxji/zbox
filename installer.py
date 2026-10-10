@@ -21,7 +21,7 @@ import sysutil
 
 APP_EXE = 'zbox.exe'
 LEGACY_APP_EXE = 'zviber.exe'   # 旧名程序本体：覆盖重装时用来识别旧安装
-APP_TITLE = 'Zbox 桌面日历'
+APP_TITLE = 'zbox桌面格子'
 
 # 向导补充样式：沿用 NOCTURNE 深色配色（#e8a33d 强调色，#e05252 危险色），%CN%/%NUM% 运行时替换
 _EXTRA_QSS = """

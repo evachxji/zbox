@@ -2094,7 +2094,7 @@ class AboutDialog(QDialog):
         head.addWidget(icon)
         info = QVBoxLayout()
         info.setSpacing(sc(4))
-        name = QLabel('Zbox 桌面日历')
+        name = QLabel('zbox桌面格子')
         name.setObjectName('setTitle')
         info.addWidget(name)
         ver = QLabel('版本 v%s' % APP_VERSION)
