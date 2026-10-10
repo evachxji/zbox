@@ -156,6 +156,44 @@ def remove_cookies():
 
 # ---------------- yt-dlp / ffmpeg 组件 ----------------
 
+def _fetch(url, dst, progress_cb=None):
+    """流式下载 url 到 dst 文件；progress_cb(已下载, 总大小)，总大小未知时为 0。"""
+    req = Request(url, headers=UA)
+    with urlopen(req, timeout=30) as r:
+        total = int(r.headers.get('Content-Length') or 0)
+        done = 0
+        with open(dst, 'wb') as f:
+            while True:
+                chunk = r.read(256 * 1024)
+                if not chunk:
+                    break
+                f.write(chunk)
+                done += len(chunk)
+                if progress_cb:
+                    progress_cb(done, total)
+
+
+def _try_sources(urls, progress_cb=None, what='组件'):
+    """多个下载源依次尝试，成功返回完整字节；全部失败抛最后一个异常。"""
+    err = None
+    tmp = os.path.join(tools_dir(), '.dl_partial')
+    try:
+        for url in urls:
+            try:
+                _fetch(url, tmp,
+                       lambda d, t: progress_cb and progress_cb(what, d, t))
+                with open(tmp, 'rb') as f:
+                    return f.read()
+            except Exception as e:
+                err = e
+        raise err if err else RuntimeError('%s 下载失败' % what)
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
 def download_ytdlp(progress_cb=None):
     """下载最新 yt-dlp.exe：GitHub 加速镜像优先、直连兜底。"""
     dst = ytdlp_path()
@@ -203,6 +241,11 @@ def download_ffmpeg(progress_cb=None, ver=None):
     with open(dst + '.new', 'wb') as f:
         f.write(exe)
     os.replace(dst + '.new', dst)
+
+
+def tools_ready():
+    """两个组件都已在本地（启动时据此判断能否直接恢复功能，避免未经操作就联网下载）。"""
+    return os.path.isfile(ytdlp_path()) and os.path.isfile(ffmpeg_path())
 
 
 def ensure_tools(progress_cb=None):

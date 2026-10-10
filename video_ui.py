@@ -1079,7 +1079,9 @@ class VideoWidget(QWidget):
         # auto_start=False（截图自检）：不下组件也不盖门禁层，按功能态渲染
         if not auto_start:
             return
-        if bool(cfg.data.get('video_enabled')):
+        # 组件不在本地时不自动联网下载（首次安装/组件被删后恢复配置），
+        # 回门禁层等用户点「启用视频解析」授权后才下
+        if bool(cfg.data.get('video_enabled')) and video_dl.tools_ready():
             self.set_enabled(True)
         else:
             self._show_gate('enable')
