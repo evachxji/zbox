@@ -181,6 +181,9 @@ class _Runner(object):
             self.job('%s_transfer_busy' % theme, 400,
                      lambda: (p.set_tab(2, save=False), self._make_busy_transfer()),
                      lambda: p, teardown=self._clear_busy_transfer)
+            self.job('%s_transfer_records' % theme, 400,
+                     lambda: (p.set_tab(2, save=False), self._make_records_transfer()),
+                     lambda: p, teardown=self._clear_records_transfer)
             self.job('%s_video' % theme, 400,
                      lambda: p.set_tab(3, save=False), lambda: p)
             self.job('%s_video_parsed' % theme, 400,
@@ -316,6 +319,44 @@ class _Runner(object):
         rec['_speed'] = 3.2 * 2 ** 20
         t._update_record(rec)
         self._busy_key = key
+
+    def _make_records_transfer(self):
+        '''注入多条不同状态的传输记录：完成 / 传输中（跑马灯）/ 已取消 / 失败。'''
+        t = self.panel.transfer
+        self._rec_keys = []
+        specs = [
+            ('down', ['旅行照片合集.zip'], 18.6, 'DESKTOP-PC', 'done'),
+            ('up', ['产品设计稿.png'], 32.0, 'My-Phone', 'busy'),
+            ('down', ['会议纪要.docx'], 86.0 / 1024, 'DESKTOP-PC', 'cancelled'),
+            ('up', ['安装包.apk'], 120.0, 'Pixel 6', 'fail'),
+        ]
+        for direction, names, mb, peer, state in specs:
+            total = int(mb * 2 ** 20)
+            key = t._add_record(direction, names, total, peer=peer)
+            rec = t._records[key]
+            rec['state'] = state
+            if state == 'busy':
+                rec['done'] = int(total * 0.63)
+                rec['_speed'] = 5.6 * 2 ** 20
+            elif state == 'fail':
+                rec['err'] = '连接中断'
+            t._update_record(rec)
+            self._rec_keys.append(key)
+
+    def _clear_records_transfer(self):
+        try:
+            t = self.panel.transfer
+            for key in getattr(self, '_rec_keys', []):
+                rec = t._records.pop(key, None)
+                if key in t._rec_keys:
+                    t._rec_keys.remove(key)
+                if rec is not None:
+                    rec['row'].set_glow('')
+                    t.rec_lay.removeWidget(rec['row'])
+                    rec['row'].deleteLater()
+            self._rec_keys = []
+        except Exception:
+            pass
 
     def _clear_busy_transfer(self):
         try:
