@@ -492,14 +492,25 @@ IPC 通道（与 `--pick-folder` 同一条）发回面板建格子；`new_folder
     而非 Press（快速两抓时整次抓取无 `_op`，目前按原样保留）；②
     `QWidget.mouseDoubleClickEvent` 默认转发 `mousePressEvent`，收起格子后 `_op`
     残留一个 move 即来源于此，松手收尾无害。
-- **层级策略（踩坑三轮后的终态）：挂桌面带（`pin_to_desktop`，免疫 Win+D）
-  + 永不主动沉底 + 被桌面整理表层压住时由 WinEvent 钩子/看门狗抬回。**
-  带内窗口点击激活会浮到应用窗口之上（实测确认），只要不主动 sink 它就一直在，
-  这就是「格子永不消失」的关键——沉底（sink_to_desktop）只用于「被表层压住」的抬回。
+- **滚动卡顿的根因（2026-10 实测定位）**：`QFileIconProvider` 返回的 QIcon 不在内存
+  缓存 pixmap，**每次 paint 都重新经壳生成**——每行 ~1.3ms，一帧 20+ 行 = 30ms 级
+  掉帧（消融实验：摘掉图标 p50 30ms → 1.2ms，半透明/QSS 均无关）。条目图标必须经
+  `_baked_icon` 烘成纯位图 QIcon（paint 只读内存），切视图后按新图标尺寸重烘。
+  滚轮是 200ms 缓出动画驱动滚动条（`BoxList.wheelEvent`，对齐资源管理器手感），
+  两种视图都 ScrollPerPixel，触摸板 pixelDelta 直接跟手不走动画。
+- **层级策略（踩坑三轮后的终态，2026-10 再修订）：挂桌面带（`pin_to_desktop`，免疫 Win+D）
+  + 永不主动沉底。** 带内窗口点击激活会浮到应用窗口之上（实测确认），只要不主动 sink
+  它就一直在，这就是「格子永不消失」的关键。
   ❌ 不要学面板在失焦时沉底：格子会被拖到任何位置，沉到应用窗口之下 = 用户眼里的消失。
-- **看门狗必须极廉**：每 tick 只做一次中心命中（`_covered_by_surface`），真被压住才跑
-  `probe_desktop` 找锚点。probe 的多点 WindowFromPoint 是跨进程同步调用，命中无响应窗口
-  会阻塞主线程——曾因每 500ms × 4 格子 × 6 点探测把界面打到转圈假死。
+- **桌面整理软件兼容层已整体移除（2026-10）**：原来的 WinEvent 钩子 + 每 500ms 表层探测
+  （`_covered_by_surface` / `probe_desktop` 的多点 WindowFromPoint，面板 tick 每秒 12 次、
+  每个格子每 tick 1 次）是跨进程同步调用（WindowFromPoint 向命中窗口同步发 WM_NCHITTEST），
+  对方线程不消息循环就把 UI 线程整段卡死——用户实测滚动格子「卡顿」的根因就是它撞上
+  前台繁忙程序（调试日志里多次 1.7~5.6s 冻结实锤）。移除后：面板 tick 只剩存活检查 +
+  `_ensure_band` 补挂 + `_ensure_desktop_level` 兜底，格子 tick 只剩存活检查 + 补挂，
+  `sink_to_desktop` 锚点固定 Progman——全是内核态查询，零跨进程消息。
+  代价：装了桌面整理软件时格子/面板可能被它的全屏覆盖层压住，属已知取舍。
+  ❌ 别再往回放 WindowFromPoint 轮询；真要检测也只能用不发消息的 z-order 遍历。
 - **空白格子只是桌面文件的收纳视图，不搬动文件**（2026-10 改，四个用户实测 bug 的根因）：
   拖入 = 把文件记进 `rec['items']` + 给它加「隐藏」属性把桌面图标藏起来（文件仍在桌面原路径，
   右键属性的位置就是桌面）；关程序（`BoxManager.shutdown`）/ 解散格子 / 显隐格子

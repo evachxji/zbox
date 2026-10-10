@@ -1282,18 +1282,6 @@ _u32.AttachThreadInput.restype = ctypes.c_int
 _u32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
 _u32.SetFocus.restype = ctypes.c_void_p
 _u32.SetFocus.argtypes = [ctypes.c_void_p]
-_u32.SetWinEventHook.restype = ctypes.c_void_p
-_u32.SetWinEventHook.argtypes = [wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
-                                 ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD]
-_u32.UnhookWinEvent.restype = ctypes.c_int
-_u32.UnhookWinEvent.argtypes = [ctypes.c_void_p]
-
-# 桌面表层重排事件（桌面整理软件每 ~2.5s 重建表层：HIDE → REORDER → SHOW）
-_EVENT_SHOW = 0x8002
-_EVENT_REORDER = 0x8004
-_WINEVENTPROC = ctypes.WINFUNCTYPE(None, ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p,
-                                   wintypes.LONG, wintypes.LONG, wintypes.DWORD, wintypes.DWORD)
-
 _GW_HWNDPREV = 3
 _GW_HWNDNEXT = 2
 _GA_ROOT = 2
@@ -1347,32 +1335,6 @@ def _class_name(hwnd):
 _PROG_FAMILY = ('Progman', 'SHELLDLL_DefView', 'WorkerW')
 
 
-def probe_desktop(skip=(), extra=()):
-    """在桌面采样点（外加 extra 点）做命中探测：返回 (第三方桌面表层 hwnd 或 None, 是否摸到桌面本体)。
-    命中窗口沿父链向上逐级检查：Progman 家族 = 桌面本体；全屏工具窗 = 桌面整理的覆盖层。
-    桌面整理软件的表层窗口嵌套层级会变化（有时是顶层窗口，有时挂在隐藏的辅助窗口下），
-    z-order 遍历不可靠，只能用命中探测。采样点全被应用盖住时返回 (None, False) = 无结论。"""
-    sw, sh = _u32.GetSystemMetrics(0), _u32.GetSystemMetrics(1)
-    points = [(sw // 2, sh // 2), (sw // 4, sh // 3), (sw * 3 // 4, sh // 3),
-              (sw // 4, sh * 2 // 3), (sw * 3 // 4, sh * 2 // 3)] + list(extra)
-    surface, touched = None, False
-    for x, y in points:
-        h = _u32.WindowFromPoint(wintypes.POINT(x, y))
-        while h:
-            if h in skip:
-                break
-            if _class_name(h) in _PROG_FAMILY:
-                touched = True
-                break
-            if _is_desktop_surface(h, sw, sh):
-                surface = h
-                break
-            h = _u32.GetParent(h)
-        if surface:
-            break
-    return surface, touched
-
-
 def pin_to_desktop(win):
     """把窗口的属主设为桌面图标窗（SHELLDLL_DefView）：加入「桌面带」，
     Win+D / 显示桌面会跳过桌面带（Win11 24H2 上顶层窗口一律被收，桌面带成员豁免——
@@ -1404,21 +1366,16 @@ def unpin_from_desktop(win):
         pass
 
 
-def sink_to_desktop(win, anchor=None):
-    """把窗口压到桌面层：桌面整理软件的全屏覆盖层之上、所有应用窗口之下。
-    做法：从 z-order 顶部往下找「最上层的桌面表层」作锚点（找不到就用 Progman），
-    把窗口插到锚点正上方。桌面整理软件会频繁重建/重排它的表层窗口，
-    从顶部找锚点不受其 z-order 抖动影响；已就位时不动，避免闪烁。"""
+def sink_to_desktop(win):
+    """把窗口压到桌面层：桌面之上、所有应用窗口之下。
+    锚点固定取 Progman，把窗口插到它正上方；已就位时不动，避免闪烁。"""
     try:
         hwnd = int(win.winId())
         if not hwnd:
             return
-        if anchor is None:
-            anchor, _t = probe_desktop(skip=(hwnd,))
-        if anchor is None:
-            anchor = _u32.FindWindowW('Progman', None)
-            if not anchor or anchor == hwnd:
-                return
+        anchor = _u32.FindWindowW('Progman', None)
+        if not anchor or anchor == hwnd:
+            return
         above = _u32.GetWindow(anchor, _GW_HWNDPREV)
         if above == hwnd:
             return   # 已经在桌面层正上方
@@ -2364,10 +2321,9 @@ class FloatingPanel(QWidget):
         # 不透明窗口 + Win11 DWM 圆角（Win10 降级为圆角遮罩），文字锐利度对齐系统组件。
         # 桌面格子模式：不置顶，可被其它窗口覆盖；移动靠顶部栏（悬浮滑出）或日历左侧时分秒拖拽。
         # 桌面层级（见 _ensure_band）：属主设为桌面图标窗加入「桌面带」，Win+D 收不走；
-        # z-order 由看门狗维护在桌面带之上、应用窗口之下
+        # z-order 由失焦沉底（_ensure_desktop_level）维护在桌面之上、应用窗口之下
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool)
         self._desk_pinned = False   # True = 已归属桌面带（SHELLDLL_DefView 的属主 popup）
-        self._desk_surface = None   # 探测到的第三方桌面表层（沉底锚点缓存）
         self._floating = False      # True = 被点击激活浮起到应用窗口之上，失焦后需要沉回
         self._drag = None           # 窗口拖拽偏移（globalPos - topLeft）；None = 未在拖拽
         self.setObjectName('panelRoot')
@@ -2393,7 +2349,9 @@ class FloatingPanel(QWidget):
         self.titlebar.setObjectName('titlebar')
         self.titlebar.installEventFilter(self)
         tb = QHBoxLayout(self.titlebar)
-        tb.setContentsMargins(sc(14), sc(8), sc(10), sc(2))
+        # ?? 14px ????????bar_corner_radius????????????
+        # ???????????? sc(42)??????
+        tb.setContentsMargins(sc(14), 0, sc(10), sc(14))
         tb.setSpacing(6)
         # 栏窗高度由展开动画逐帧设置，不能被子控件的最小高度顶住
         tb.setSizeConstraint(QLayout.SetNoConstraint)
@@ -2470,16 +2428,11 @@ class FloatingPanel(QWidget):
         self.setFixedSize(sc(SINGLE_W), sc(PANEL_H))
         self.set_tab(int(cfg.tab or 0), save=False)
 
-        # 桌面层级：归属桌面带（Win+D 免疫）+ 看门狗维护 z-order 与挂接健康
+        # 桌面层级：归属桌面带（Win+D 免疫）+ 看门狗维护挂接健康与失焦沉底
         self._ensure_band()
-        # WinEvent 钩子：桌面整理软件的表层重建时立刻把面板抬回（等看门狗会闪 0.3~0.6s）
-        self._win_evt_cb = _WINEVENTPROC(self._on_win_event)   # 必须留引用，防 GC
-        self._win_evt_hook = _u32.SetWinEventHook(_EVENT_SHOW, _EVENT_REORDER,
-                                                  None, self._win_evt_cb, 0, 0, 0)
-        QApplication.instance().aboutToQuit.connect(self._unhook_win_event)
         self._sink_timer = QTimer(self)
         self._sink_timer.timeout.connect(self._desktop_mode_tick)
-        self._sink_timer.start(500)   # 桌面整理软件会在 Win+D 等时机重排表层，要快些跟上
+        self._sink_timer.start(500)
         QApplication.instance().focusChanged.connect(self._grab_input_focus)
         QTimer.singleShot(800, lambda: sink_to_desktop(self))   # 首次沉底
 
@@ -2500,75 +2453,18 @@ class FloatingPanel(QWidget):
             pin_to_desktop(self.titlebar)
 
     def _desktop_mode_tick(self):
+        """500ms 健康检查：自身存活 + 桌面带补挂 + 失焦沉底兜底。
+        不做跨进程命中探测——WindowFromPoint 会向命中窗口同步发 WM_NCHITTEST，
+        对方线程不消息循环就把 UI 线程整段卡死（2026-10 实测多次秒级冻结，
+        探测随桌面整理软件兼容层整体移除）。"""
         hwnd = int(self.winId())
         if not _u32.IsWindow(hwnd):
             QApplication.instance().quit()   # 桌面（DefView）被销毁会连坐销毁属主窗口，无法恢复
             return
         self._ensure_band()
-        skip = (hwnd, int(self.titlebar.winId()))
-        extra = []
-        if self.isVisible():
-            extra.append((self.x() + self.width() // 2, self.y() + self.height() // 2))
-        self._desk_surface, _t = probe_desktop(skip=skip, extra=extra)
-        covered = self._covered_by_surface()
-        _dbg('tick: pinned=%s surface=%s covered=%s active=%s undermouse=%s' % (
-            self._desk_pinned, self._desk_surface, covered, self.isActiveWindow(), self.underMouse()))
-        if covered and self._drag is None:
-            sink_to_desktop(self, self._desk_surface)   # 被桌面表层压住：无条件抬上来
-        elif not covered:
-            self._ensure_desktop_level()
-
-    def _on_win_event(self, _hook, event, hwnd, idObject, _idChild, _thread, _ts):
-        """桌面带内窗口的 SHOW / 容器 REORDER 事件回调。只做轻量过滤，
-        真正的抬回动作丢回事件循环（钩子里直接动 z-order 有风险）。"""
-        try:
-            if not hwnd or not self.isVisible() or self._drag is not None:
-                return
-            if hwnd == int(self.winId()) or hwnd == int(self.titlebar.winId()):
-                return
-            if idObject not in (0, -4):   # 只看窗口本身 / 客户区级别
-                return
-            cls = _class_name(hwnd)
-            if cls in _PROG_FAMILY:
-                if event != _EVENT_REORDER:
-                    return
-            else:
-                sw, sh = _u32.GetSystemMetrics(0), _u32.GetSystemMetrics(1)
-                if not _is_desktop_surface(hwnd, sw, sh):
-                    return
-            QTimer.singleShot(0, self._lift_if_covered)
-        except Exception:
-            pass
-
-    def _unhook_win_event(self):
-        if self._win_evt_hook:
-            _u32.UnhookWinEvent(self._win_evt_hook)
-            self._win_evt_hook = None
-
-    def _lift_if_covered(self):
-        """表层重排后的即时抬回：只抬不换锚点；没被压住就不动（我们自己的沉底也会触发
-        REORDER 事件，靠这道判断防自激回路）。"""
-        if self._covered_by_surface():
-            _dbg('lift: 表层重排事件触发抬回')
-            sink_to_desktop(self, self._desk_surface)
-
-    def _covered_by_surface(self):
-        """面板中心被桌面整理软件的表层压住（看不见也点不到）的判定。
-        此状态绝非用户所愿，必须无条件抬回——不能走 _ensure_desktop_level 的空闲守卫
-        （光标停在面板上时 underMouse 会因收不到 Leave 事件而过期为真，把沉底永久挡住）。"""
-        if not self.isVisible():
-            return False
-        h = _u32.WindowFromPoint(wintypes.POINT(self.x() + self.width() // 2,
-                                                self.y() + self.height() // 2))
-        mine = (int(self.winId()), int(self.titlebar.winId()))
-        sw, sh = _u32.GetSystemMetrics(0), _u32.GetSystemMetrics(1)
-        while h:
-            if h in mine or _class_name(h) in _PROG_FAMILY:
-                return False
-            if _is_desktop_surface(h, sw, sh):
-                return True
-            h = _u32.GetParent(h)
-        return False
+        _dbg('tick: pinned=%s active=%s undermouse=%s' % (
+            self._desk_pinned, self.isActiveWindow(), self.underMouse()))
+        self._ensure_desktop_level()
 
     def _grab_input_focus(self, _old, new):
         """桌面带窗口的键盘焦点兜底（Win10 用；Win11 实测点击即自然获得焦点）。
@@ -2600,9 +2496,10 @@ class FloatingPanel(QWidget):
         设置窗开着时鼠标一移上去、面板 underMouse 过期，面板一沉设置窗就被其它
         应用窗口盖住——子窗口使用中不沉。"""
         for w in QApplication.topLevelWidgets():
-            if (w is not self and w.parent() is self and w.isVisible()
-                    and (w.isActiveWindow() or w.underMouse())):
-                return True
+            if w is not self and w.parent() is self and w.isVisible():
+                _dbg('childwin: %s active=%s undermouse=%s' % (type(w).__name__, w.isActiveWindow(), w.underMouse()))
+                if w.isActiveWindow() or w.underMouse():
+                    return True
         return False
 
     def _ensure_desktop_level(self):
@@ -2614,7 +2511,7 @@ class FloatingPanel(QWidget):
                 or self._child_window_in_use()):
             return
         self._floating = False
-        sink_to_desktop(self, self._desk_surface)
+        sink_to_desktop(self)
         if self.titlebar.isVisible():
             _place_below(self.titlebar, self)   # 面板沉层后栏窗要重新压回它正下方
 
@@ -2768,9 +2665,9 @@ class FloatingPanel(QWidget):
         if t == QEvent.MouseButtonRelease and self._drag is not None:
             self._drag = None
             self._save_pos()
-            self._desk_pinned = pin_to_desktop(self)   # 归位：重新归属桌面带并沉到表层之上
+            self._desk_pinned = pin_to_desktop(self)   # 归位：重新归属桌面带并沉回桌面层
             pin_to_desktop(self.titlebar)
-            sink_to_desktop(self, self._desk_surface)
+            sink_to_desktop(self)
             if self.titlebar.isVisible():
                 _place_below(self.titlebar, self)
             return True

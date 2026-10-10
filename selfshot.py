@@ -128,7 +128,6 @@ class _Runner(object):
     def finish(self):
         try:
             if self._box is not None:
-                self._box._unhook_win_event()
                 self._box.close()
                 self._box.deleteLater()
         except Exception:

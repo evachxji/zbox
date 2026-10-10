@@ -37,7 +37,7 @@ import time
 from ctypes import wintypes
 
 from PySide6.QtCore import (Qt, QObject, QTimer, QThread, QUrl, QPoint, QRect, QSize,
-                          QFileSystemWatcher, Signal, QEvent)
+                          QFileSystemWatcher, Signal, QEvent, QVariantAnimation, QEasingCurve)
 from PySide6.QtGui import (QIcon, QCursor, QPainter, QColor, QPen, QFont, QImage, QPixmap,
                           QActionGroup, QPalette)   # QActionGroup Qt6 起从 QtWidgets 挪到 QtGui
 from PySide6.QtWidgets import (QWidget, QDialog, QListWidget, QListWidgetItem, QVBoxLayout,
@@ -389,6 +389,14 @@ class BoxList(QListWidget):
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.itemDoubleClicked.connect(lambda it: self.box.open_path(it.data(Qt.UserRole)))
         self._menu_press_ts = 0.0   # 最近一次「点掉外壳菜单」的那按下（见 mouseDoubleClickEvent）
+        # 滚轮平滑滚动（对齐资源管理器手感，见 wheelEvent）：动画驱动滚动条
+        self._wheel_target = 0
+        self._wheel_anim = QVariantAnimation(self)
+        self._wheel_anim.setDuration(200)
+        self._wheel_anim.setEasingCurve(QEasingCurve.OutCubic)
+        sb = self.verticalScrollBar()
+        self._wheel_anim.valueChanged.connect(sb.setValue)
+        sb.sliderPressed.connect(self._wheel_anim.stop)   # 拖滚动条时动画让位，别抢
 
     def set_view(self, key):
         """按列表 / 按图标查看。图标视图 = 32px 图标 + 固定网格 + 名称两行折行；
@@ -406,11 +414,55 @@ class BoxList(QListWidget):
             self.setIconSize(QSize(ui.sc(16), ui.sc(16)))
             self.setGridSize(QSize())   # 无效 QSize = 恢复自动
             self.setWordWrap(False)
-            self.setVerticalScrollMode(QAbstractItemView.ScrollPerItem)
+            # 两种视图都按像素滚动：滚轮平滑动画（wheelEvent）与触摸板跟手都按像素驱动
+            self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.setProperty('view', key)
         st = self.style()
         st.unpolish(self)
         st.polish(self)
+        # 图标尺寸随视图变，按新尺寸重烘 pixmap（壳图标 paint 期现取是滚动卡顿根因，
+        # 见 BoxWindow._baked_icon）
+        for i in range(self.count()):
+            it = self.item(i)
+            p = it.data(Qt.UserRole)
+            if p:
+                it.setIcon(self.box._baked_icon(p, os.path.isdir(p), self.iconSize()))
+
+    def wheelEvent(self, e):
+        """滚轮平滑滚动（对齐资源管理器手感）：Qt 默认每 notch 瞬跳 3 行，视觉上
+        一卡一卡；改成 200ms 缓出动画驱动滚动条。触摸板（pixelDelta）直接跟手不走动画。"""
+        sb = self.verticalScrollBar()
+        pd = e.pixelDelta()
+        if not pd.isNull():
+            self._wheel_anim.stop()
+            sb.setValue(sb.value() - pd.y())
+            e.accept()
+            return
+        dy = e.angleDelta().y()
+        if not dy:
+            super(BoxList, self).wheelEvent(e)   # 横向滚动等交给默认实现
+            return
+        if self.viewMode() == QListWidget.IconMode:
+            px = self.gridSize().height() or ui.sc(72)   # 一 notch ≈ 一格高
+        else:
+            lines = QApplication.styleHints().wheelScrollLines() or 3
+            row = self.sizeHintForRow(0) if self.count() else ui.sc(28)
+            px = row * lines   # 一 notch = 系统滚动行数 × 行高
+        start = sb.value()
+        if self._wheel_anim.state() == QVariantAnimation.Running:
+            start_target = self._wheel_target   # 连滚：从在途动画的目标值继续叠加
+        else:
+            start_target = start
+        target = max(sb.minimum(), min(sb.maximum(), int(round(start_target - px * dy / 120.0))))
+        if target == start:
+            e.accept()
+            return
+        self._wheel_target = target
+        self._wheel_anim.stop()
+        self._wheel_anim.setStartValue(start)
+        self._wheel_anim.setEndValue(target)
+        self._wheel_anim.start()
+        e.accept()
 
     def mousePressEvent(self, e):
         # 菜单正开着（或刚被点关掉）时落下的这一按，就是「点掉那个菜单」的那一下——
@@ -486,6 +538,7 @@ class BoxList(QListWidget):
         非挪不可——文件本来就在桌面上，直接拖到桌面＝把文件移动到它自己所在的目录，
         资源管理器会弹「源文件名和目标文件名相同」（用户实测）；挪出去之后拖到桌面
         才是一次真实的跨目录移动。拖动数据里也要换成暂存路径，否则报错照旧。"""
+        self._wheel_anim.stop()   # 拖拽自动滚动与滚轮动画不叠加
         items = self.selectedItems()
         saved = self.box.stage_for_drag([it.data(Qt.UserRole) for it in items])
         staged = dict(saved)
@@ -695,7 +748,6 @@ class BoxWindow(QWidget):
         self.mgr = mgr
         self.rec = rec
         self._desk_pinned = False
-        self._desk_surface = None   # 探测到的第三方桌面表层（抬回锚点缓存）
         self._dragging = {}         # 拖出期间 {原路径: 暂存路径}（见 stage_for_drag）
         self._op = None          # ('move', 起点全局坐标, 起始几何) 或 ('resize', 边缘掩码, ...)
         self._press_pos = None   # 拖拽起点（全局坐标），用于区分点击与拖动
@@ -806,14 +858,9 @@ class BoxWindow(QWidget):
         self._debounce.timeout.connect(self.refresh)
         self.watcher.directoryChanged.connect(lambda _p: self._debounce.start())
 
-        # 桌面层级：归属桌面带（免疫 Win+D，面板同款 pin_to_desktop）+ WinEvent 钩子
-        # + 500ms 看门狗。与面板的关键差异：永不主动沉底——格子被压到应用窗口之下
-        # 就是用户眼里的「消失」。只在被桌面整理表层压住时抬回（表层每 ~2.5s 重建，
-        # 钩子毫秒级抬回，等看门狗会闪半秒）。
-        self._win_evt_cb = ui._WINEVENTPROC(self._on_win_event)   # 必须留引用，防 GC
-        self._win_evt_hook = ui._u32.SetWinEventHook(ui._EVENT_SHOW, ui._EVENT_REORDER,
-                                                     None, self._win_evt_cb, 0, 0, 0)
-        QApplication.instance().aboutToQuit.connect(self._unhook_win_event)
+        # 桌面层级：归属桌面带（免疫 Win+D，面板同款 pin_to_desktop）+ 500ms 补挂看门狗。
+        # 与面板的关键差异：永不主动沉底——格子被压到应用窗口之下
+        # 就是用户眼里的「消失」。
         self._sink_timer = QTimer(self)
         self._sink_timer.timeout.connect(self._desktop_tick)
         self._sink_timer.start(500)
@@ -841,6 +888,15 @@ class BoxWindow(QWidget):
         if not hasattr(self, '_icon_provider'):
             self._icon_provider = QFileIconProvider()
         return self._icon_provider.icon(QFileInfo(path))
+
+    def _baked_icon(self, path, is_dir, size):
+        """取壳图标后烘成纯位图 QIcon。QFileIconProvider 返回的 QIcon 不在内存缓存
+        pixmap，每次 paint 都重新经壳生成——实测滚动一帧 20+ 行、每行 ~1.3ms，
+        整帧 30ms 级掉帧（2026-10 滚动卡顿根因）；烘焙后 paint 只读内存位图
+        （p50 30ms → 1.2ms）。DPR 按窗口取，高分屏不糊。"""
+        icon = self._icon_for(path, is_dir)
+        pm = icon.pixmap(size, self.devicePixelRatioF())
+        return QIcon(pm) if not pm.isNull() else icon
 
     def _url_icon(self, path):
         """解析 .url 里的 IconFile/IconIndex，ExtractIconExW 取图标（同资源管理器）；没有就返回 None。"""
@@ -916,7 +972,7 @@ class BoxWindow(QWidget):
         self.list.clear()
         for name, p, is_dir, st in entries:
             disp = name[:-4] if name.lower().endswith(('.lnk', '.url')) else name   # 快捷方式不显示 .lnk/.url 后缀
-            item = QListWidgetItem(self._icon_for(p, is_dir), disp)
+            item = QListWidgetItem(self._baked_icon(p, is_dir, self.list.iconSize()), disp)
             item.setData(Qt.UserRole, p)
             item.setToolTip(p)
             self.list.addItem(item)
@@ -1472,68 +1528,16 @@ class BoxWindow(QWidget):
             _h32.ShowWindow(hwnd, 8)   # SW_SHOWNA：恢复可见但不抢焦点
 
     def _desktop_tick(self):
-        """看门狗必须极廉：每 tick 只做一次中心命中检测。
-        probe_desktop 的 5 点 WindowFromPoint 是跨进程同步调用，命中无响应的窗口会
-        阻塞主线程——4 个格子每秒 48 次探测曾把界面打到转圈假死，顺序绝不能反过来。"""
+        """看门狗只做两件极廉的事：自身存活检查 + 桌面带补挂。
+        不做跨进程命中探测——WindowFromPoint 会向命中窗口同步发 WM_NCHITTEST，
+        对方线程不消息循环就把 UI 线程整段卡死（2026-10 实测多次秒级冻结，
+        探测随桌面整理软件兼容层整体移除；装了桌面整理软件时格子可能被
+        它的覆盖层压住，属已知取舍）。"""
         hwnd = int(self.winId())
         if not ui._u32.IsWindow(hwnd):
             self._sink_timer.stop()
             return
         self._ensure_band()
-        if self._op is not None or not self._covered_by_surface():
-            return
-        # 真被表层压住才做完整探测找锚点抬回（表层每 ~2.5s 重建一次，属低频路径）
-        if not self._desk_surface or not ui._u32.IsWindow(self._desk_surface):
-            self._desk_surface, _t = ui.probe_desktop(skip=(hwnd,))
-        ui.sink_to_desktop(self, self._desk_surface)
-
-    def _on_win_event(self, _hook, event, hwnd, idObject, _idChild, _thread, _ts):
-        """桌面带内窗口的 SHOW / 容器 REORDER 事件回调。只做轻量过滤，
-        真正的抬回动作丢回事件循环（钩子里直接动 z-order 有风险）。"""
-        try:
-            if not hwnd or not self.isVisible() or self._op is not None:
-                return
-            if hwnd == int(self.winId()):
-                return
-            if idObject not in (0, -4):   # 只看窗口本身 / 客户区级别
-                return
-            cls = ui._class_name(hwnd)
-            if cls in ui._PROG_FAMILY:
-                if event != ui._EVENT_REORDER:
-                    return
-            else:
-                sw, sh = ui._u32.GetSystemMetrics(0), ui._u32.GetSystemMetrics(1)
-                if not ui._is_desktop_surface(hwnd, sw, sh):
-                    return
-            QTimer.singleShot(0, self._lift_if_covered)
-        except Exception:
-            pass
-
-    def _unhook_win_event(self):
-        if self._win_evt_hook:
-            ui._u32.UnhookWinEvent(self._win_evt_hook)
-            self._win_evt_hook = None
-
-    def _lift_if_covered(self):
-        """表层重排后的即时抬回：没被压住就不动（自己的沉底也会触发 REORDER，防自激回路）。"""
-        if self._covered_by_surface():
-            ui.sink_to_desktop(self, self._desk_surface)
-
-    def _covered_by_surface(self):
-        """格子中心被桌面整理软件的表层压住（看不见也点不到）的判定。"""
-        if not self.isVisible():
-            return False
-        h = ui._u32.WindowFromPoint(wintypes.POINT(self.x() + self.width() // 2,
-                                                   self.y() + self.height() // 2))
-        mine = int(self.winId())
-        sw, sh = ui._u32.GetSystemMetrics(0), ui._u32.GetSystemMetrics(1)
-        while h:
-            if h == mine or ui._class_name(h) in ui._PROG_FAMILY:
-                return False
-            if ui._is_desktop_surface(h, sw, sh):
-                return True
-            h = ui._u32.GetParent(h)
-        return False
 
     # ---------- 绘制 ----------
     def paintEvent(self, e):
@@ -2521,7 +2525,7 @@ def _hit_desktop(pt, own, my_pid, sw, sh, blank_only):
     """桌面命中测试（DesktopClickHook 双击判定与 DesktopRightClickHook 右键拦截共用）。
     命中窗口沿父链走：先碰到我们自己的窗口（own）则忽略；SysListView32/SHELLDLL_DefView
     只有根窗口是 Progman/WorkerW 才是桌面（资源管理器窗口里也有这两个壳视图）；
-    桌面整理软件的全屏覆盖层也算（与 app.probe_desktop 同一判定）。
+    桌面整理软件的全屏覆盖层也算（全屏工具窗判定见 app._is_desktop_surface）。
     blank_only=True 时点中图标/文件夹不算空白（双击文件夹不能触发显隐）；右键拦截不需要区分。"""
     h = ui._u32.WindowFromPoint(pt)
     pid = wintypes.DWORD()
@@ -2543,7 +2547,7 @@ def _hit_desktop(pt, own, my_pid, sw, sh, blank_only):
             return cls == 'SHELLDLL_DefView' or not _desktop_icon_at(h, pt)
         if cls in ui._PROG_FAMILY:
             return True
-        # 桌面整理软件的全屏覆盖层：与 app.probe_desktop 同一判定
+        # 桌面整理软件的全屏覆盖层也算桌面
         if ui._is_desktop_surface(h, sw, sh):
             return True
         h = ui._u32.GetParent(h)
