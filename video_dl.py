@@ -344,15 +344,16 @@ def uninstall_tools():
 def parse_video(url, timeout=60):
     """解析视频信息（-J 全量 JSON）：返回 {'title', 'duration', 'heights'}，
     heights 为源视频实际提供的分辨率高度降序（最多 8 档）；失败抛带可读信息的异常。"""
-    r = subprocess.run([ytdlp_path(), '-J', '--no-playlist', '--no-color']
+    r = subprocess.run([ytdlp_path(), '-J', '--no-playlist', '--no-color',
+                        '--encoding', 'utf-8']
                        + _cookie_args() + [url],
                        capture_output=True, timeout=timeout,
                        creationflags=CREATE_NO_WINDOW)
     if r.returncode != 0:
-        text = r.stderr.decode(LOCALE_ENC, 'replace') + r.stdout.decode(LOCALE_ENC, 'replace')
+        text = r.stderr.decode('utf-8', 'replace') + r.stdout.decode('utf-8', 'replace')
         lines = [l.replace('ERROR:', '').strip() for l in text.splitlines() if 'ERROR' in l]
         raise RuntimeError(lines[-1][:120] if lines else '解析失败（退出码 %d）' % r.returncode)
-    j = json.loads(r.stdout.decode(LOCALE_ENC, 'replace'))
+    j = json.loads(r.stdout.decode('utf-8', 'replace'))
     fmts = j.get('formats', [])
     heights = sorted({f['height'] for f in fmts
                       if f.get('height') and f.get('vcodec') != 'none'},
@@ -391,6 +392,7 @@ def download_cmd(url, height, out_dir):
             '--merge-output-format', 'mp4',
             '--ffmpeg-location', tools_dir(),
             '-P', out_dir,
+            '--encoding', 'utf-8',   # 强制 UTF-8 输出：文件名含 emoji 时 cp936 会丢字符
             '--newline', '--no-color'] + _cookie_args() + [url]
 
 
@@ -430,7 +432,7 @@ class Download(object):
         stage = ''          # 当前阶段名，前缀进进度文案
         self._proc = subprocess.Popen(
             self.cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, encoding=LOCALE_ENC, errors='replace',
+            text=True, encoding='utf-8', errors='replace',   # 与 --encoding utf-8 配对
             creationflags=CREATE_NO_WINDOW)
         for line in self._proc.stdout:
             line = line.strip()
