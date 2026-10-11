@@ -86,7 +86,8 @@ Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyS
 
 - `main.pyw` — 入口：单实例 IPC（`QLocalServer`）、节假日后台更新、局域网传输服务启动、（frozen 时）`--uninstall` 卸载向导入口
 - `app.py` — 面板 UI（日历 / 待办 / 传输 / 顶部栏滑出与拖动）、`SettingsDialog` 与节假日导入引导窗
-- `boxes.py` — 桌面格子：空白格子（桌面文件的收纳视图，不搬文件、只隐藏桌面图标）与文件夹映射格子、双击桌面显隐；桌面图标位置记忆（`boxes.json['desktop_icons']`：退出时与每 60s 快照可见图标坐标——格子里的已隐藏、ListView 枚举不到，正好是「没进格子的文件」——启动时 `_DesktopIconLayout.restore_positions` 按显示名摆回并 3s 后补一次，自动排列桌面不插手）
+- `boxes.py` — 桌面格子：空白格子（桌面文件的收纳视图，不搬文件、只隐藏桌面图标）与文件夹映射格子、双击桌面显隐；桌面图标位置记忆（`boxes.json['desktop_icons']`：退出时与每 60s 快照可见图标坐标——格子里的已隐藏、ListView 枚举不到，正好是「没进格子的文件」——启动时 `_DesktopIconLayout.restore_positions` 按显示名摆回并 3s 后补一次，自动排列桌面不插手）；
+格子拖出落回桌面由 `_DesktopDropOverlay`（桌面带最底层的全屏透明落放层，仅拖拽期间显示）接住内部处理、不走 Explorer（被占用的文件夹也能拖出），落到资源管理器窗口/其他应用才交 URL 给对方真实移动；拖拽默认「移动」、按住 Ctrl 落放 = 复制；Delete 删除走外壳原生确认弹窗（`_shell_op` 包 SHFileOperation）
 - `calendar_data.py` — 内置国务院节假日数据、农历换算、三源联网回退与离线导入
 - `transfer.py` — 局域网文件传输协议核心（参照 LocalSend v2 的私有实例）：UDP 组播发现 + HTTP REST 传输，纯标准库零 Qt
 - `transfer_ui.py` — 面板「传输」tab：设备列表、文件多选 + 拖拽发送、传输记录（「传输中」的记录行亮彩色跑马灯轮廓）、接收确认弹窗、发送方取消；传输服务生命周期自持（默认关闭的门禁层、启用/停用、「?」说明弹窗）；`enable_service()` 成功后后台查一次 Windows 防火墙阻止规则（`sysutil.firewall_blocked` 按 exe 路径匹配、免管理员；命中弹 `_ConfirmDialog` 引导一键修复，UAC 被拒静默，每会话最多提示一次）
@@ -550,7 +551,7 @@ IPC 通道（与 `--pick-folder` 同一条）发回面板建格子；`new_folder
     （实测：管理员 ACL 下发的企业图标，普通用户只有读权限，改不了隐藏位）——
     这类「藏不掉」的文件由 `_collect` 退而**真搬进** `%APPDATA%\zbox\Boxes\<id>\`，
     `rec['moved']` 记「桌面路径 → 存放路径」，`show_icons` 时按它搬回桌面；
-    拖出不经暂存（已在 AppData，直接拖真路径），`finish_drag_out` 空 saved 也刷新收尾；
+    拖出直接拖 AppData 里的真路径（落到桌面由落放层 `_shell_op` 搬回，账本靠 refresh 自愈）；
     `_upgrade_blank_boxes` 扫残留时用 keep 跳过托管中的文件。DeskGo 能收这类图标是
     因为它自绘整个桌面图标层、从不碰文件属性，是另一套模型，别照抄。
   - **释放后图标落点要修正（`_DesktopIconLayout`，2026-10 用户报障）**：还原隐藏属性后，
@@ -572,23 +573,29 @@ IPC 通道（与 `--pick-folder` 同一条）发回面板建格子；`new_folder
     优先、主名兜底，撞名（同主名不同扩展名）挑「位置不在快照里」的新项；③ shutdown 时
     多个空白格子各跑一次快照+修正，后跑的快照含先跑已挪好的图标（SET 回原位=无操作），
     幂等不用改。
-  - **拖出 = 先把文件挪进桌面下的隐藏暂存夹 `桌面\.zbox\`（`stage_for_drag`）**：
-    格子里的文件本来就在桌面上，直接拖到桌面就是把文件移动到它自己所在的目录 ——
-    资源管理器会弹「源文件名和目标文件名相同」（用户实测）。挪进同盘的隐藏子目录后，
-    拖到桌面 = 一次真实的跨目录移动（文件回到原路径），拖到资源管理器文件夹/别的格子
-    也都正常。`finish_drag_out` 收尾：暂存文件还在 = 没搬走（取消拖拽/拖回格子）→ 搬回
-    原路径继续藏着；暂存文件没了 = 被搬走了 → 从 `items` 里去掉（拖到桌面即「移出格子」，
-    图标不再隐藏）。拖拽期间 `self._dragging` 有值：`refresh()` 直接返回（不然重建列表会把
-    拖拽源那一行清掉）、`_entries_from_items()` 按暂存路径确认文件还在。暂存夹空了立刻删掉
-    （桌面上不留目录），拖拽途中被强杀留下的残留在启动时由 `_upgrade_blank_boxes()`
-    （内部 `_recover_files`）搬回桌面并补进记账。映射格子不参与这套（文件在别处）。
+  - **拖出落回桌面 = `_DesktopDropOverlay` 内部处理，不走 Explorer（2026-10 改）**：
+    格子里的文件本来就在桌面上，让 Explorer 执行落放＝移动到它自己所在的目录 ——
+    资源管理器会弹「源文件名和目标文件名相同」（用户实测）。所以拖拽期间 show 一个
+    全屏透明落放层（挂桌面带最底层：压在桌面图标之上、格子/面板之下——`begin()` 里
+    统一抬一次兄弟序），落桌面由它接住走 `mgr.overlay_drop()`：落桌面根 = 划账即可
+    （文件不挪窝，**被占用的文件夹也能拖出**，DeskGo 同款）；落点命中桌面文件夹图标
+    则落进它（`_desktop_folder_at`，文件夹快捷方式不解析目标）。落资源管理器窗口/
+    其他应用照旧交文件 URL 给对方真实移动。空白格子拖出前先把隐藏图标放出来
+    （对方真实移动时隐藏属性不能跟过去），拖完没搬走的（取消/复制）重新藏；
+    拖拽期间 `self._dragging` 记账：`refresh()` 直接返回（不然重建列表会把拖拽源那一行
+    清掉）、`_entries_from_items()` 不会把放出来的图标当场收回。落放后图标用
+    `_place_desktop_icons()` 摆到落点（Explorer 只会把新图标扔到第一列空位）。
+    旧版用隐藏暂存夹 `桌面\.zbox\` 周转（`stage_for_drag`，已删）：文件夹被占用时
+    `shutil.move` 退化成整树复制、留下半拉子副本还没人清理（用户实测）——
+    旧残留由 `_upgrade_blank_boxes()`（内部 `_recover_files`）搬回桌面并补进记账。
   - 拖到别的空白格子 = 换归属（`ungroup_paths`）；格子里改名要同步 `items`/`attrs` 的键
     （`rename_item`，否则文件会「藏着但不在任何格子里」）。
   - **落放效果（鼠标旁那个徽标）分两步，别混为一谈**：OLE 里徽标由 **DragOver** 报回的效果
     决定，而「源方要不要清理源文件」只看 **Drop** 报回的效果（`IDropTarget::Drop` 的
     `*pdwEffect`）。所以：
-    - `drag_effect()`（悬停）**一律报 MoveAction** → 徽标显示「移动」。这与「文件被收进格子」
-      的直觉一致，也是 DeskGo 那种「移动到 <格子名>」的观感；
+    - `drag_effect(e)`（悬停）**默认报 MoveAction、按住 Ctrl 报 CopyAction** → 徽标在
+      「移动」/加号「复制」间切换（落放时真复制，见 `import_paths`/`overlay_drop`）。
+      默认移动与「文件被收进格子」的直觉一致，也是 DeskGo 那种「移动到 <格子名>」的观感；
     - `drop_effect(paths)`（落放）**按实际结果**回报：源文件都不在原处了才算 Move，否则 Copy。
     ⚠️ 绝不能把 **Drop** 一律报成 Move：报 Move 而文件仍在原处时，资源管理器会认为移动已完成、
     **把源文件删掉**（实测：探针回报 Move 不搬文件，桌面上的源文件当场消失；Qt 源码里那句
