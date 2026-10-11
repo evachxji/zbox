@@ -48,6 +48,7 @@ SELF = Path(__file__).name
 def skip(p):
     # 编辑器/工具元数据与脚本自身不上传
     return (p.name in (SELF, 'PROJECT_HANDOFF.md') or p.name.endswith('.artifact.json')
+            or '__pycache__' in p.parts
             or any(part.startswith('.') for part in p.parts))
 
 
