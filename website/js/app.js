@@ -6,8 +6,9 @@
   "use strict";
 
   /* ---------- 下载地址（单一配置点，可修改） ---------- */
-  var WINDOWS_DOWNLOAD_URL = "https://github.com/evachxji/zbox/releases/download/v0.3/zbox-Setup-v0.3-x64.exe";
-  var MOBILE_DOWNLOAD_URL = "https://github.com/evachxji/zbox/releases/download/v0.3/zbox-v0.3.apk";
+  var WINDOWS_DOWNLOAD_URL = "https://github.com/evachxji/zbox/releases/download/v0.4/zbox-Setup-v0.4-x64.exe";
+  var MOBILE_DOWNLOAD_URL = "https://github.com/evachxji/zbox/releases/download/v0.4/zbox-Android-v0.4.apk";
+  var HARMONY_DOWNLOAD_URL = "https://github.com/evachxji/zbox/releases/download/v0.4/zbox-HarmonyOS-v0.4-unsigned.hap";
   var GITHUB_URL = "https://github.com/evachxji/zbox";
 
   function wireLinks(key, url) {
@@ -20,6 +21,7 @@
   }
   wireLinks("windows", WINDOWS_DOWNLOAD_URL);
   wireLinks("android", MOBILE_DOWNLOAD_URL);
+  wireLinks("harmony", HARMONY_DOWNLOAD_URL);
   wireLinks("github", GITHUB_URL);
 
   var q = function (s) { return document.querySelector(s); };
@@ -305,7 +307,7 @@
   capOut(tlClean, "#cap-back", 4.2);
 
   /* ============================================================
-     第八幕：v0.3 多端传输（双向）
+     第八幕：多端传输（双向 · 三端）
      ============================================================ */
   var tlTr = gsap.timeline({
     scrollTrigger: {

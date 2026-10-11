@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Zbox — 你的桌面，井然有条</title>
-  <meta name="description" content="Zbox：把堆在桌面的文件拖进格子即归类，附带日历、待办与局域网多端文件传输的个人工作空间。免费开源，Windows 与 Android。" />
+  <meta name="description" content="Zbox：把堆在桌面的文件拖进格子即归类，附带日历、待办、截图、视频解析与局域网多端文件传输的个人工作空间。免费开源，Windows、Android 与 HarmonyOS。" />
   <link rel="icon" href="assets/brand/icon.png" type="image/png" />
   <link rel="preload" as="image" href="assets/desktop/desktop-grids-overview.png" />
   <script>document.documentElement.classList.add("js");</script>
@@ -110,9 +110,9 @@
       <div class="hero-veil" aria-hidden="true"></div>
       <div class="hero-core">
         <img class="logo" src="assets/brand/icon.png" width="256" height="256" alt="Zbox 标志" />
-        <h1>Zbox<span class="hero-chip">v0.3</span></h1>
+        <h1>Zbox<span class="hero-chip">v0.4</span></h1>
         <p class="tagline">你的桌面，井然有条。</p>
-        <p class="hero-cta"><a class="btn-primary" data-dl="windows" href="https://github.com/evachxji/zbox/releases/download/v0.3/zbox-Setup-v0.3-x64.exe"><svg aria-hidden="true"><use href="#i-dl"/></svg>下载 Windows 版</a></p>
+        <p class="hero-cta"><a class="btn-primary" data-dl="windows" href="https://github.com/evachxji/zbox/releases/download/v0.4/zbox-Setup-v0.4-x64.exe"><svg aria-hidden="true"><use href="#i-dl"/></svg>下载 Windows 版</a></p>
         <p class="hero-meta">Windows 10 / 11 · x64</p>
       </div>
       <div class="hero-hint" aria-hidden="true">
@@ -251,7 +251,7 @@
             <figcaption class="shot-cap">浅色主题 · 同一桌面</figcaption>
           </figure>
           <figure>
-            <div class="shot"><img src="assets/desktop/settings-window.png" width="370" height="396" loading="lazy" decoding="async" alt="Zbox 设置窗口：深色、浅色、跟随系统三档与传输开关" /></div>
+            <div class="shot"><img src="assets/desktop/settings-window.png" width="309" height="419" loading="lazy" decoding="async" alt="Zbox 设置窗口：主题三档、截图热键与视频解析开关，改动即时生效" /></div>
             <figcaption class="shot-cap">设置 · 一键切换</figcaption>
           </figure>
         </div>
@@ -386,7 +386,7 @@
 
         <div class="panel" id="panel-clean" aria-hidden="true">
           <div class="panel-tabs">
-            <span class="on">日历</span><span>待办</span><span>传输</span>
+            <span class="on">日历</span><span>待办</span><span>传输</span><span>视频解析</span>
             <span class="panel-icons">
               <svg aria-hidden="true"><use href="#i-gear"/></svg>
               <svg aria-hidden="true"><use href="#i-minus"/></svg>
@@ -418,11 +418,11 @@
         </div>
         <div class="cal-grid reveal">
           <figure>
-            <div class="shot"><img src="assets/desktop/panel-calendar-todo.png" width="402" height="548" loading="lazy" decoding="async" alt="Zbox 悬浮面板·日历页：顶部时钟与倒计时、周一起始月视图、法定节假日休班角标、农历副标题" /></div>
+            <div class="shot"><img src="assets/desktop/panel-calendar-todo.png" width="359" height="476" loading="lazy" decoding="async" alt="Zbox 悬浮面板·日历页：顶部时钟与倒计时、周一起始月视图、法定节假日休班角标、农历副标题" /></div>
             <figcaption class="shot-cap">日历 · 时钟、倒计时、法定节假日与农历</figcaption>
           </figure>
           <figure>
-            <div class="shot"><img src="assets/desktop/panel-todo.png" width="402" height="548" loading="lazy" decoding="async" alt="Zbox 悬浮面板·待办页：逾期标红、今天、还剩 N 天的截止日期标签" /></div>
+            <div class="shot"><img src="assets/desktop/panel-todo.png" width="359" height="476" loading="lazy" decoding="async" alt="Zbox 悬浮面板·待办页：逾期标红、今天、还剩 N 天的截止日期标签" /></div>
             <figcaption class="shot-cap">待办 · 逾期标红，今日与倒计时一目了然</figcaption>
           </figure>
         </div>
@@ -436,7 +436,82 @@
       </div>
     </section>
 
-    <!-- ============ 第八幕：v0.3 多端传输 ============ -->
+    <!-- ============ 新功能：视频解析（真实截图） ============ -->
+    <section class="sec" id="sec-video">
+      <div class="sec-inner">
+        <div class="center reveal">
+          <span class="kick">视频解析</span>
+          <h2 class="h2">面板里，直接下视频。</h2>
+          <p class="sub">粘贴链接即解析，选好清晰度就下载——YouTube、Bilibili 等主流平台，组件全部本地运行。</p>
+        </div>
+        <div class="cal-grid video-grid reveal">
+          <figure>
+            <div class="shot"><img src="assets/desktop/video-gate.png" width="359" height="476" loading="lazy" decoding="async" alt="Zbox 视频解析页默认关闭状态：高斯模糊底与启用按钮" /></div>
+            <figcaption class="shot-cap">默认关闭 · 一键启用</figcaption>
+          </figure>
+          <figure>
+            <div class="shot"><img src="assets/desktop/video-parsed.png" width="359" height="476" loading="lazy" decoding="async" alt="Zbox 视频解析完成：视频卡片显示标题与时长，清晰度下拉列出 1080P 等档位" /></div>
+            <figcaption class="shot-cap">解析完成 · 清晰度按源站档位</figcaption>
+          </figure>
+          <figure>
+            <div class="shot"><img src="assets/desktop/video-downloading.png" width="359" height="476" loading="lazy" decoding="async" alt="Zbox 视频下载中：卡片环绕彩虹进度描边，显示已下载大小、速度与剩余时间" /></div>
+            <figcaption class="shot-cap">下载中 · 暂停续传</figcaption>
+          </figure>
+          <figure>
+            <div class="shot"><img src="assets/desktop/video-done.png" width="359" height="476" loading="lazy" decoding="async" alt="Zbox 视频下载完成：两条任务卡片各带文件大小与打开按钮" /></div>
+            <figcaption class="shot-cap">完成 · 多任务列表</figcaption>
+          </figure>
+        </div>
+        <ul class="facts reveal">
+          <li><svg aria-hidden="true"><use href="#i-check"/></svg>粘贴即解析：标题、时长、清晰度档位</li>
+          <li><svg aria-hidden="true"><use href="#i-check"/></svg>最高 4K，视源站实际档位</li>
+          <li><svg aria-hidden="true"><use href="#i-check"/></svg>多任务并行 · 断点续传</li>
+          <li><svg aria-hidden="true"><use href="#i-check"/></svg>组件本地运行（yt-dlp / ffmpeg）</li>
+          <li><svg aria-hidden="true"><use href="#i-check"/></svg>默认关闭 · 不用不装</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ============ 新功能：截图（真实截图） ============ -->
+    <section class="sec" id="sec-shot">
+      <div class="sec-inner">
+        <div class="center reveal">
+          <span class="kick">截图</span>
+          <h2 class="h2">截图、标注、钉在桌面。</h2>
+          <p class="sub">全局热键唤起，框选、标注、钉图、截长图，一气呵成。</p>
+        </div>
+        <div class="shot-grid reveal">
+          <figure>
+            <div class="shot"><img src="assets/desktop/shot-overlay.png" width="1920" height="1080" loading="lazy" decoding="async" alt="Zbox 截图：全屏灰罩中框选区域，底部工具条提供矩形、椭圆、文字标注" /></div>
+            <figcaption class="shot-cap">灰罩框选 · 八手柄微调</figcaption>
+          </figure>
+          <figure>
+            <div class="shot"><img src="assets/desktop/shot-annotated.png" width="1920" height="1080" loading="lazy" decoding="async" alt="Zbox 截图标注完成态：椭圆圈出格子标题，矩形框选文件，附两行文字说明" /></div>
+            <figcaption class="shot-cap">矩形 · 椭圆 · 多行文字标注</figcaption>
+          </figure>
+          <figure>
+            <div class="shot"><img src="assets/desktop/shot-pin.png" width="1920" height="1080" loading="lazy" decoding="async" alt="Zbox 钉图：无边框置顶贴图窗贴在桌面上" /></div>
+            <figcaption class="shot-cap">钉在桌面 · 置顶随看</figcaption>
+          </figure>
+          <figure>
+            <div class="shot"><img src="assets/desktop/shot-long.png" width="1920" height="1080" loading="lazy" decoding="async" alt="Zbox 截长图：拼接进行中，右侧缩略预览实时延伸" /></div>
+            <figcaption class="shot-cap">截长图 · 自动下滚拼接</figcaption>
+          </figure>
+        </div>
+        <ul class="facts reveal">
+          <li><svg aria-hidden="true"><use href="#i-check"/></svg>全局热键唤起，键位自定义</li>
+          <li><svg aria-hidden="true"><use href="#i-check"/></svg>六色三档，矩形 / 椭圆 / 文字</li>
+          <li><svg aria-hidden="true"><use href="#i-check"/></svg>钉图滚轮缩放 · 双击关闭</li>
+          <li><svg aria-hidden="true"><use href="#i-check"/></svg>长图自动下滚 · 实时预览</li>
+        </ul>
+        <p class="toolbar-note reveal">
+          <img src="assets/desktop/shot-toolbar-light.png" width="360" height="95" loading="lazy" decoding="async" alt="浅色主题下的 Zbox 截图工具条" />
+          <span>工具条跟随面板主题 —— 图为浅色版</span>
+        </p>
+      </div>
+    </section>
+
+    <!-- ============ 第八幕：多端传输（三端） ============ -->
     <div id="pin-transfer">
       <section class="stage" id="stage-tr" aria-label="PC 与手机双向文件传输演示">
         <div class="wall wall-clean" aria-hidden="true"></div>
@@ -475,7 +550,7 @@
 
         <div class="panel tpanel" id="tpanel" aria-label="Zbox 传输面板（界面还原）">
           <div class="panel-tabs">
-            <span>日历</span><span>待办</span><span class="on">传输</span>
+            <span>日历</span><span>待办</span><span class="on">传输</span><span>视频解析</span>
             <span class="panel-icons">
               <svg aria-hidden="true"><use href="#i-gear"/></svg>
               <svg aria-hidden="true"><use href="#i-minus"/></svg>
@@ -485,7 +560,7 @@
             <span class="ref"><svg aria-hidden="true"><use href="#i-refresh"/></svg></span>
           </div>
           <div class="dev-row">
-            <span class="tag">手机</span><span>Pixel 6</span><span class="st">在线</span>
+            <span class="tag">手机</span><span>Mate 90 Pro</span><span class="st">在线</span>
           </div>
           <div class="tsend">
             <span class="pick">选择文件发送（可拖）</span>
@@ -494,17 +569,17 @@
           <div class="tlabel">传输记录</div>
           <div class="trec" id="trec-vac">
             <svg class="fi t-img" aria-hidden="true"><use href="#i-img"/></svg>
-            <span class="nm">Vacation.jpg · 发送至 Pixel 6</span>
+            <span class="nm">Vacation.jpg · 发送至 Mate 90 Pro</span>
             <span class="ok">完成</span>
           </div>
         </div>
 
         <div class="phone" id="phone-tr">
           <div class="scr">
-            <img class="ps-1" src="assets/mobile/mobile-devices.png" width="1080" height="2400" loading="lazy" decoding="async" alt="Zbox Android 端设备列表：发现附近的电脑 DESKTOP-9F2K7L" />
-            <img class="ps-2" src="assets/mobile/mobile-receive-dialog.png" width="1080" height="2400" loading="lazy" decoding="async" alt="Zbox Android 端接收确认弹窗：来自电脑的 Vacation.jpg" />
-            <img class="ps-3" src="assets/mobile/mobile-transfers.png" width="1080" height="2400" loading="lazy" decoding="async" alt="Zbox Android 端传输记录：已接收 Vacation.jpg，已发送 IMG_2048.jpg" />
-            <img class="ps-4" src="assets/mobile/mobile-send.png" width="1080" height="2400" loading="lazy" decoding="async" alt="Zbox Android 端选择文件发送：选中 IMG_2048.jpg" />
+            <img class="ps-1" src="assets/harmony/harmony-home.png" width="1280" height="2832" loading="lazy" decoding="async" alt="Zbox 传输鸿蒙端首页：本机别名 Mate 90 Pro，附近设备发现电脑 DESKTOP-9F2K7L" />
+            <img class="ps-2" src="assets/harmony/harmony-receive.png" width="1280" height="2832" loading="lazy" decoding="async" alt="Zbox 传输鸿蒙端接收确认弹层：电脑想发送 Vacation.jpg" />
+            <img class="ps-3" src="assets/harmony/harmony-history.png" width="1280" height="2832" loading="lazy" decoding="async" alt="Zbox 传输鸿蒙端传输记录：接收 Vacation.jpg 与发送 IMG_2048.jpg 均完成" />
+            <img class="ps-4" src="assets/harmony/harmony-send.png" width="1280" height="2832" loading="lazy" decoding="async" alt="Zbox 传输鸿蒙端选择文件：选中 IMG_2048.jpg 准备发送到电脑" />
           </div>
           <span class="cam" aria-hidden="true"></span>
         </div>
@@ -518,7 +593,7 @@
 
         <div class="recv" id="recv" role="dialog" aria-label="接收文件确认（界面还原）">
           <h4>收到文件</h4>
-          <p class="from">来自 Pixel 6 · 1 个文件 · 共 2.4 MB</p>
+          <p class="from">来自 Mate 90 Pro · 1 个文件 · 共 2.4 MB</p>
           <div class="recv-file"><svg class="fi t-img" aria-hidden="true"><use href="#i-img"/></svg><span>IMG_2048.jpg</span></div>
           <p class="recv-save">保存到：下载\Zbox<span class="chg">更改…</span></p>
           <div class="recv-btns">
@@ -530,7 +605,7 @@
         <p class="corner-note">传输协议参照 LocalSend v2 · 私有实现（与官方 LocalSend 不互通）</p>
 
         <div class="cap" id="cap-tr1">
-          <span class="kick">Zbox 0.3 · 新能力</span>
+          <span class="kick">Zbox 0.4 · 三端互传</span>
           <h2>文件，随时流动。</h2>
         </div>
         <div class="cap" id="cap-tr2"><h2>Vacation.jpg，已到手机。</h2></div>
@@ -564,30 +639,32 @@
       </section>
     </div>
 
-    <!-- ============ 第十幕：v0.3 ============ -->
+    <!-- ============ 第十幕：v0.4 ============ -->
     <section class="sec" id="sec-v03">
       <div class="sec-inner center">
         <div class="reveal">
           <span class="kick">最新版本</span>
-          <h2 class="h2">Zbox 0.3</h2>
-          <p class="sub">桌面与手机，从此相连。</p>
+          <h2 class="h2">Zbox 0.4</h2>
+          <p class="sub">Windows、Android、鸿蒙，同在一个局域网。</p>
         </div>
         <div class="v03-mark reveal" aria-hidden="true">
           <span class="dev"><svg><use href="#i-pc"/></svg>Windows</span>
           <span class="swap"><svg><use href="#i-swap"/></svg></span>
-          <span class="dev"><svg><use href="#i-phone"/></svg>Android</span>
+          <span class="dev"><svg><use href="#i-android"/></svg>Android</span>
+          <span class="swap"><svg><use href="#i-swap"/></svg></span>
+          <span class="dev"><svg><use href="#i-phone"/></svg>HarmonyOS</span>
         </div>
         <div class="v03-shots reveal">
           <figure>
-            <div class="shot"><img src="assets/desktop/transfer-pc-devices.png" width="402" height="548" loading="lazy" decoding="async" alt="Zbox 传输页：本机别名与附近设备列表，发现 Pixel 6" /></div>
+            <div class="shot"><img src="assets/desktop/transfer-pc-devices.png" width="359" height="476" loading="lazy" decoding="async" alt="Zbox 传输页：本机别名与附近设备列表，发现 Pixel 6" /></div>
             <figcaption class="shot-cap">启用传输 · 自动发现同网设备</figcaption>
           </figure>
           <figure>
-            <div class="shot"><img src="assets/desktop/transfer-pc-sending.png" width="402" height="548" loading="lazy" decoding="async" alt="Zbox 传输记录：Vacation.jpg 已发送至 Pixel 6，状态完成" /></div>
+            <div class="shot"><img src="assets/desktop/transfer-pc-sending.png" width="359" height="476" loading="lazy" decoding="async" alt="Zbox 传输记录：Vacation.jpg 已发送至 Pixel 6，状态完成" /></div>
             <figcaption class="shot-cap">真实界面，未加修饰</figcaption>
           </figure>
           <figure>
-            <div class="shot"><img src="assets/desktop/transfer-pc-received.png" width="419" height="579" loading="lazy" decoding="async" alt="Zbox 传输页收到文件：来自手机的 1000186943.jpg，含保存目录与拒绝、接受按钮" /></div>
+            <div class="shot"><img src="assets/desktop/transfer-pc-received.png" width="359" height="476" loading="lazy" decoding="async" alt="Zbox 收到文件的独立置顶确认弹窗：来自 Pixel 6 的 IMG_2048.jpg，含保存目录与拒绝、接受按钮" /></div>
             <figcaption class="shot-cap">接收确认 · 手动接受才保存</figcaption>
           </figure>
         </div>
@@ -606,18 +683,27 @@
             <svg class="os-ic" aria-hidden="true"><use href="#i-windows"/></svg>
             <h3>Windows</h3>
             <p class="meta">Windows 10 / 11 · x64 · 免费开源</p>
-            <p class="note">zbox-Setup-v0.3-x64.exe · 仅当前用户安装，免管理员</p>
-            <a class="btn-primary" data-dl="windows" href="https://github.com/evachxji/zbox/releases/download/v0.3/zbox-Setup-v0.3-x64.exe">
+            <p class="note">zbox-Setup-v0.4-x64.exe · 仅当前用户安装，免管理员</p>
+            <a class="btn-primary" data-dl="windows" href="https://github.com/evachxji/zbox/releases/download/v0.4/zbox-Setup-v0.4-x64.exe">
               <svg aria-hidden="true"><use href="#i-dl"/></svg>下载 Windows 版
             </a>
           </div>
           <div class="dl-card">
             <svg class="os-ic" aria-hidden="true"><use href="#i-android"/></svg>
             <h3>Android</h3>
-            <p class="meta">v0.3 · 与桌面端局域网互传文件</p>
-            <p class="note">zbox-v0.3.apk · Android 安装包</p>
-            <a class="btn-primary" data-dl="android" href="https://github.com/evachxji/zbox/releases">
+            <p class="meta">v0.4 · 与桌面端局域网互传文件</p>
+            <p class="note">zbox-Android-v0.4.apk · Android 安装包</p>
+            <a class="btn-primary" data-dl="android" href="https://github.com/evachxji/zbox/releases/download/v0.4/zbox-Android-v0.4.apk">
               <svg aria-hidden="true"><use href="#i-dl"/></svg>下载 Android 版
+            </a>
+          </div>
+          <div class="dl-card">
+            <svg class="os-ic" aria-hidden="true"><use href="#i-phone"/></svg>
+            <h3>HarmonyOS</h3>
+            <p class="meta">v0.4 · Zbox 传输 · HarmonyOS NEXT 5.0+</p>
+            <p class="note">zbox-HarmonyOS-v0.4-unsigned.hap · 免签名调试包，需开发者设备 · <a href="harmony/privacy.html">隐私政策</a></p>
+            <a class="btn-primary" data-dl="harmony" href="https://github.com/evachxji/zbox/releases/download/v0.4/zbox-HarmonyOS-v0.4-unsigned.hap">
+              <svg aria-hidden="true"><use href="#i-dl"/></svg>下载鸿蒙版
             </a>
           </div>
         </div>
@@ -647,7 +733,7 @@
         <li><a href="https://github.com/evachxji/zbox/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a></li>
       </ul>
       <p class="fine">
-        © 2026 Zbox contributors · 页面截图均来自 Zbox v0.3 真实运行画面；整理与传输过程为滚动驱动的界面演示。<br />
+        © 2026 Zbox contributors · 页面截图均来自 Zbox v0.4 真实运行画面；整理与传输过程为滚动驱动的界面演示。<br />
         Zbox 的局域网传输参照开源项目 LocalSend 的 v2 协议实现，为私有实例，与官方 LocalSend 应用不互通。
       </p>
     </div>
