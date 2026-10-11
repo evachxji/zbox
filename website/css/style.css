@@ -995,7 +995,7 @@ body.rm .map-grid, html:not(.js) .map-grid { transform: translateY(-50%); }
 .dl-card .os-ic { width: 38px; height: 38px; color: #e6e9ef; margin-bottom: 14px; }
 .dl-card h3 { font-size: 24px; font-weight: 700; letter-spacing: -.01em; }
 .dl-card .meta { color: var(--muted); font-size: 14px; }
-.dl-card .note { color: var(--faint); font-size: 12.5px; margin-top: 2px; }
+.dl-card .note { color: var(--faint); font-size: 12.5px; margin-top: 2px; flex: 1 1 auto; /* 弹性伸展，让三张卡的按钮对齐到底部 */ }
 .dl-card .note a { color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
 @media (hover: hover) { .dl-card .note a:hover { color: var(--fg); } }
 
