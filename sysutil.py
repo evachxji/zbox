@@ -4,7 +4,9 @@
 import json
 import os
 import shutil
+import subprocess
 import sys
+import tempfile
 import winreg
 
 from version import APP_VERSION
@@ -400,3 +402,92 @@ def uninstall_reg_remove():
                 winreg.DeleteKey(root, key)
             except OSError:
                 pass
+
+
+# ---------------- Windows 防火墙（局域网传输） ----------------
+# 首次监听端口时系统弹「安全警告」，点「取消」会写入一条针对本程序 exe 的
+# 「阻止」规则且不再弹窗：出站正常（别的设备能发现本机）、入站被静默丢弃
+# （发现不了别人、收不到文件），端口监听本身不报错所以界面毫无提示。
+# 读规则不需要管理员，删/加规则需要（经 UAC 提权）。
+
+CREATE_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+
+
+def _fw_exe():
+    """防火墙规则按程序路径匹配：frozen 是 zbox.exe，源码运行是 python(w).exe。"""
+    return os.path.realpath(sys.executable)
+
+
+def _fw_match_ps():
+    """PowerShell 片段：按程序路径（展开环境变量、忽略大小写）筛出本程序的规则。"""
+    exe = _fw_exe().replace("'", "''")
+    return ("$exe = [Environment]::ExpandEnvironmentVariables('%s');" % exe +
+            "Get-NetFirewallApplicationFilter -All -ErrorAction SilentlyContinue |"
+            " Where-Object { [Environment]::ExpandEnvironmentVariables($_.Program) -ieq $exe } |"
+            " ForEach-Object { Get-NetFirewallRule -AssociatedNetFirewallApplicationFilter $_"
+            " -ErrorAction SilentlyContinue }")
+
+
+def firewall_blocked():
+    """存在针对本程序的「已启用 + 阻止」规则返回 True；查询失败按 False（不误报）。"""
+    ps = (_fw_match_ps() +
+          " | Where-Object { $_.Enabled -eq 'True' -and $_.Action -eq 'Block' } |"
+          " ForEach-Object { $hit = $true }; if ($hit) { exit 1 }")
+    try:
+        r = subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command', ps],
+                           capture_output=True, timeout=90, creationflags=CREATE_NO_WINDOW)
+        return r.returncode == 1
+    except Exception:
+        return False
+
+
+def fix_firewall_rules():
+    """删除本程序的阻止规则并放行 53327（TCP/UDP 入站），经 UAC 提权后执行。
+    返回 'ok' / 'cancelled'（用户拒绝提权）/ 'error'。"""
+    exe = _fw_exe().replace("'", "''")
+    body = (
+        "$exe = [Environment]::ExpandEnvironmentVariables('%s')\n" % exe +
+        "function _rules($a) {\n"
+        " Get-NetFirewallApplicationFilter -All -ErrorAction SilentlyContinue |\n"
+        "  Where-Object { [Environment]::ExpandEnvironmentVariables($_.Program) -ieq $exe } |\n"
+        "  ForEach-Object { Get-NetFirewallRule -AssociatedNetFirewallApplicationFilter $_"
+        " -ErrorAction SilentlyContinue } |\n"
+        "  Where-Object { $_.Action -eq $a }\n"
+        "}\n"
+        "_rules 'Block' | Remove-NetFirewallRule -ErrorAction SilentlyContinue\n"
+        "$name = 'zbox 局域网传输'\n"
+        "function _allow {\n"
+        " Get-NetFirewallRule -DisplayName \"$name*\" -ErrorAction SilentlyContinue |\n"
+        "  Where-Object { [Environment]::ExpandEnvironmentVariables("
+        "($_ | Get-NetFirewallApplicationFilter).Program) -ieq $exe }\n"
+        "}\n"
+        "if (-not (_allow)) {\n"
+        " New-NetFirewallRule -DisplayName \"$name (TCP)\" -Direction Inbound -Action Allow"
+        " -Program $exe -Protocol TCP -LocalPort 53327 -Profile Any | Out-Null\n"
+        " New-NetFirewallRule -DisplayName \"$name (UDP)\" -Direction Inbound -Action Allow"
+        " -Program $exe -Protocol UDP -LocalPort 53327 -Profile Any | Out-Null\n"
+        "}\n"
+        "if (_rules 'Block') { exit 1 }\n"
+        "if (-not (_allow)) { exit 1 }\n"
+        "exit 0\n")
+    # 提权子进程执行临时 ps1（UTF-8 BOM，防中文规则名乱码），避免多层命令行引号转义；
+    # -Wait -PassThru 取回子进程退出码：0 成功，UAC 被拒时 Start-Process 抛错走 catch
+    fd, script = tempfile.mkstemp(suffix='.ps1', prefix='zbox_fw_')
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8-sig') as f:
+            f.write(body)
+        outer = ("try { $p = Start-Process -Verb RunAs -Wait -PassThru -FilePath powershell"
+                 " -ArgumentList '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass',"
+                 "'-File','\"%s\"'; exit $p.ExitCode } catch { exit 3 }" % script)
+        r = subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command', outer],
+                           capture_output=True, timeout=300, creationflags=CREATE_NO_WINDOW)
+        if r.returncode == 3:
+            return 'cancelled'
+        return 'ok' if r.returncode == 0 else 'error'
+    except Exception:
+        return 'error'
+    finally:
+        try:
+            os.remove(script)
+        except OSError:
+            pass

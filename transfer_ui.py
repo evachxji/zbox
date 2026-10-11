@@ -26,6 +26,7 @@ import app as ui            # 仅运行期用 ui.sc()，import 期无依赖（ap
 import transfer
 from transfer import send_files
 import glow
+import sysutil
 
 RECV_CONFIRM_TIMEOUT = 170   # 接收确认等待秒数：须小于协议端 prepare-upload 的 180s
 MAX_RECORDS = 50             # 传输记录条数上限，超出丢弃最旧
@@ -335,6 +336,8 @@ class TransferWidget(QWidget):
     sig_recv_timeout = Signal(str)                  # 确认超时 session_id
     sig_send_progress = Signal(str, object, object)       # 记录 key, done, total
     sig_send_done = Signal(str, bool, str)          # 记录 key, ok, err
+    sig_firewall = Signal()                         # 检测到防火墙阻止规则
+    sig_fw_result = Signal(str)                     # 防火墙修复结果 ok/error
 
     def __init__(self, cfg, device_info, parent=None, auto_start=True):
         super(TransferWidget, self).__init__(parent)
@@ -354,6 +357,7 @@ class TransferWidget(QWidget):
         self._expired = set()        # 已超时作废的接收确认 session_id
         self._progress_ts = {}       # 接收进度节流：{session_id: 上次 emit 时间}
         self._scanning = False
+        self._fw_warned = False    # 防火墙拦截提示：每会话最多一次
         self._save_dir = _default_save_dir(cfg)
         self.setAcceptDrops(True)
 
@@ -544,6 +548,8 @@ class TransferWidget(QWidget):
         self.sig_recv_timeout.connect(self._on_recv_timeout)
         self.sig_send_progress.connect(self._on_send_progress)
         self.sig_send_done.connect(self._on_send_done)
+        self.sig_firewall.connect(self._on_firewall_blocked)
+        self.sig_fw_result.connect(self._on_fw_result)
 
         # ---- 门禁层：未开启传输时盖住整页（内容高斯模糊）----
         self._build_gate()
@@ -610,6 +616,7 @@ class TransferWidget(QWidget):
         self.server = server
         self.discovery = discovery
         self._service_started = True
+        self._check_firewall()
         return True
 
     def disable_service(self):
@@ -662,6 +669,59 @@ class TransferWidget(QWidget):
                 self._service_started = False
         except Exception:
             pass
+
+    # ---------------- Windows 防火墙 ----------------
+
+    def _check_firewall(self):
+        '''服务启动后后台查一次防火墙阻止规则（每会话最多提示一次）。
+        首次启用时系统安全警告被点「取消」会留下针对本程序 exe 的阻止规则：
+        出站正常（别的设备能发现本机）、入站被静默丢弃（发现不了别人、收不到文件）。'''
+        if self._fw_warned:
+            return
+        def work():
+            try:
+                if sysutil.firewall_blocked():
+                    self._fw_warned = True
+                    self.sig_firewall.emit()
+            except Exception:
+                pass
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_firewall_blocked(self):
+        '''命中阻止规则：弹窗引导一键修复（需管理员权限）。'''
+        if self.server is None:     # 检测期间传输已被关闭
+            return
+        from video_ui import _ConfirmDialog   # 运行期导入：避开 import 期循环
+        dlg = _ConfirmDialog(
+            self, title='Windows 防火墙拦截',
+            text='检测到 Windows 防火墙存在针对本程序的「阻止」规则'
+                 '（首次启用时在安全警告弹窗点了「取消」所致）。\n'
+                 '后果：其他设备能发现本机，本机却发现不了对方、也收不到文件。\n'
+                 '修复将请求管理员权限：删除阻止规则并放行端口 53327。',
+            ok_text='修复防火墙')
+        if dlg.exec() != QDialog.Accepted:
+            return
+        threading.Thread(target=self._fix_firewall, daemon=True).start()
+
+    def _fix_firewall(self):
+        try:
+            r = sysutil.fix_firewall_rules()
+        except Exception:
+            r = 'error'
+        if r != 'cancelled':            # 用户在 UAC 弹窗点「否」：静默
+            self.sig_fw_result.emit(r)
+
+    def _on_fw_result(self, r):
+        from video_ui import _ConfirmDialog   # 运行期导入：避开 import 期循环
+        if r == 'ok':
+            _ConfirmDialog(self, title='防火墙修复',
+                           text='已删除阻止规则并放行端口 53327，传输功能恢复正常。',
+                           ok_text='知道了').exec()
+        else:
+            _ConfirmDialog(self, title='防火墙修复失败',
+                           text='自动修复未成功。请手动放行：设置 → 网络和 Internet → '
+                                'Windows 防火墙 → 允许应用通过防火墙，找到 zbox 并勾选网络类型。',
+                           ok_text='知道了').exec()
 
     # ---------------- 门禁层 ----------------
 
