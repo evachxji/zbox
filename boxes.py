@@ -1923,6 +1923,17 @@ class _DesktopIconLayout(object):
             for i, (px, py) in moved:
                 self._set_pos(i, px, py)
 
+    def restore_positions(self, saved):
+        """启动恢复：把桌面图标摆回记住的位置（saved = {小写显示名: [x, y]}）。
+        按显示名匹配，位置不同才 SET；快照里没有的新图标不动，
+        快照里有但桌面已没有（删掉 / 收进格子）的跳过。自动排列桌面 ok=False 早退。"""
+        if not self.ok or not saved:
+            return
+        for i, n, x, y in self.enum_icons():
+            pos = saved.get(n.lower())
+            if pos and (x, y) != (pos[0], pos[1]):
+                self._set_pos(i, pos[0], pos[1])
+
 
 _LVM_HITTEST = 0x1012
 
@@ -2767,6 +2778,11 @@ class BoxManager(object):
             self.hook.start()
         self.restore()
         self._refresh_own_hwnds()
+        # 运行期间定时记桌面图标位置（没进格子的文件），崩溃重启后也能摆回
+        self._icon_pos_timer = QTimer(self.panel)
+        self._icon_pos_timer.setInterval(60 * 1000)
+        self._icon_pos_timer.timeout.connect(self._save_desktop_icons)
+        self._icon_pos_timer.start()
         _get_daemon().ensure()   # 面板启动就拉起菜单宿主并预热壳扩展，首个右键不等
 
     def _refresh_own_hwnds(self):
@@ -2802,6 +2818,36 @@ class BoxManager(object):
                 if rec['kind'] == 'blank':
                     win.hide_icons()
         self._refresh_own_hwnds()
+        self._restore_desktop_icons()
+        # 开机自启时 Explorer 的图标可能还在陆续加载，晚一拍再补一次
+        QTimer.singleShot(3000, self._restore_desktop_icons)
+
+    # ---------- 桌面图标位置记忆（没进格子的文件） ----------
+    def _save_desktop_icons(self):
+        """可见桌面图标的位置快照 -> boxes.json['desktop_icons']。格子里的文件已被隐藏、
+        ListView 枚举不到，所以可见图标正好是「没进格子的文件」。
+        退出时 + 每 60s 定时各记一次（崩溃也丢不了多少）；自动排列 / 找不到桌面层时
+        不动旧快照。"""
+        lay = _DesktopIconLayout()
+        try:
+            snap = lay.snapshot() if lay.ok else None
+        finally:
+            lay.close()
+        if snap is None:
+            return
+        self.store.data['desktop_icons'] = {k: [v[0], v[1]] for k, v in snap.items()}
+        self.store.save()
+
+    def _restore_desktop_icons(self):
+        """启动时把没进格子的图标摆回上次记住的位置。"""
+        saved = self.store.data.get('desktop_icons') or {}
+        if not saved:
+            return
+        lay = _DesktopIconLayout()
+        try:
+            lay.restore_positions(saved)
+        finally:
+            lay.close()
 
     def _upgrade_blank_boxes(self):
         """启动时把空白格子的文件弄回桌面，两种情况：
@@ -3056,6 +3102,8 @@ class BoxManager(object):
     def shutdown(self):
         self.hook.stop()
         self.rhook.stop()   # 退出时若仍在全隐藏态（--quit / stop.cmd），拦截钩必须卸掉
+        self._icon_pos_timer.stop()
+        self._save_desktop_icons()   # 先记位置再释放：格子图标还藏着，快照只含没进格子的文件
         # 关程序：空白格子里的文件全部「还原」到桌面（文件本来就在桌面，只是被隐藏了
         # 图标）——不还原的话用户关掉程序后桌面上找不到它们。分组记录留着，下次启动
         # 再收进格子（用户实测：关程序后文件被吞在 AppData 里，就是这个没做）。
