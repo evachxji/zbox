@@ -6,9 +6,9 @@
   "use strict";
 
   /* ---------- 下载地址（单一配置点，可修改） ---------- */
-  var WINDOWS_DOWNLOAD_URL = "https://github.com/evachxji/zbox/releases/download/v0.4/zbox-Setup-v0.4-x64.exe";
-  var MOBILE_DOWNLOAD_URL = "https://github.com/evachxji/zbox/releases/download/v0.4/zbox-Android-v0.4.apk";
-  var HARMONY_DOWNLOAD_URL = "https://github.com/evachxji/zbox/releases/download/v0.4/zbox-HarmonyOS-v0.4-unsigned.hap";
+  var WINDOWS_DOWNLOAD_URL = "https://github.com/evachxji/zbox/releases/download/v0.4.1/zbox-Setup-v0.4.1-x64.exe";
+  var MOBILE_DOWNLOAD_URL = "https://github.com/evachxji/zbox/releases/download/v0.4.1/zbox-Android-v0.4.1.apk";
+  var HARMONY_DOWNLOAD_URL = "https://github.com/evachxji/zbox/releases/download/v0.4.1/zbox-HarmonyOS-v0.4.1-unsigned.hap";
   var GITHUB_URL = "https://github.com/evachxji/zbox";
 
   function wireLinks(key, url) {
@@ -62,7 +62,8 @@
 
   /* ---------- 导航选中态（scrollspy）：当前分镜对应的 tab 高亮 ----------
      独立于 GSAP，reduced-motion / 无 JS 库时照常工作；判定线 = 视口 35% 高度 */
-  var spyLinks = qa(".nav-links a");
+  /* 首页按钮不参与 scrollspy：它是回到顶部的按钮，不是分镜 tab */
+  var spyLinks = qa(".nav-links a:not(.nav-home)");
   var spyMap = [];
   for (var si = 0; si < spyLinks.length; si++) {
     var spyTarget = q(spyLinks[si].getAttribute("href"));
@@ -86,12 +87,35 @@
   window.addEventListener("resize", spy);
   spy();
 
+  /* ---------- 教程录屏：播完点击重播（无播放控件，不可暂停快进） ---------- */
+  var howVideos = qa("video.autoplay-on-view");
+  howVideos.forEach(function (v) {
+    var box = v.parentElement;
+    var hint = box.querySelector(".replay-hint");
+    v.removeAttribute("controls");
+    v.addEventListener("ended", function () { box.classList.add("ended"); });
+    v.addEventListener("play", function () { box.classList.remove("ended"); });
+    /* 播放期间点画面不作反应；只有点「点击重播」才从头播 */
+    if (hint) hint.addEventListener("click", function () {
+      try { v.currentTime = 0; v.muted = true; v.play(); } catch (_) {}
+    });
+  });
+
+  /* ---------- 首页按钮（tab 栏最左，紧邻「功能」）：不管滚到哪，一键回到页面顶部 ---------- */
+  var homeBtn = q(".nav-home");
+  if (homeBtn) {
+    homeBtn.addEventListener("click", function (e) {
+      e.preventDefault();
+      var calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      window.scrollTo({ top: 0, behavior: calm ? "auto" : "smooth" });
+    });
+  }
+
   /* ---------- reduced-motion / 无 GSAP：静态可读版 ---------- */
   var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (reduced || typeof gsap === "undefined" || typeof ScrollTrigger === "undefined") {
     document.body.classList.add("rm");
     document.body.classList.add("ready");
-    qa("video").forEach(function (v) { v.removeAttribute("autoplay"); v.pause(); });
     return;
   }
 
@@ -187,18 +211,15 @@
     return Math.max(1, Math.min(1.6, s));
   }
 
-  function toggleRename() {
+  /* 「改个名字」：逐字键入（scrub 驱动 —— 往回滚即逐字回删） */
+  var RENAME_TEXT = "我的项目";
+  var renameProxy = { n: 0 };
+  function paintRename() {
     var t = q("#g3 .grid-title");
     if (!t) return;
-    if (t.dataset.renamed) {
-      t.textContent = "项目";
-      t.classList.remove("typing");
-      delete t.dataset.renamed;
-    } else {
-      t.textContent = "我的项目";
-      t.classList.add("typing");
-      t.dataset.renamed = "1";
-    }
+    var n = Math.round(renameProxy.n);
+    t.textContent = RENAME_TEXT.slice(0, n);
+    t.classList.toggle("typing", n > 0 && n < RENAME_TEXT.length);
   }
 
   var tl = gsap.timeline({
@@ -273,7 +294,13 @@
   capOut(tl, "#cap-lock", 8.65);
 
   capIn(tl, "#cap-rename", 8.75);
-  tl.call(toggleRename, null, 8.82);
+  tl.to(renameProxy, {
+    n: RENAME_TEXT.length, duration: .45, ease: "none", onUpdate: paintRename,
+    onReverseComplete: function () {
+      var t = q("#g3 .grid-title");
+      if (t) { t.textContent = "项目"; t.classList.remove("typing"); }
+    }
+  }, 8.82);
   capOut(tl, "#cap-rename", 9.3);
 
   tl.to("#desk-main", { scale: 1, duration: .65, ease: "power2.inOut" }, 9.45);
@@ -348,25 +375,10 @@
   capIn(tlTr, "#cap-trf", 6.8);
 
   /* ============================================================
-     第九幕：完整工作空间
-     ============================================================ */
-  var tlWs = gsap.timeline({
-    scrollTrigger: {
-      trigger: "#pin-space", start: "top top",
-      end: SHORT ? "+=170%" : "+=200%",
-      scrub: 1, pin: true, anticipatePin: 1, invalidateOnRefresh: true
-    }
-  });
-  tlWs.fromTo("#stage-space .ws-frame", { scale: 1.14 }, { scale: 1, duration: 1.5, ease: "none" }, 0);
-  tlWs.fromTo("#stage-space .ws-ol", { autoAlpha: .9 }, { autoAlpha: .35, duration: 1.2, ease: "none" }, 0);
-  tlWs.to("#stage-space .ws-phone", { xPercent: 0, duration: .8, ease: "power2.out" }, .5);
-  tlWs.to("#stage-space .ws-words span", { autoAlpha: 1, y: 0, duration: .5, stagger: .25 }, .9);
-  capIn(tlWs, "#cap-space", 1.85);
-
-  /* ============================================================
-     滚动演示舞台：教程 / 截图 / 视频解析
+     滚动演示舞台：视频解析
      叠放帧交叉淡入（DOM 顺序即叙事顺序），文案随幕进出；
      reduced-motion / 无 JS 时：叠放帧最后一张 + cap-final 可见 = 最终态
+     （截图分镜已改为静态分栏，不再走这里）
      ============================================================ */
   function filmTimeline(triggerSel, stageSel, count, caps, endPct) {
     var tl = gsap.timeline({
@@ -389,12 +401,70 @@
     return tl;
   }
 
-  filmTimeline("#sec-how", "#stage-how", 5,
-    ["#cap-how1", "#cap-how2", "#cap-how3", "#cap-how4", "#cap-howf"], 430);
-  filmTimeline("#sec-shot", "#stage-shot", 4,
-    ["#cap-shot1", "#cap-shot2", "#cap-shot3", "#cap-shotf"], 350);
-  filmTimeline("#sec-video", "#stage-video", 4,
+  /* 录屏：滚到视口内停顿 1s 后自动播；滚回上方则复位，下次进入重播 */
+  howVideos.forEach(function (v) {
+    var pending = null;
+    ScrollTrigger.create({
+      trigger: v, start: "top 78%",
+      onEnter: function () {
+        v.muted = true;
+        pending = gsap.delayedCall(1, function () {
+          pending = null;
+          var p = v.play();
+          if (p && p.catch) p.catch(function () {});
+        });
+      },
+      onLeaveBack: function () {
+        if (pending) { pending.kill(); pending = null; }
+        try { v.pause(); v.currentTime = 0; } catch (_) {}
+      }
+    });
+  });
+
+  var tlVideo = filmTimeline("#sec-video", "#stage-video", 4,
     ["#cap-video1", "#cap-video2", "#cap-video3", "#cap-videof"], 350);
+
+  /* ============================================================
+     第九幕：完整工作空间
+     pin 舞台的时间线必须按 DOM 顺序创建。视频解析（#sec-video）在文档里排在
+     完整工作空间（#pin-space）之前，所以它必须先建——否则给 #pin-space 算 pin
+     位置时，视频解析的 pin 间隔还没插进文档，位置会整整少算 350% 视口高，
+     结果是两段 pin 舞台叠在一起（视频解析幕里冒出下一幕的内容），
+     并且后面留出一大片空白。
+     ============================================================ */
+  var tlWs = gsap.timeline({
+    scrollTrigger: {
+      trigger: "#pin-space", start: "top top",
+      end: SHORT ? "+=170%" : "+=200%",
+      scrub: 1, pin: true, anticipatePin: 1, invalidateOnRefresh: true
+    }
+  });
+  tlWs.fromTo("#stage-space .ws-frame", { scale: 1.14 }, { scale: 1, duration: 1.5, ease: "none" }, 0);
+  tlWs.fromTo("#stage-space .ws-ol", { autoAlpha: .9 }, { autoAlpha: .35, duration: 1.2, ease: "none" }, 0);
+  tlWs.to("#stage-space .ws-phone", { xPercent: 0, duration: .8, ease: "power2.out" }, .5);
+  tlWs.to("#stage-space .ws-words span", { autoAlpha: 1, y: 0, duration: .5, stagger: .25 }, .9);
+  capIn(tlWs, "#cap-space", 1.85);
+
+  /* ---------- 导航 tab：跳到 pin 舞台的「起点」 ----------
+     pin 期间元素是 position: fixed，pin 结束后它落在间隔区的末尾——也就是说
+     它在文档里的位置并不等于分镜开头。所以从页面下方点 tab 时，浏览器算出的
+     锚点位置是分镜的「结尾」。
+     这里改成滚到 ScrollTrigger 记录的 start，点击时才读，resize / 刷新后依然正确；
+     非 pin 分镜没有这个问题，继续交给浏览器默认的锚点行为。 */
+  var pinStageAt = {};
+  ScrollTrigger.getAll().forEach(function (st) {
+    if (!(st.vars && st.vars.pin)) return;
+    if (!st.trigger || !st.trigger.id) return;
+    pinStageAt["#" + st.trigger.id] = st;
+  });
+  qa(".nav-links a:not(.nav-home)").forEach(function (a) {
+    var st = pinStageAt[a.getAttribute("href")];
+    if (!st) return;
+    a.addEventListener("click", function (e) {
+      e.preventDefault();
+      window.scrollTo({ top: st.start, behavior: reduced ? "auto" : "smooth" });
+    });
+  });
 
   /* ---------- 静态区块的入场揭示 ---------- */
   qa(".reveal").forEach(function (el) {

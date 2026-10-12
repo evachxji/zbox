@@ -1,7 +1,7 @@
 # Zbox 官网 — 项目交接文档
 
 > 给下一个会话的 Agent：读完这份文档即可继续迭代页面，无需重新调研。
-> 最后更新：2026-10-12（教程 / 截图 / 视频解析三个分镜改造为 pin 滚动演示舞台（用户要求与其他模块节奏一致）；同日新增教程分镜；拍摄目录已更名为 `photo_task`）
+> 最后更新：2026-10-12（教程分镜改用用户自录的两段真实录屏：滚到即停顿 1s 自动播、播完点「点击重播」角标才重播、无播放控件；主舞台「改个名字」改为逐字键入）
 
 ## 一、这个项目是什么
 
@@ -26,7 +26,8 @@ assets/brand/icon.png       ← Zbox Logo（256×256）
 assets/desktop/             ← 25 张真实软件截图（其中 theme-light-overview / settings-window 随「主题条」分镜删除暂不被页面引用，保留备用）
 assets/mobile/              ← 4 张 Android 端真实截图（1080×2400；mobile-receive-dialog 为 v0.4 重拍）
 assets/harmony/             ← 4 张鸿蒙端真实截图（1280×2832）
-assets/video/               ← newbox-flow.mp4（10 秒 1920×1080 H.264 带指针，教程分镜用，静音循环播放）
+assets/video/               ← newbox-flow-v2.mp4（1156×1080）+ folderbox-flow.mp4（1536×1080），教程分镜的两段真实录屏
+                               （旧 newbox-flow.mp4 1920×1080 已下页，留档备用）
 ```
 
 素材全部来自真实运行的 Zbox v0.4（拍摄源目录：`C:\Users\yechen\Desktop\photo_task\zbox-v04-assets`
@@ -39,7 +40,7 @@ assets/video/               ← newbox-flow.mp4（10 秒 1920×1080 H.264 带指
 | ---- | ---- | ---- | ------ |
 | 1 | Hero | `.hero#hero` | overview 截图做背景；H1「Zbox」+ 右侧框外 `span.hero-chip`「v0.4」；`.hero-cta` 品牌橙主按钮 + `.hero-meta`「Windows 10 / 11 · x64」 |
 | 2 | 混乱→格子→整理→Make It Yours | `#pin-main > #stage-main` | 主舞台 pin（720% 滚动）；`#wall-messy` 真实混乱桌面照片淡出为 `#wall-clean` 壁纸；`#g1..g4` 四个格子；`.fly` 飞行芯片 |
-| 3 | **快速上手教程**（pin 舞台） | `#sec-how > #stage-how` | `.film-how` 取景框五帧交叉淡入（menu-newbox → newbox-blank → menu-folderbox → pick-folder-dialog → grid-folder-mapping）；下方 `#how-strip` 录屏条：newbox-flow.mp4（静音循环，rm 下不自动播放）+ explorer-context-menu 侧注；无导航项，scrollspy 归属「功能」 |
+| 3 | **快速上手教程**（录屏） | `#sec-how` | 静态 `.sec` 分镜：`.how-films` 两列并列两段真实录屏（`newbox-flow-v2.mp4` / `folderbox-flow.mp4`），各自按录屏自身比例 `height:auto` 显示不裁切、无播放控件，标题仅两字词组（新建格子 / 新建文件夹格子）；`video.autoplay-on-view` 由 ScrollTrigger 驱动：进入视口停顿 1s 自动播，播完浮出「点击重播」角标，**只有点该角标才重播**（播放期间点画面无反应），滚回上方复位；无导航项，scrollspy 归属「功能」 |
 | 4 | 双击显隐 | `#pin-clean > #stage-clean` | `.r1/.r2` 涟漪；格子+面板消失再归来；`#panel-clean` 内是**真实时钟与当月日历**（JS 生成）；DOM 面板 tab 条为 4 个（含视频解析）；结尾文案只留「格子、面板、文件，都在。」 |
 | 5 | **截图**（pin 舞台） | `#sec-shot > #stage-shot` | `.film-shot` 16:9 取景框四帧交叉淡入：shot-overlay → shot-annotated → shot-pin → shot-long |
 | 6 | 日历待办 | `#sec-cal` | kick 为「工作空间」；panel-calendar-todo / panel-todo（359×476，4 tab）真实截图 + `.facts` 功能点 |
@@ -83,6 +84,13 @@ v0.4 release 三个资产名已在 GitHub 核实；改版本时先核对 release
    叠放帧舞台（`.film`）：img 绝对叠放、DOM 顺序即叙事顺序，JS 只动 autoAlpha——rm / 无 JS 时
    最后一张帧 + cap-final 即最终态；新增舞台用 `filmTimeline()` 助手（app.js），每幕 `.cap` 进出、
    最后一幕带 `.cap-final`。
+   教程录屏（`video.autoplay-on-view`）：无 autoplay 属性、无播放控件，由 ScrollTrigger 的
+   `onEnter`（停顿 1s）触发 `play()`，`onLeaveBack` 复位；`ended` 时给 `.shot` 加 `.ended`
+   显示「点击重播」角标（`.replay-hint`：未播完 `visibility: hidden`，故不可点），**只有点该角标**才
+   `currentTime = 0` 重播；rm / 无 JS 下不自动播，点角标仍可播（角标此时代码里不显示，属已知取舍）。
+   主舞台「改个名字」节拍是 **scrub 驱动的逐字键入**：tween 一个 `{n}` 代理、`onUpdate` 写
+   `RENAME_TEXT.slice(0, n)`，往回滚即逐字回删，`onReverseComplete` 复原为「项目」——不用
+   `tl.call` 切文案（那会突然改字、且倒放不还原）。
 6. **图片**：必须本地化、`<img>` 带 width/height；内容截图用 contain/自然流（不裁切），
    只有装饰背景（.wall/.hero-media）允许 cover。
 7. **断点**：1100px（下载区 3→2 卡）/ 860px（格子 2×2、手机框缩小、新分镜网格转单列）/ 480px；
@@ -115,9 +123,11 @@ v0.4 release 三个资产名已在 GitHub 核实；改版本时先核对 release
   （scroll 监听 + rAF 节流，判定线 = 视口 35% 高度；不依赖 GSAP，reduced-motion 下照常工作）。
 - 双击显隐幕结尾文案只留「格子、面板、文件，都在。」——「Win+D 也吹不散」已按用户要求删掉
   （产品仍免疫 Win+D，只是不上文案）。
-- 教程 / 截图 / 视频解析三个分镜均为 pin 滚动演示舞台（`.film` 叠放帧交叉淡入，2026-10-12
-  用户要求与其他模块节奏一致）；`shot-toolbar-light.png` 不再上页（文件留 assets）；
-  文件夹映射作为产品事实仍然存在（见第六节），页面经教程舞台的「新建文件夹格子」一幕呈现。
+- 教程分镜为两段真实录屏（`#sec-how`，2026-10-12 用户自录、按录屏自身尺寸显示）；截图 / 视频解析
+  两个分镜仍为 pin 滚动演示舞台（`.film` 叠放帧交叉淡入）。`shot-toolbar-light.png` 与五张教程静帧
+  （menu-desktop-newbox / newbox-blank / menu-desktop-folderbox / pick-folder-dialog /
+  explorer-context-menu）不再上页（文件留 assets）。
+  文件夹映射作为产品事实仍然存在（见第六节），页面由教程录屏的「新建文件夹格子」一段呈现。
 - 页脚备案号「浙ICP备2024095561号-2」（`.icp`，链接 beian.miit.gov.cn）。
 - `grid-context-menu.png` 区块与素材已按用户要求删除，**不要加回**。
 - `transfer-pc-received.png`（359×476，v0.4 独立置顶弹窗）在 `#sec-v03` 第三张卡片位。
