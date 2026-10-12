@@ -110,7 +110,7 @@ Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyS
 - `installer.py` — 安装向导（选项/进度/完成页）与卸载向导（可选删除个人数据）；供 setup exe（安装）与程序本体 `--uninstall`（卸载）共用
 - `install.py` — 源码方式的系统集成（只装开机自启）
 - `setup.pyw` — 安装包入口：build.py 把它打成 onefile exe，内嵌 onedir 本体为 payload，双击弹安装向导
-- `build.py` / `build.cmd` — `build.cmd` 是三端一键入口（启动后选 1-7 构建单端或组合，默认 7 全量：PC exe + Android APK + 鸿蒙 HAP，产物带版本号汇总到 `dist\release\`）；`build.py` 只负责 PC：生成图标与 DPI 清单，两段式 PyInstaller——main.pyw 打 onedir 本体（`dist\build\app\`），setup.pyw 内嵌本体打成单个安装包 `dist\zbox-Setup-v<版本>-<架构>.exe`（架构标识跟随打包用的 Python：x64 / x86 / arm64）
+- `build.py` / `build.cmd` — `build.cmd` 是三端一键入口（启动后选 1-7 构建单端或组合，默认 7 全量：PC exe + Android APK + 鸿蒙 HAP+APP，产物带版本号汇总到 `dist\release\`；鸿蒙段先 `assembleApp` 出 release 签名上架包 `.app`、再 `devecocli build` 出 debug 调试 hap——顺序不能反，assembleApp 会用 release 模式覆写 entry 的 hap 产物；assembleApp 走 DevEco 工具链 hvigorw，按 DEVECO_HOME / 常见安装路径探测）；`build.py` 只负责 PC：生成图标与 DPI 清单，两段式 PyInstaller——main.pyw 打 onedir 本体（`dist\build\app\`），setup.pyw 内嵌本体打成单个安装包 `dist\zbox-Setup-v<版本>-<架构>.exe`（架构标识跟随打包用的 Python：x64 / x86 / arm64）
 - `native/` — 外壳菜单宿主：`zshell.cpp`（C++ 源码，契约见下方「格子文件右键」）
   + `build_native.cmd`（cl /MT 静态 CRT 编译出 `zshell_host.exe`，需 MSVC Build Tools）；
   exe 随仓库提交，改源码后需重新编译并一起提交

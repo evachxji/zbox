@@ -26,7 +26,7 @@ rem ---- 选择构建目标 ----
 echo   请选择构建目标：
 echo     1. Win端（EXE）
 echo     2. 安卓端（APK）
-echo     3. 鸿蒙端（HAP）
+echo     3. 鸿蒙端（HAP + APP 审核包）
 echo     4. Win端 + 安卓端
 echo     5. Win端 + 鸿蒙端
 echo     6. 安卓端 + 鸿蒙端
@@ -109,12 +109,30 @@ if not "%APK_ERR%"=="0" goto :apk_failed
 echo.
 :skip_apk
 
-rem ============ 鸿蒙 HAP ============
+rem ============ 鸿蒙 HAP + APP ============
 if not defined DO_HAP goto :skip_hap
-echo   [HAP] 鸿蒙安装包 ...
 where devecocli.cmd >nul 2>nul
 if errorlevel 1 goto :no_deveco
 pushd "%~dp0harmony"
+set "APP_OK="
+rem ---- 上架审核包（.app，release 签名）先打：assembleApp 会以 release 模式覆写 entry 的 hap 产物，
+rem ---- 调试 hap 放后面打，保证 outputs 里最终留下的是 debug 版（devecocli 只做 assembleHap） ----
+echo   [APP] 鸿蒙上架审核包（release 签名）...
+set "DEVECO_NODE="
+if defined DEVECO_HOME if exist "%DEVECO_HOME%\tools\node\node.exe" set "DEVECO_NODE=%DEVECO_HOME%\tools\node\node.exe"
+if not defined DEVECO_NODE if exist "C:\Program Files\Huawei\DevEco Studio\tools\node\node.exe" set "DEVECO_NODE=C:\Program Files\Huawei\DevEco Studio\tools\node\node.exe"
+if not defined DEVECO_NODE if exist "D:\Program Files\Huawei\DevEco Studio\tools\node\node.exe" set "DEVECO_NODE=D:\Program Files\Huawei\DevEco Studio\tools\node\node.exe"
+if not defined DEVECO_NODE goto :skip_app_no_toolchain
+for %%I in ("%DEVECO_NODE%") do set "HVIGORW=%%~dpI..\hvigor\bin\hvigorw.js"
+call "%DEVECO_NODE%" "%HVIGORW%" assembleApp -p "product=default" -p "buildMode=release" --analyze=normal --parallel --incremental
+if errorlevel 1 (popd & goto :app_failed)
+set "APP_OK=1"
+goto :app_done
+:skip_app_no_toolchain
+echo   [跳过] 未找到 DevEco Studio 工具链，本次只产出 hap；
+echo          要打出上架 .app 请安装 DevEco Studio 或设 DEVECO_HOME 指向其安装目录。
+:app_done
+echo   [HAP] 鸿蒙调试安装包 ...
 call devecocli.cmd build
 if errorlevel 1 (popd & goto :hap_failed)
 popd
@@ -127,6 +145,7 @@ if not exist "%~dp0dist\release" mkdir "%~dp0dist\release"
 if defined DO_PC for %%f in ("%~dp0dist\zbox-Setup-v%VER%-*.exe") do copy /y "%%f" "%~dp0dist\release\" >nul
 if defined DO_APK copy /y "%~dp0android\app\build\outputs\apk\debug\app-debug.apk" "%~dp0dist\release\zbox-Android-v%VER%.apk" >nul
 if defined DO_HAP copy /y "%~dp0harmony\entry\build\default\outputs\default\entry-default-unsigned.hap" "%~dp0dist\release\zbox-HarmonyOS-v%VER%-unsigned.hap" >nul
+if defined APP_OK copy /y "%~dp0harmony\build\outputs\default\harmony-default-signed.app" "%~dp0dist\release\zbox-HarmonyOS-v%VER%.app" >nul
 
 echo.
 echo   [完成] 本次产物（dist\release\）：
@@ -135,6 +154,8 @@ echo.
 echo   说明：exe 发给别人双击即装；apk 发手机点开安装；
 echo         hap 是免签名调试包，只能装模拟器/开发者调试设备，
 echo         分发真机需先签名或上架 AppGallery（见 harmony\README.md）。
+echo         app 是 release 签名的上架审核包，传 AppGallery Connect 用；
+echo         无 DevEco Studio 工具链时只产出 hap。
 echo.
 pause
 exit /b 0
@@ -166,6 +187,15 @@ echo   [错误] 鸿蒙 HAP 打包失败，请查看上方 hvigor 的输出排查。
 echo          若报错与 SignHap / profile 有关：build-profile.json5 配了 release 签名，
 echo          但 signing\ 下的证书材料不全（缺 .cer / .p7b，需从 AppGallery Connect 下载）。
 echo          把材料补全，或把 signingConfig 改回空（免签名调试包）即可恢复构建。
+echo.
+pause
+exit /b 1
+
+:app_failed
+echo.
+echo   [错误] 鸿蒙 APP 上架包打包失败，请查看上方 hvigor 的输出排查。
+echo          多为 release 签名材料问题：signing\ 下需齐备 .cer / .p7b / .p12
+echo          （从 AppGallery Connect 下载/导出），详见 harmony\README.md。
 echo.
 pause
 exit /b 1

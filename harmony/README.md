@@ -25,6 +25,9 @@ PC 端 zbox 面板「传输」的鸿蒙配套 App：局域网内与 PC 互传文
    （登录开发者账号后自动生成调试签名）。
 5. 构建：Build → Build Hap(s)/APP(s) → Build Hap(s)，产物在
    `entry/build/default/outputs/default/`；命令行等价：`hvigorw assembleHap`。
+   上架审核包（`.app`，release 签名）：`hvigorw assembleApp -p "product=default" -p "buildMode=release"`，
+   产物在 `build/outputs/default/harmony-default-signed.app`，上传 AppGallery Connect 用；
+   注意它会以 release 模式覆写 entry 的 hap 产物，调试 hap 需在其后重打（build.cmd 已按此顺序编排）。
 6. 安装到调试真机：DevEco 直接 Run，或 `hdc install <hap路径>`。
 
 ## 没有真机时的联调（模拟器）
