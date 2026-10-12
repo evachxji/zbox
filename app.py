@@ -28,7 +28,7 @@ from themes import THEMES, THEME_ORDER, THEME_CHOICES, AUTO, build_qss
 from version import APP_VERSION, GITHUB_URL
 
 SHADOW = 0  # 不透明窗口：无边距，圆角由 DWM/遮罩实现
-SINGLE_W, PANEL_H = 344, 428
+SINGLE_W, PANEL_H = 344, 370   # 370 ≈ 428 − 一周行高：日历五周条带恰好撑满
 
 
 _UI_SCALE = None
@@ -344,8 +344,10 @@ class _GridViewport(QWidget):
 
 
 class _GridPage(QWidget):
-    """六周条带：连续周序列上 42 个 DayCell 组成的一段。条带间首尾相接、无重复周，
-    平移停在任意位置都不会出现跨页重复行。可原地重建内容。"""
+    """五周条带：连续周序列上 35 个 DayCell 组成的一段。条带间首尾相接、无重复周，
+    平移停在任意位置都不会出现跨页重复行。可原地重建内容。
+    五周而不是六周：默认视图不再带一行全灰的下月日期；跨 6 周的月份（如 2026-11）
+    最后一周在下一屏，滚一下即可看到。"""
 
     def __init__(self, store, parent=None):
         super(_GridPage, self).__init__(parent)
@@ -366,7 +368,7 @@ class _GridPage(QWidget):
         if dim_month is None:  # 无显示月上下文时的临时基准，随后由 _update_sub 统一校正
             ref = start + timedelta(days=17)
             dim_month = (ref.year, ref.month)
-        for i in range(42):
+        for i in range(35):
             d = start + timedelta(days=i)
             cell = DayCell()
             cell.set_day(d, (d.year, d.month) != dim_month, self.store, d == selected)
@@ -488,7 +490,7 @@ class CalendarWidget(QWidget):
         h = self.viewport.height()
         if not self._pages or self._pages[0].start is None or h <= 0:
             return self.year, self.month
-        r = int((h / 2.0 - self._off) // (h / 6.0))  # 中线所在行（相对当前段首周）
+        r = int((h / 2.0 - self._off) // (h / 5.0))  # 中线所在行（相对当前段首周）
         d = self._pages[0].start + timedelta(days=7 * r + 3)
         return d.year, d.month
 
@@ -580,7 +582,7 @@ class CalendarWidget(QWidget):
         first = date(self.year, self.month, 1)
         anchor = first - timedelta(days=first.weekday())  # 当前月 1 日所在周的周一
         for d in (-1, 0, 1):
-            self._pages[d].build(anchor + timedelta(days=42 * d), self._selected, self._dim_month)
+            self._pages[d].build(anchor + timedelta(days=35 * d), self._selected, self._dim_month)
         self._update_sub()
         self._layout_pages()
 
@@ -597,11 +599,11 @@ class CalendarWidget(QWidget):
         if n > 0:
             gone = self._pages[-1]
             self._pages = {-1: self._pages[0], 0: self._pages[1], 1: gone}
-            gone.build(self._pages[0].start + timedelta(days=42), self._selected, self._dim_month)
+            gone.build(self._pages[0].start + timedelta(days=35), self._selected, self._dim_month)
         else:
             gone = self._pages[1]
             self._pages = {-1: gone, 0: self._pages[-1], 1: self._pages[0]}
-            gone.build(self._pages[0].start - timedelta(days=42), self._selected, self._dim_month)
+            gone.build(self._pages[0].start - timedelta(days=35), self._selected, self._dim_month)
         if self._panning:
             # 页面编号整体挪了一位，位图缓存必须跟着换位；只补新段会让画面错开一整段
             pm = _page_pixmap(gone)
@@ -2407,6 +2409,7 @@ class FloatingPanel(QWidget):
         self._desk_pinned = False   # True = 已归属桌面带（SHELLDLL_DefView 的属主 popup）
         self._floating = False      # True = 被点击激活浮起到应用窗口之上，失焦后需要沉回
         self._drag = None           # 窗口拖拽偏移（globalPos - topLeft）；None = 未在拖拽
+        self._sizing = False        # 原生边框缩放进行中（WM_ENTERSIZEMOVE 起）：防失焦沉底
         self.setObjectName('panelRoot')
 
         root = QVBoxLayout(self)
@@ -2506,7 +2509,16 @@ class FloatingPanel(QWidget):
         self._theme = cfg.theme
         self._icon_dir = _indicator_icons()
         self.apply_theme(cfg.theme, save=False)
-        self.setFixedSize(sc(SINGLE_W), sc(PANEL_H))
+        # 最小尺寸按日历完整显示定：宽 = 7 列 x 40（数字 38 居中）+ 左右边距 32；
+        # 高 = 5 行 x 48（数字 30 + 农历/节日小字 + 行距）+ 时钟行/星期行 83
+        self.setMinimumSize(sc(320), sc(325))
+        # 尺寸与位置同一条校验：只在记录时的屏幕分辨率下恢复，否则回默认尺寸
+        ag = QApplication.primaryScreen().availableGeometry()
+        sz = cfg.data.get('size')
+        if sz and cfg.data.get('pos_screen') == [ag.width(), ag.height()]:
+            self.resize(sz[0], sz[1])
+        else:
+            self.resize(sc(SINGLE_W), sc(PANEL_H))
         self.set_tab(int(cfg.tab or 0), save=False)
 
         # 桌面层级：归属桌面带（Win+D 免疫）+ 看门狗维护挂接健康与失焦沉底
@@ -2588,7 +2600,7 @@ class FloatingPanel(QWidget):
         让其它窗口可以正常遮挡它。正在使用时不动，避免打字/拖拽途中被其它窗口盖住。
         没浮起过就不动——z-order 变动会触发桌面整理软件的表层反压，空发会振荡闪烁。"""
         if (not self._floating or not self.isVisible() or self.isActiveWindow() or self.underMouse()
-                or self._drag is not None or self.titlebar.underMouse()
+                or self._drag is not None or self._sizing or self.titlebar.underMouse()
                 or self._child_window_in_use()):
             return
         self._floating = False
@@ -2722,6 +2734,49 @@ class FloatingPanel(QWidget):
         if self._tb_anim.endValue() == 0:
             self.titlebar.hide()
 
+    # --- 四边/四角自由缩放（参考格子缩放，但走 WM_NCHITTEST 原生命中测试：
+    # Qt 控件都是共享同一 hwnd 的 alien 子控件，一次命中测试覆盖整个窗口，
+    # 不用像格子那样给子视口逐个装事件过滤器；缩放光标也由系统代管） ---
+    def nativeEvent(self, eventType, message):
+        if bytes(eventType) == b'windows_generic_MSG':
+            msg = ctypes.cast(int(message), ctypes.POINTER(wintypes.MSG)).contents
+            if msg.message == 0x0084:            # WM_NCHITTEST
+                x = ctypes.c_short(msg.lParam & 0xFFFF).value
+                y = ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value
+                dpr = self.devicePixelRatioF() or 1.0   # lParam 是物理像素，Qt 坐标是逻辑像素
+                ht = self._hit_zone(self.mapFromGlobal(QPoint(int(x / dpr), int(y / dpr))))
+                if ht:
+                    return True, ht   # 交给 Windows 驱动交互缩放（最小尺寸走 WM_GETMINMAXINFO）
+            elif msg.message == 0x0231:          # WM_ENTERSIZEMOVE
+                self._sizing = True
+            elif msg.message == 0x0232:          # WM_EXITSIZEMOVE：松手收尾，位置尺寸一起落盘
+                self._sizing = False
+                self._save_pos()
+        return super(FloatingPanel, self).nativeEvent(eventType, message)
+
+    def _hit_zone(self, pos):
+        """窗口内 Qt 坐标 → 边框命中码（HT*）：四角优先，其次四边，未命中返回 0。"""
+        m = sc(8)
+        x, y, w, h = pos.x(), pos.y(), self.width(), self.height()
+        l, r, t, b = x < m, x >= w - m, y < m, y >= h - m
+        if t and l:
+            return 13   # HTTOPLEFT
+        if t and r:
+            return 14   # HTTOPRIGHT
+        if b and l:
+            return 16   # HTBOTTOMLEFT
+        if b and r:
+            return 17   # HTBOTTOMRIGHT
+        if l:
+            return 10   # HTLEFT
+        if r:
+            return 11   # HTRIGHT
+        if t:
+            return 12   # HTTOP
+        if b:
+            return 15   # HTBOTTOM
+        return 0
+
     def eventFilter(self, obj, ev):
         """时分秒 / 日期行和展开的顶部栏都是窗口拖拽把手；栏窗的悬浮进出也在这里接力。"""
         t = ev.type()
@@ -2758,6 +2813,7 @@ class FloatingPanel(QWidget):
         ag = QApplication.primaryScreen().availableGeometry()
         self.cfg.data['pos_screen'] = [ag.width(), ag.height()]
         self.cfg.set('pos', [self.x(), self.y()])
+        self.cfg.set('size', [self.width(), self.height()])
 
     # --- 其他 ---
     def close_panel(self):

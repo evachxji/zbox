@@ -247,8 +247,9 @@ ClearType，文字发灰），圆角统一走遮罩（`round_corners`，SetWindo
   踩过这个坑，要先 `addLayout` 进父控件再添加页面）。
 - 内容区是 `_SlideStack`（横向滑动切页动画）：日历/待办/传输/视频解析四页**按 tab 顺序入栈**——
   `slide_to` 靠页面在列表里的先后判断左滑/右滑，顺序错了方向就反。
-- 尺寸常量 `SINGLE_W / PANEL_H`；`cfg` 键：`theme` / `tab` / `pos` /
+- 尺寸常量 `SINGLE_W / PANEL_H`（默认尺寸 344x370，高度按日历五周条带定）；`cfg` 键：`theme` / `tab` / `pos` / `size` /
   `off_noon` / `off_evening` / `shot_hotkey`（截图热键，空串 = 不启用），`Config` 用 `__getattr__` 暴露为属性。
+  `size` 与 `pos` 同一条 `pos_screen` 分辨率校验，换屏回默认尺寸。
   视频解析相关键：`video_enabled`（默认 False，门禁层）/ `video_dir`（空串 = 桌面）/ `video_quality`。
 - **桌面格子模式**：窗口标志是 `FramelessWindowHint | Tool`，**故意不带 `WindowStaysOnTopHint`**
   ——面板就该被别的窗口正常盖住，别再顺手加回去。
@@ -271,6 +272,13 @@ ClearType，文字发灰），圆角统一走遮罩（`round_corners`，SetWindo
   MouseButtonPress/Move/Release 直接 `move()`，松手 `_save_pos()` 落盘。过滤器只装在
   `titlebar` / `cal.clock_hm` / `cal.sub` 三个控件上——装在哪就只对谁生效（标题栏里设置、关闭
   按钮的点击不受影响）；想再划一块可拖区域，得把过滤器也装到那个控件上。
+- **四边/四角自由缩放**：不走格子那套事件过滤器，而是 `nativeEvent` 对 `WM_NCHITTEST` 回报
+  边缘/角命中码（`_hit_zone`，边缘宽 `sc(8)`），由 Windows 接管交互缩放——Qt 控件都是共享
+  同一 hwnd 的 alien 子控件，一次命中测试覆盖整个窗口，缩放光标与最小尺寸（`setMinimumSize` →
+  `WM_GETMINMAXINFO`）都系统代管。坑：lParam 是**物理像素**，要先除 `devicePixelRatioF` 再
+  `mapFromGlobal`（Qt 坐标是逻辑像素，125% DPI 下两者差 1.25 倍）。缩放首尾靠
+  `WM_ENTERSIZEMOVE` / `WM_EXITSIZEMOVE`：前者置 `_sizing` 防 `_ensure_desktop_level` 失焦沉底，
+  后者经 `_save_pos` 把 pos + size 一起落盘。
 - 时间设置两处约定：`off_noon` 是**区间** `'HH:mm-HH:mm'`（旧版单值 `'12:00'` 按开始点 +1 小时
   兼容）；时间框一律用自由文本 `QLineEdit` + `parse_time_text` / `parse_noon_range` 解析，
   不用 `QTimeEdit`——它按时/分分段校验，全选后直接打字会被校验器拒掉，且根本打不进冒号。
@@ -292,8 +300,10 @@ ClearType，文字发灰），圆角统一走遮罩（`round_corners`，SetWindo
 
 #### 日历的连续周条带
 
-日历不是「一月一页」，而是把周序列切成 42 格（6 周）的 `_GridPage` 条带，首尾相接不重复周，
-因此平移停在任意位置都不会出现跨页重复行。`_GridViewport` 在上/当前/下三个页面间平移：
+日历不是「一月一页」，而是把周序列切成 35 格（5 周）的 `_GridPage` 条带，首尾相接不重复周，
+因此平移停在任意位置都不会出现跨页重复行。五周而不是六周：默认视图不再带一行全灰的下月
+日期（面板高度随之矮一行）；代价是跨 6 周的月份（如 2026-11）最后一周在下一屏，滚一下可见。
+`_GridViewport` 在上/当前/下三个页面间平移：
 
 - 平移中切到 `pixmaps` 位图缓存（每帧只 blit 三张图），停手 200ms 后 `_end_pan` 切回活页面。
 - `_page_pixmap` 抓图前必须预填透明——否则深色主题下平移会闪白。
