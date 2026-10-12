@@ -33,6 +33,8 @@ Windows 桌面整理工具：桌面格子 + 悬浮面板（日历 / 待办 / 传
 
 到 [Releases](https://github.com/evachxji/zbox/releases) 下载 `zbox-Setup-v<版本>-x64.exe`，双击打开安装向导即可（仅当前用户安装免管理员）。
 
+升级：设置窗右下角「检查更新」会自动比对 GitHub 最新 release，有新版本可一键下载安装包并引导安装。
+
 源码运行：双击 `run.cmd`（缺 PySide6 会提示自动安装）。
 
 ## 自行构建

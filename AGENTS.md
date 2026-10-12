@@ -85,10 +85,11 @@ Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyS
 平铺布局，一个模块一个职责：
 
 - `main.pyw` — 入口：单实例 IPC（`QLocalServer`）、节假日后台更新、局域网传输服务启动、（frozen 时）`--uninstall` 卸载向导入口
-- `app.py` — 面板 UI（日历 / 待办 / 传输 / 顶部栏滑出与拖动）、`SettingsDialog` 与节假日导入引导窗
+- `app.py` — 面板 UI（日历 / 待办 / 传输 / 顶部栏滑出与拖动）、`SettingsDialog`（右下角「检查更新」：后台查 GitHub 最新 release，有新版本确认后经 updater 下载安装包、再确认即启动安装向导并退出本程序）与节假日导入引导窗
 - `boxes.py` — 桌面格子：空白格子（桌面文件的收纳视图，不搬文件、只隐藏桌面图标）与文件夹映射格子、双击桌面显隐；桌面图标位置记忆（`boxes.json['desktop_icons']`：退出时与每 60s 快照可见图标坐标——格子里的已隐藏、ListView 枚举不到，正好是「没进格子的文件」——启动时 `_DesktopIconLayout.restore_positions` 按显示名摆回并 3s 后补一次，自动排列桌面不插手）；
 格子拖出落回桌面由 `_DesktopDropOverlay`（桌面带最底层的全屏透明落放层，仅拖拽期间显示）接住内部处理、不走 Explorer（被占用的文件夹也能拖出），落到资源管理器窗口/其他应用才交 URL 给对方真实移动；拖拽默认「移动」、按住 Ctrl 落放 = 复制；Delete 删除走外壳原生确认弹窗（`_shell_op` 包 SHFileOperation）
 - `calendar_data.py` — 内置国务院节假日数据、农历换算、三源联网回退与离线导入
+- `updater.py` — 应用自身更新：`latest_release` 查 GitHub 最新 release 并挑当前架构的 Setup exe（API 直连优先、ghproxy 镜像兜底）、`has_update` 版本号数值化补齐比较、`download_setup` 镜像优先下载（`.new` + replace）。纯标准库零 Qt，供设置窗在后台线程调用
 - `transfer.py` — 局域网文件传输协议核心（参照 LocalSend v2 的私有实例）：UDP 组播发现 + HTTP REST 传输，纯标准库零 Qt
 - `transfer_ui.py` — 面板「传输」tab：设备列表、文件多选 + 拖拽发送、传输记录（「传输中」的记录行亮彩色跑马灯轮廓）、接收确认弹窗、发送方取消；传输服务生命周期自持（默认关闭的门禁层、启用/停用、「?」说明弹窗）；`enable_service()` 成功后后台查一次 Windows 防火墙阻止规则（`sysutil.firewall_blocked` 按 exe 路径匹配、免管理员；命中弹 `_ConfirmDialog` 引导一键修复，UAC 被拒静默，每会话最多提示一次）
 - `video_dl.py` — 视频解析核心：yt-dlp / ffmpeg 组件下载（ghproxy 镜像优先、GitHub 直连兜底；ffmpeg 优先 npmmirror 的 ffmpeg-static 单文件 gz）、版本查询（本地 `--version` + PyPI JSON / GitHub API，比较走 `version_key` 数值化——本地输出 `2026.08.19`、PyPI 归一成 `2026.8.19`，字符串直接比会误报有新版）、视频下载子进程（照搬参考脚本 `bestvideo[height<=N]+bestaudio` 合并 mp4，解析/下载一律带 `--encoding utf-8` 并按 utf-8 解码——默认 cp936 会把文件名里的 emoji（🎞/▪︎ 等 GBK 外字符）替换成空格，Merger 行路径与真实文件不符导致 `isfile` 失败、完成态卡片丢失「打开」按钮；`--newline` 逐行进度解析并映射成**单趟进度条**：下载段 0→95%（分流源 视频 0–85 / 音频 85–95，合流源 0–95），95→100 留给合并（done 置 100）——不再每路流各走一遍；阶段文案仍按 Destination 计数标「(1/3) 下载视频/(2/3) 下载音频/(3/3) 合并中」（合流源不带计数，由解析时的 `split_heights` 判定；`-f` 带 `/best` 兜底合流单文件）；中间流文件下在保存目录，成功由 yt-dlp 自删，失败/中止由 `_cleanup_parts` 清掉本次 Destination 及 .part/.ytdl 边车；同名成品撞车被 yt-dlp 跳过时自动追加 `-2160P` 式分辨率后缀重试一次，后缀也撞车才报「未重复下载」）；浏览器 cookie：`tools\cookies.txt` 存在即随解析/下载命令带 `--cookies`（抖音等站点匿名请求 403 必需，`import_cookies` 做 Netscape 格式轻校验、缺 douyin.com 条目仅警告，卸载组件时一并删除）。纯标准库零 Qt，回调全在后台线程

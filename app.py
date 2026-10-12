@@ -5,6 +5,7 @@ from ctypes import wintypes
 import json
 import os
 import sys
+import threading
 import time
 from datetime import date, datetime, timedelta
 
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (QWidget, QFrame, QLabel, QToolButton, QVBoxLayout
 import calendar_data as cd
 import sysutil
 import transfer_ui
+import updater
 import video_ui
 from themes import THEMES, THEME_ORDER, THEME_CHOICES, AUTO, build_qss
 from version import APP_VERSION, GITHUB_URL
@@ -1625,6 +1627,7 @@ class SettingsDialog(QDialog):
     """齿轮按钮弹出的无边框设置窗口，样式跟随当前主题（themes.py #settingsPanel 区段）。
     on_fetch/on_import 为节假日数据回调（由入口提供）。
     改动即时生效并写入 config.json。"""
+    sig_upd = Signal(object)    # 检查更新/下载状态（后台线程 → 主线程）
     def __init__(self, panel, on_fetch, on_import, boxmgr=None, on_hotkey=None):
         super(SettingsDialog, self).__init__(panel)
         self.setObjectName('settingsDlg')
@@ -1902,6 +1905,14 @@ class SettingsDialog(QDialog):
         ver.setObjectName('setLabel')   # 借用表单标签的弱化色
         ver_row.addWidget(ver)
         ver_row.addStretch(1)
+        # 检查更新：查 GitHub 最新 release，有新版本则下载安装包并引导安装（updater.py）
+        self.btn_update = QPushButton('检查更新')
+        self.btn_update.setObjectName('setBtn')
+        self.btn_update.setCursor(Qt.PointingHandCursor)
+        self.btn_update.setToolTip('检查 GitHub 上是否有新版本')
+        self.btn_update.clicked.connect(self._update_clicked)
+        ver_row.addWidget(self.btn_update)
+        self.sig_upd.connect(self._on_upd)
         lay.addLayout(ver_row)
 
         # 默认居中在屏幕可用区（不贴着面板：面板常停右下角，跟着它会被挤到屏幕边上）
@@ -1925,6 +1936,76 @@ class SettingsDialog(QDialog):
             self.btn_fetch.setText('联网更新')
         except RuntimeError:
             pass  # 设置窗已关，按钮随窗口销毁
+
+    # ---------------- 检查更新 ----------------
+
+    def _update_clicked(self):
+        """点击即 loading + 禁用，后台查 GitHub 最新 release，结果经 sig_upd 回主线程。"""
+        self.btn_update.setEnabled(False)
+        self.btn_update.setText('检查中…')
+        threading.Thread(target=self._upd_check_work, daemon=True).start()
+
+    def _upd_check_work(self):
+        try:
+            rel = updater.latest_release()
+        except Exception:
+            rel = None
+        self.sig_upd.emit({'phase': 'check', 'rel': rel})
+
+    def _upd_dl_work(self, rel):
+        try:
+            path = updater.download_setup(
+                rel, sysutil.download_dir(),
+                lambda d, t: self.sig_upd.emit({'phase': 'progress', 'done': d, 'total': t}))
+            self.sig_upd.emit({'phase': 'done', 'path': path})
+        except Exception as e:
+            self.sig_upd.emit({'phase': 'done', 'err': str(e)})
+
+    def _upd_reset(self):
+        self.btn_update.setEnabled(True)
+        self.btn_update.setText('检查更新')
+
+    def _on_upd(self, p):
+        """更新流程（主线程）：检查 → 有新版本确认下载 → 按钮上显示进度 → 下完确认安装。"""
+        try:
+            phase = p.get('phase')
+            if phase == 'progress':
+                d, t = p['done'], p['total']
+                self.btn_update.setText('下载中 %d%%' % (d * 100 // t) if t else '下载中…')
+                return
+            if phase == 'check':
+                self._upd_reset()
+                rel = p.get('rel')
+                if rel is None:
+                    show_toast_on(self, '检查更新失败，请检查网络后重试', ok=False, hold_ms=2200)
+                elif not updater.has_update(rel['tag']):
+                    show_toast_on(self, '已是最新版本（v%s）' % APP_VERSION)
+                else:
+                    box = video_ui._ConfirmDialog(
+                        self, title='发现新版本 %s' % rel['tag'],
+                        text='当前版本 v%s，最新版本 %s。是否下载安装包并更新？'
+                             % (APP_VERSION, rel['tag']),
+                        ok_text='下载并安装')
+                    if box.exec() == QDialog.Accepted:
+                        self.btn_update.setEnabled(False)
+                        self.btn_update.setText('下载中…')
+                        threading.Thread(target=self._upd_dl_work, args=(rel,),
+                                         daemon=True).start()
+                return
+            if phase == 'done':
+                self._upd_reset()
+                if not p.get('path'):
+                    show_toast_on(self, '安装包下载失败，请检查网络后重试', ok=False, hold_ms=2200)
+                    return
+                box = video_ui._ConfirmDialog(
+                    self, title='下载完成',
+                    text='安装包已下载。点击「立即安装」将退出当前程序并启动安装向导。',
+                    ok_text='立即安装')
+                if box.exec() == QDialog.Accepted:
+                    os.startfile(p['path'])
+                    QApplication.instance().quit()
+        except RuntimeError:
+            pass  # 设置窗已关，控件随窗口销毁
 
     _MOD_KEYS = (Qt.Key_Control, Qt.Key_Shift, Qt.Key_Alt, Qt.Key_Meta)
 
