@@ -1,59 +1,69 @@
-﻿<p align="center">
+<p align="center">
   <img src="assets/icon.png" width="96" alt="Zbox">
 </p>
 
-# Zbox 桌面格子 v0.4.1
+# Zbox v0.4.1
 
-Windows 桌面整理工具：桌面格子 + 悬浮面板（日历 / 待办 / 传输 / 视频解析）+ 截图。Win10 / Win11。
+<p align="center">
+  <a href="https://github.com/evachxji/zbox/releases/latest"><img src="https://img.shields.io/github/v/release/evachxji/zbox" alt="Release"></a>
+  <a href="https://github.com/evachxji/zbox/releases"><img src="https://img.shields.io/github/downloads/evachxji/zbox/total" alt="Downloads"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/platforms-Windows%2010%2F11%20%C2%B7%20Android%20%C2%B7%20HarmonyOS-blue" alt="Platforms">
+</p>
 
-## 功能
+<p align="center">
+  <b>English</b> | <a href="README.zh-CN.md">简体中文</a>
+</p>
+
+A Windows desktop organizer: desktop boxes + a floating panel (calendar / todo / LAN transfer / video downloader) + screenshot tool. Windows 10 / 11.
+
+## Features
 
 <table>
   <tr>
-    <th align="center">桌面格子</th>
-    <th align="center">文件传输</th>
-    <th align="center">视频解析</th>
+    <th align="center">Desktop Boxes</th>
+    <th align="center">File Transfer</th>
+    <th align="center">Video Downloader</th>
   </tr>
   <tr>
-    <td><a href="assets/box.png"><img src="assets/box.png" width="260" alt="桌面格子"></a></td>
-    <td><a href="assets/transfer.png"><img src="assets/transfer.png" width="260" alt="文件传输"></a></td>
-    <td><a href="assets/video.png"><img src="assets/video.png" width="260" alt="视频解析"></a></td>
+    <td><a href="assets/box.png"><img src="assets/box.png" width="260" alt="Desktop boxes"></a></td>
+    <td><a href="assets/transfer.png"><img src="assets/transfer.png" width="260" alt="File transfer"></a></td>
+    <td><a href="assets/video.png"><img src="assets/video.png" width="260" alt="Video downloader"></a></td>
   </tr>
 </table>
 
-1. **桌面整理**：文件拖入格子即归类，图标自动收纳还原，未入格文件的图标位置自动记忆、启动时摆回；
-   格子内拖到条目间的白色引导线上可自定义排序，拖到文件夹上 = 移入该文件夹，拖到程序/快捷方式上 = 用它打开
-2. **悬浮面板**：
-   - **日历**：时钟倒计时、节假日农历、滚轮翻月
-   - **待办**：勾选完成置灰，截止日期逾期提醒
-   - **传输**：局域网设备互传文件，手动确认接收（首次启用请放行 Windows 防火墙弹窗；误点「取消」导致收不到设备/文件时，传输页会自动提示并可一键修复）
-   - **视频解析**：粘贴网址下载视频，多清晰度、断点续传
-   - 卡片四边/四角拖拽自由缩放，大小自动记忆
-3. **截图**：全局热键框选标注，支持钉图与滚动长图
+1. **Desktop organization**: drag files into a box to tidy them away — icons are hidden and restored automatically, and the positions of icons that never entered a box are remembered and put back on launch.
+   Inside a box, drop onto the white guide line between items for a custom order, onto a folder to move files into it, or onto an app/shortcut to open the dragged files with it.
+2. **Floating panel**:
+   - **Calendar**: clock with countdowns, public holidays and lunar calendar, scroll to flip months
+   - **Todo**: check items off (grayed out), overdue reminders for due dates
+   - **Transfer**: send files between devices on the LAN, with manual accept on the receiver (allow the Windows Firewall prompt when first enabling it; if you clicked "Cancel" by mistake and devices/files stop arriving, the transfer tab detects it and offers a one-click repair)
+   - **Video downloader**: paste a URL to download videos, multiple resolutions, resumable downloads
+   - Freely resize the card by dragging its edges/corners; the size is remembered
+3. **Screenshot**: global hotkey region capture with annotations, pin-to-screen and scrolling long capture
 
-## 快速开始
+## Quick Start
 
-到 [Releases](https://github.com/evachxji/zbox/releases) 下载 `zbox-Setup-v<版本>-x64.exe`，双击打开安装向导即可（仅当前用户安装免管理员）。
+Download `zbox-Setup-v<version>-x64.exe` from [Releases](https://github.com/evachxji/zbox/releases) and double-click to open the installer (per-user install, no admin rights needed).
 
-升级：设置窗右下角「检查更新」会自动比对 GitHub 最新 release，有新版本可一键下载安装包并引导安装。
+Upgrading: "Check for updates" in the bottom-right corner of the Settings window compares against the latest GitHub release and can download the installer and guide you through the upgrade.
 
-源码运行：双击 `run.cmd`（缺 PySide6 会提示自动安装）。
+Run from source: double-click `run.cmd` (it will offer to install PySide6 if missing).
 
-## 自行构建
+## Build It Yourself
 
-- 一键三端：双击 `build.cmd`，启动后选 1-7 构建单端或组合（默认 7 全量：Windows exe 安装包 + Android APK + 鸿蒙 HAP），产物汇总在 `dist\release\`（文件名带版本号）
-  - 依赖：PC 需 PySide6 + PyInstaller（缺了会提示自动装）；Android 需 JDK 17 与 Android SDK；鸿蒙需 DevEco Studio 与 `devecocli`（`npm i -g @deveco/deveco-cli@stable`）
-  - hap 是免签名调试包，只能装模拟器/开发者调试设备；分发真机需签名或上架（见 `harmony\README.md`）
+- One-click, three platforms: double-click `build.cmd` and pick 1-7 to build a single target or a combination (default 7 = everything: Windows exe installer + Android APK + HarmonyOS HAP). Artifacts (versioned file names) are collected in `dist\release\`.
+  - Requirements: PC builds need PySide6 + PyInstaller (auto-install offered if missing); Android needs JDK 17 and the Android SDK; HarmonyOS needs DevEco Studio and `devecocli` (`npm i -g @deveco/deveco-cli@stable`)
+  - The HAP is an unsigned debug package that only installs on emulators / developer debug devices; distributing to real devices requires signing or AppGallery release (see `harmony\README.md`)
 
-## 兼容性
+## Compatibility
 
-PySide6（Qt 6.8 LTS），Python 3.10+，Win10 / Win11。
+PySide6 (Qt 6.8 LTS), Python 3.10+, Windows 10 / 11.
 
-## 开源致谢
+## Acknowledgments
 
-局域网传输功能参照开源项目 [LocalSend](https://github.com/localsend/localsend)（Apache License 2.0）的
-v2 协议实现，为私有实例（端口 53327 / 组播 224.0.0.168），与官方 LocalSend 应用不互通。
-视频解析功能由 [yt-dlp](https://github.com/yt-dlp/yt-dlp) 驱动，音视频合并由 [ffmpeg](https://ffmpeg.org/) 完成。
+The LAN transfer feature implements the v2 protocol of the open-source project [LocalSend](https://github.com/localsend/localsend) (Apache License 2.0) as a private instance (port 53327 / multicast 224.0.0.168) and is not interoperable with the official LocalSend apps.
+Video downloading is powered by [yt-dlp](https://github.com/yt-dlp/yt-dlp), with audio/video merging by [ffmpeg](https://ffmpeg.org/).
 
 ## License
 
