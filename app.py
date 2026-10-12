@@ -1440,6 +1440,38 @@ def _place_below(win, anchor):
         pass
 
 
+_HWND_TOPMOST = -1
+_GWLP_HWNDPARENT = -8
+try:
+    _set_wnd_long_ptr = _u32.SetWindowLongPtrW   # 64 位
+except AttributeError:
+    _set_wnd_long_ptr = _u32.SetWindowLongW      # 32 位 Python 没有这个导出
+_set_wnd_long_ptr.restype = ctypes.c_longlong if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_long
+_set_wnd_long_ptr.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
+
+
+def force_topmost(win):
+    """把窗口原生钉进 topmost 层，并摘掉它的原生属主。
+    设置/关于窗是面板（桌面带成员）的子窗口，这层 owned 关系有两个连坐坑：
+    ① Qt 的 WindowStaysOnTopHint 对它不生效（实测 WS_EX_TOPMOST 缺失，弹窗被
+       普通应用窗口盖住）；② Windows 保证 owned window 恒在 owner 之上，面板
+       沉底/重挂桌面带时弹窗被一并拖拽（闪烁后埋在应用窗口之下，表现是鼠标一
+       移上去就「消失」）。摘掉属主后弹窗 z-order 完全独立，只剩 topmost 说了算。
+    Qt 层 parent 不动：居中定位、随面板隐藏等仍走 Qt 父子关系。"""
+    def _pin():
+        try:
+            hwnd = int(win.winId())
+            if hwnd and win.isVisible():
+                _set_wnd_long_ptr(hwnd, _GWLP_HWNDPARENT, None)
+                _u32.SetWindowPos(hwnd, _HWND_TOPMOST, 0, 0, 0, 0, _SWP_Z_ONLY)
+        except Exception:
+            pass
+    _pin()
+    # Qt 在 showEvent 之后才往原生窗口上写属主（实测 showEvent 里摘完 owner 仍是面板），
+    # 延迟一拍再摘一次；句柄被 Qt 重建（winId 变化）后属主也会回来，靠 WinIdChange 兜底
+    QTimer.singleShot(200, _pin)
+
+
 def parse_time_text(text):
     """把时间输入框里的自由文本解析成 'HH:mm'，解析不了返回 None。
     中文冒号按英文冒号处理（中文输入法下常打出「：」）；允许省前导零与时/分之间的冒号：
@@ -2105,6 +2137,7 @@ class SettingsDialog(QDialog):
     def showEvent(self, e):
         super(SettingsDialog, self).showEvent(e)
         round_corners(self)
+        force_topmost(self)   # 桌面带子窗口吃不到 Qt 的 topmost 标志，原生补钉
 
     def resizeEvent(self, e):
         super(SettingsDialog, self).resizeEvent(e)
@@ -2236,6 +2269,7 @@ class AboutDialog(QDialog):
     def showEvent(self, e):
         super(AboutDialog, self).showEvent(e)
         round_corners(self)
+        force_topmost(self)   # 同设置窗：桌面带子窗口吃不到 Qt 的 topmost 标志
 
     def resizeEvent(self, e):
         super(AboutDialog, self).resizeEvent(e)
@@ -2584,15 +2618,15 @@ class FloatingPanel(QWidget):
         return super(FloatingPanel, self).event(e)
 
     def _child_window_in_use(self):
-        """面板的子窗口（设置/关于等无边框对话框）正在使用：激活或悬停。
+        """面板有可见的子窗口（设置/关于等无边框对话框）就算使用中。
         面板沉底会把属主是自己的子窗口一并拽进桌面层（owned window 恒在 owner 之上），
-        设置窗开着时鼠标一移上去、面板 underMouse 过期，面板一沉设置窗就被其它
-        应用窗口盖住——子窗口使用中不沉。"""
+        而一旦被其它应用窗口盖住，鼠标根本到不了子窗口上，靠激活/悬停补救永远
+        来不及——所以只要子窗口可见就不沉，让它靠 WindowStaysOnTopHint 一直浮在
+        最顶层。"""
         for w in QApplication.topLevelWidgets():
             if w is not self and w.parent() is self and w.isVisible():
-                _dbg('childwin: %s active=%s undermouse=%s' % (type(w).__name__, w.isActiveWindow(), w.underMouse()))
-                if w.isActiveWindow() or w.underMouse():
-                    return True
+                _dbg('childwin visible: %s' % type(w).__name__)
+                return True
         return False
 
     def _ensure_desktop_level(self):

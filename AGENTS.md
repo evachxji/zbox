@@ -267,7 +267,14 @@ ClearType，文字发灰），圆角统一走遮罩（`round_corners`，SetWindo
   `pin_to_desktop` 内部已处理可见窗口挂带丢 `WS_VISIBLE` 的坑（ShowWindow SW_SHOWNA）。
 - **沉底守卫要算上子窗口**（`_child_window_in_use`）：设置/关于窗是面板的子窗口，Windows 保证
   owned window 恒在 owner 之上——面板一沉底会把它一并拽进桌面层，被其它应用窗口盖住
-  （表现：鼠标一移到设置窗上它就「消失」）。子窗口激活或悬停期间 `_ensure_desktop_level` 不沉。
+  （表现：鼠标一移到设置窗上它就「消失」）。注意被盖住后鼠标根本到不了子窗口上，
+  靠激活/悬停补救永远来不及，所以只要子窗口**可见**`_ensure_desktop_level` 就不沉。
+  另外 Qt 的 WindowStaysOnTopHint 对桌面带的子窗口不生效（实测 WS_EX_TOPMOST 缺失），
+  且 owned 关系会让弹窗被面板的沉底/重挂连坐拖拽（闪烁后埋在应用窗口下，表现为
+  鼠标一移上去就「消失」）——设置/关于窗 showEvent 里用 `force_topmost` 原生补钉：
+  摘原生属主（GWLP_HWNDPARENT 置空，Qt 层 parent 不动）+ SetWindowPos HWND_TOPMOST。
+  注意 Qt 在 showEvent **之后**才往原生窗口写属主，立即摘会被盖掉，`force_topmost`
+  内部已带 200ms 延迟补摘。
 - **拖动把手**：展开的顶部栏、日历左侧的时分秒与日期行，都走同一个 `eventFilter` 里的
   MouseButtonPress/Move/Release 直接 `move()`，松手 `_save_pos()` 落盘。过滤器只装在
   `titlebar` / `cal.clock_hm` / `cal.sub` 三个控件上——装在哪就只对谁生效（标题栏里设置、关闭
