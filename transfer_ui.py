@@ -295,7 +295,7 @@ class TransferInfoDialog(QDialog):
         para('安全提示', 'transferTitle')
         para('请只在自己家、公司等可信的局域网使用，公共 Wi-Fi 下建议保持关闭。')
         para('手机端', 'transferTitle')
-        para('Android 手机安装 zbox 手机端，即可与电脑互传。')
+        para('Android 手机安装 Zbox 手机端，即可与电脑互传。')
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(ui.sc(8))
@@ -720,7 +720,7 @@ class TransferWidget(QWidget):
         else:
             _ConfirmDialog(self, title='防火墙修复失败',
                            text='自动修复未成功。请手动放行：设置 → 网络和 Internet → '
-                                'Windows 防火墙 → 允许应用通过防火墙，找到 zbox 并勾选网络类型。',
+                                'Windows 防火墙 → 允许应用通过防火墙，找到 Zbox 并勾选网络类型。',
                            ok_text='知道了').exec()
 
     # ---------------- 门禁层 ----------------

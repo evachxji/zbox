@@ -5,7 +5,7 @@
       pythonw main.pyw --new-box / --settings / --about / --quit
                                   桌面右键二级菜单项：已运行则 IPC 转发，未运行则启动后本地执行（--quit 除外）
       pythonw main.pyw --pick-folder   「新建文件夹格子」：本进程弹原生目录框，路径经 IPC 发回面板
-      pythonw main.pyw --add-folder <路径>   文件夹右键「添加到zbox桌面格子」：路径经 IPC 发回面板建格子
+      pythonw main.pyw --add-folder <路径>   文件夹右键「添加到Zbox桌面格子」：路径经 IPC 发回面板建格子
 自检：设置环境变量 ZBOX_SHOT=<目录> 启动，自动导出两主题截图后退出。
 """
 import ctypes
@@ -258,7 +258,7 @@ def main():
         return 0
 
     if '--add-folder' in sys.argv:
-        # 文件夹右键「添加到zbox桌面格子」：资源管理器经 %1 传入路径，直接包成
+        # 文件夹右键「添加到Zbox桌面格子」：资源管理器经 %1 传入路径，直接包成
         # b'folder:' 消息发回面板（与 --pick-folder 同一条 IPC 通道，面板侧零改动）。
         # 菜单只在运行中注入，无实例 = 崩溃残留被点到，静默退出。
         # ⚠️ 必须在下方通用转发之前 return：--add-folder 不在 IPC_ACTIONS，

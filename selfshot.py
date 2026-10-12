@@ -443,7 +443,7 @@ class _Runner(object):
         self._sample_dir = d
         for name in ('会议纪要.docx', '季度数据.xlsx', 'README.txt'):
             with open(os.path.join(d, name), 'wb') as f:
-                f.write('zbox 截图自检示例文件\n'.encode('utf-8'))
+                f.write('Zbox 截图自检示例文件\n'.encode('utf-8'))
         # 1x1 PNG（真实格式，图标走系统关联）
         png = bytes.fromhex(
             '89504e470d0a1a0a0000000d494844520000000100000001080600000'

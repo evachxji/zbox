@@ -12,7 +12,7 @@ import winreg
 from version import APP_VERSION
 
 APP_NAME = 'zbox'
-MENU_TITLE = 'zbox桌面格子'
+MENU_TITLE = 'Zbox桌面格子'
 
 # 桌面右键二级菜单项：(注册表子键名, 显示文字, exe 命令行参数)
 # 子键名的字母序就是菜单顺序，故带 A_/B_… 前缀
@@ -36,8 +36,8 @@ RUN_KEY = r'Software\Microsoft\Windows\CurrentVersion\Run'
 # 右键菜单键相对 HKCR 的路径；ExtendedSubCommandsKey 要的就是这段（不带 Software\Classes\）
 SHELL_SUBKEY = r'Directory\Background\shell\zbox'
 SHELL_KEY = r'Software\Classes\\' + SHELL_SUBKEY
-# 文件夹（Directory）右键「添加到zbox桌面格子」静态动词：仅运行中注入，随面板启停写删
-FOLDER_MENU_TEXT = '添加到zbox桌面格子'
+# 文件夹（Directory）右键「添加到Zbox桌面格子」静态动词：仅运行中注入，随面板启停写删
+FOLDER_MENU_TEXT = '添加到Zbox桌面格子'
 FOLDER_SHELL_KEY = r'Software\Classes\Directory\shell\zbox'
 LEGACY_SHELL_KEY = r'Software\Classes\Directory\Background\shell\zviber'  # 旧名残留，安装/退出时清掉
 COMMANDSTORE_KEY = r'Software\Microsoft\Windows\CurrentVersion\Explorer\CommandStore\shell'  # 只为清理旧版残留
@@ -269,7 +269,7 @@ def _menu_icon(exe, icon_path):
 
 
 def _write_flat(root, exe, icon_path):
-    """未运行形态：直链菜单项「zbox桌面格子」，单击启动程序。"""
+    """未运行形态：直链菜单项「Zbox桌面格子」，单击启动程序。"""
     with winreg.CreateKey(root, SHELL_KEY) as k:
         winreg.SetValueEx(k, 'MUIVerb', 0, winreg.REG_SZ, MENU_TITLE)
         icon = _menu_icon(exe, icon_path)
@@ -311,7 +311,7 @@ def _write_cascade(root, exe, icon_path):
 
 
 def _write_folder_item(root, exe, icon_path):
-    """文件夹（Directory）右键项「添加到zbox桌面格子」：静态动词，%1 = 选中的文件夹路径。
+    """文件夹（Directory）右键项「添加到Zbox桌面格子」：静态动词，%1 = 选中的文件夹路径。
     仅运行中存在（见 context_menu_set_running），点击经 --add-folder 由 IPC 转发给面板建格子。"""
     with winreg.CreateKey(root, FOLDER_SHELL_KEY) as k:
         winreg.SetValueEx(k, 'MUIVerb', 0, winreg.REG_SZ, FOLDER_MENU_TEXT)
@@ -340,7 +340,7 @@ def context_menu_set_running(running, icon_path=None):
     - 源码运行（无安装记录）：启动时注入级联菜单、退出时整体删除，不留残留
       （崩溃残留由下次启动时 installer.sync_context_menu() 清掉）。
     进程崩溃会让菜单停在级联态——此时点二级项会新起实例并本地执行动作，可接受的降级。
-    文件夹右键「添加到zbox桌面格子」（FOLDER_SHELL_KEY）与级联菜单同生共死：只随
+    文件夹右键「添加到Zbox桌面格子」（FOLDER_SHELL_KEY）与级联菜单同生共死：只随
     running=True 注入，退出/卸载/覆盖安装时随 _delete_shell_tree 一并删除——未运行时不该
     出现，崩溃残留被点到则静默退出（main.pyw 的 --add-folder 分支）。"""
     hkcu_installed = uninstall_reg_get('InstallLocation', False)
@@ -370,7 +370,7 @@ def uninstall_reg_install(exe_path, all_users=False, size_kb=None):
     if size_kb is None:
         size_kb = os.path.getsize(exe_path) // 1024
     vals = [
-        ('DisplayName', winreg.REG_SZ, 'zbox桌面格子'),
+        ('DisplayName', winreg.REG_SZ, 'Zbox桌面格子'),
         ('DisplayVersion', winreg.REG_SZ, APP_VERSION),
         ('Publisher', winreg.REG_SZ, 'Zbox'),
         ('DisplayIcon', winreg.REG_SZ, exe_path),
@@ -455,7 +455,7 @@ def fix_firewall_rules():
         "  Where-Object { $_.Action -eq $a }\n"
         "}\n"
         "_rules 'Block' | Remove-NetFirewallRule -ErrorAction SilentlyContinue\n"
-        "$name = 'zbox 局域网传输'\n"
+        "$name = 'Zbox 局域网传输'\n"
         "function _allow {\n"
         " Get-NetFirewallRule -DisplayName \"$name*\" -ErrorAction SilentlyContinue |\n"
         "  Where-Object { [Environment]::ExpandEnvironmentVariables("

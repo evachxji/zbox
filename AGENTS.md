@@ -186,7 +186,7 @@ set ZBOX_SHOT=designs\verify && python main.pyw   :: 截图自检
 接收 `toggle` / `quit` → `context_menu_set_running(True)` 注入桌面右键级联菜单。
 
 - 单实例靠 `QLocalServer` 名称 `zbox-panel-v1`；消息由 `_on_ipc` 按 `actions` 字典分发，`quit` 消息供卸载程序请求退出。
-- 桌面右键是**级联菜单**：父项「zbox桌面格子」用 `MUIVerb` + `ExtendedSubCommandsKey` 自引用（子项放父项 `shell\` 子键下，子键名字母序即菜单顺序，故带 A_/B_… 前缀）。两个实测坑：① 别用 `SubCommands` 方案——它只按 **HKLM** 的 `Explorer\CommandStore` 解析，HKCU 的不认，免管理员安装没法用；② 父项绝不能有 `command` 子键，否则退化成直链不展开。6 个二级项：新建格子、新建文件夹格子、显示/隐藏卡片、设置、关于、退出，各走 `--new-box`/`--pick-folder`/`--toggle`/`--settings`/`--about`/`--quit` 命令行参数，经 IPC（`IPC_ACTIONS`）转发给运行中的实例，不新起进程。**菜单形态跟随运行状态**：`context_menu_set_running()` 在面板启停时改写——运行中 = 级联六项，未运行 = 直链单项「单击启动」（安装时写入的就是直链形态）；HKLM 安装无权改写，运行时往 HKCU 写覆盖层、退出删掉回落；源码运行（无安装记录）启动时注入级联菜单、退出时整体删除（崩溃残留由下次启动时 `sync_context_menu` 清掉）。
+- 桌面右键是**级联菜单**：父项「Zbox桌面格子」用 `MUIVerb` + `ExtendedSubCommandsKey` 自引用（子项放父项 `shell\` 子键下，子键名字母序即菜单顺序，故带 A_/B_… 前缀）。两个实测坑：① 别用 `SubCommands` 方案——它只按 **HKLM** 的 `Explorer\CommandStore` 解析，HKCU 的不认，免管理员安装没法用；② 父项绝不能有 `command` 子键，否则退化成直链不展开。6 个二级项：新建格子、新建文件夹格子、显示/隐藏卡片、设置、关于、退出，各走 `--new-box`/`--pick-folder`/`--toggle`/`--settings`/`--about`/`--quit` 命令行参数，经 IPC（`IPC_ACTIONS`）转发给运行中的实例，不新起进程。**菜单形态跟随运行状态**：`context_menu_set_running()` 在面板启停时改写——运行中 = 级联六项，未运行 = 直链单项「单击启动」（安装时写入的就是直链形态）；HKLM 安装无权改写，运行时往 HKCU 写覆盖层、退出删掉回落；源码运行（无安装记录）启动时注入级联菜单、退出时整体删除（崩溃残留由下次启动时 `sync_context_menu` 清掉）。
   **第三种形态——全隐藏单项**：双击桌面把图标/格子/面板全收起来后，`toggle_all` 调
   `context_menu_set_icons_hidden(True)` 把桌面右键收成唯一直链项「显示桌面图标」
   （`--show-icons` 经 IPC 调 `BoxManager.show_all`，图标 + 格子 + 面板一起放回），恢复后切回级联；
@@ -404,7 +404,7 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
 
 - 注册表写入默认走 HKCU（**免管理员**，Win10/11 通用）；`all_users=True` 才写 HKLM
   （exe 安装向导的「此计算机」选项，需管理员）。清理函数对两个根都尝试、无权限时静默跳过。
-- **命名统一为全小写 `zbox`（2026-10 从 `zviber` 改名）**：程序本体 `zbox.exe`、
+- **标识符统一为全小写 `zbox`、展示文案统一为首字母大写 `Zbox`（2026-10 从 `zviber` 改名）**：程序本体 `zbox.exe`、
   安装目录（`%LOCALAPPDATA%\Programs\zbox` / `Program Files\zbox`）、安装包
   `zbox-Setup-v<版本>-<架构>.exe`、注册表键、单实例 IPC 名都跟着换。**改名前的兼容代码别当冗余删**：
   `installer.LEGACY_APP_EXE`（`_check_dir` 与覆盖重装要认旧 exe）、`sysutil.LEGACY_SHELL_KEY` /
@@ -414,7 +414,7 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
   **IPC 名重新起为 `zbox-panel-v1`**（旧版 zviber 用 `zviber-panel-v2`）：新旧版数据目录与注册表会互相覆盖，
   让它俩互不串话（各起一个实例）比新旧混用一个安全。
 - 涉及的键：`Run`（自启）、`Directory\Background\shell\zbox`（桌面右键菜单）、
-  `Directory\shell\zbox`（文件夹右键「添加到zbox桌面格子」，仅运行中注入，安装不写）、
+  `Directory\shell\zbox`（文件夹右键「添加到Zbox桌面格子」，仅运行中注入，安装不写）、
   `Uninstall\zbox`（应用列表卸载项）。
 - **桌面右键菜单只属于 exe 安装**：只有 `installer.install()` 会写菜单，`install.py` 只写开机自启。
   每次启动 `installer.sync_context_menu()` 按 `Uninstall\zbox` 的 `InstallLocation` 判定——
@@ -501,7 +501,7 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
 桌面文件归类格子：`BoxManager` 总管（恢复/新建/解散/显隐），`BoxWindow` 单格，
 `BoxStore` 存 `%APPDATA%\zbox\boxes.json`（`visible` + 格子记录列表）。
 格子管理入口在桌面右键级联菜单（新建格子 / 新建文件夹格子 / 显示隐藏格子）；截图自检模式不创建格子。
-另有**资源管理器文件夹右键「添加到zbox桌面格子」**（`Directory\shell\zbox` 静态动词，
+另有**资源管理器文件夹右键「添加到Zbox桌面格子」**（`Directory\shell\zbox` 静态动词，
 `--add-folder "%1"` 传路径）：仅运行中注入（随 `context_menu_set_running` 与桌面级联菜单同生共死，
 退出/卸载/覆盖安装时随 `_delete_shell_tree` 一并删除，崩溃残留被点到静默退出），路径经 `b'folder:'`
 IPC 通道（与 `--pick-folder` 同一条）发回面板建格子；`new_folder` 按 normcase 去重——同一路径
@@ -928,7 +928,7 @@ HTTP 模式无加密，只面向可信局域网。组播失效时有 /24 子网�
   写入一条针对该 exe 路径的「阻止」规则且**不再弹窗**——出站正常（对方能发现本机）、入站被
   静默丢弃（发现不了对方、收不到文件），端口监听本身不报错，界面毫无提示。传输页已有自检：
   `enable_service()` 成功后后台跑 `sysutil.firewall_blocked()`，命中弹「修复防火墙」引导
-  （删阻止规则 + 加「zbox 局域网传输 (TCP/UDP)」放行规则）。规则按 exe 路径匹配：换目录/重装
+  （删阻止规则 + 加「Zbox 局域网传输 (TCP/UDP)」放行规则）。规则按 exe 路径匹配：换目录/重装
   后是新路径、会重新弹授权框，旧路径的规则不影响。排查「单向可见」先查防火墙，再查 AP 客户端
   隔离（办公/访客 WiFi 常见，防火墙规则全正常也不通，手机开热点可验证）。
 

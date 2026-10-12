@@ -827,7 +827,7 @@ class CookieGuideDialog(QDialog):
             lb.setCursor(Qt.PointingHandCursor)
             return lb
 
-        para('抖音限制了匿名访问：解析前要给 zbox 一份浏览器 cookie'
+        para('抖音限制了匿名访问：解析前要给 Zbox 一份浏览器 cookie'
              '（访客 cookie 即可，<b>不需要登录抖音账号</b>）。按下面四步操作；'
              'cookie 大约几周后过期，届时抖音再次解析失败，重走第 2～4 步即可。')
         warn = para('<b>注意：</b>2026 年 9 月起抖音升级了风控，即使导入 cookie，'
@@ -846,7 +846,7 @@ class CookieGuideDialog(QDialog):
         para('第 3 步：导出 cookies.txt', 'transferTitle')
         para('点浏览器工具栏上的扩展图标 →「Export」，得到一个 cookies.txt 文件'
              '（通常在「下载」文件夹里）。')
-        para('第 4 步：导入 zbox', 'transferTitle')
+        para('第 4 步：导入 Zbox', 'transferTitle')
         self.status_lab = para('')
 
         self.result_lab = QLabel('')
