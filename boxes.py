@@ -1482,6 +1482,9 @@ class BoxWindow(QWidget):
             grp.addAction(act)
             act.triggered.connect(lambda _c=False, k=key: self._set_sort(k))
         menu.addSeparator()
+        menu.addAction('重命名', self._start_rename)
+        if self.rec['kind'] == 'folder':
+            menu.addAction('打开所在目录', lambda: self.open_path(self.rec['path']))
         menu.addAction('解散格子', self.dissolve)
         return menu
 
