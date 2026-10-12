@@ -87,7 +87,9 @@ Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyS
 - `main.pyw` — 入口：单实例 IPC（`QLocalServer`）、节假日后台更新、局域网传输服务启动、（frozen 时）`--uninstall` 卸载向导入口
 - `app.py` — 面板 UI（日历 / 待办 / 传输 / 顶部栏滑出与拖动）、`SettingsDialog`（右下角「检查更新」：后台查 GitHub 最新 release，有新版本确认后经 updater 下载安装包、再确认即启动安装向导并退出本程序）与节假日导入引导窗
 - `boxes.py` — 桌面格子：空白格子（桌面文件的收纳视图，不搬文件、只隐藏桌面图标）与文件夹映射格子、双击桌面显隐；桌面图标位置记忆（`boxes.json['desktop_icons']`：退出时与每 60s 快照可见图标坐标——格子里的已隐藏、ListView 枚举不到，正好是「没进格子的文件」——启动时 `_DesktopIconLayout.restore_positions` 按显示名摆回并 3s 后补一次，自动排列桌面不插手）；
-格子拖出落回桌面由 `_DesktopDropOverlay`（桌面带最底层的全屏透明落放层，仅拖拽期间显示）接住内部处理、不走 Explorer（被占用的文件夹也能拖出），落到资源管理器窗口/其他应用才交 URL 给对方真实移动；拖拽默认「移动」、按住 Ctrl 落放 = 复制；Delete 删除走外壳原生确认弹窗（`_shell_op` 包 SHFileOperation）
+格子拖出落回桌面由 `_DesktopDropOverlay`（桌面带最底层的全屏透明落放层，仅拖拽期间显示）接住内部处理、不走 Explorer（被占用的文件夹也能拖出），落到资源管理器窗口/其他应用才交 URL 给对方真实移动；拖拽默认「移动」、按住 Ctrl 落放 = 复制；Delete 删除走外壳原生确认弹窗（`_shell_op` 包 SHFileOperation）；
+格子内拖放（外部拖入同规则，`BoxList._drop_loc`）落点三态：条目间缝显白色引导线、松手插入该位并切自定义排序（`sort='custom'`——空白格子 = items 记账顺序、映射格子 = `rec['order']` 文件名表、表外新文件排最后，排序菜单三项勾勾因此全灭；行高中部 50% = 落在条目上、上下各 25% = 缝，图标视图看左右），落文件夹条目上 = 移进去（.lnk 指向目录时按文件夹处理：`_lnk_target_dir` 经 IShellLinkW 解析目标、落上去 = 移进目标目录，`BoxList._lnk_dir` 带缓存随 refresh 清空），落可执行文件/快捷方式上 = 用它打开被拖文件（`_shell_exec_async`，普通文件无此语义、退化为就近引导线——资源管理器同款）；
+列表视图光标超出条目内容宽度（图标+文件名右缘 `_content_right`）的行尾空白区不做落点判定——一律视为移动/复制到格子根，引导线长度与高亮框也收缩到内容区
 - `calendar_data.py` — 内置国务院节假日数据、农历换算、三源联网回退与离线导入
 - `updater.py` — 应用自身更新：`latest_release` 查 GitHub 最新 release 并挑当前架构的 Setup exe（API 直连优先、ghproxy 镜像兜底）、`has_update` 版本号数值化补齐比较、`download_setup` 镜像优先下载（`.new` + replace）。纯标准库零 Qt，供设置窗在后台线程调用
 - `transfer.py` — 局域网文件传输协议核心（参照 LocalSend v2 的私有实例）：UDP 组播发现 + HTTP REST 传输，纯标准库零 Qt
@@ -595,17 +597,40 @@ IPC 通道（与 `--pick-folder` 同一条）发回面板建格子；`new_folder
     格子里的文件本来就在桌面上，让 Explorer 执行落放＝移动到它自己所在的目录 ——
     资源管理器会弹「源文件名和目标文件名相同」（用户实测）。所以拖拽期间 show 一个
     全屏透明落放层（挂桌面带最底层：压在桌面图标之上、格子/面板之下——`begin()` 里
-    统一抬一次兄弟序），落桌面由它接住走 `mgr.overlay_drop()`：落桌面根 = 划账即可
-    （文件不挪窝，**被占用的文件夹也能拖出**，DeskGo 同款）；落点命中桌面文件夹图标
-    则落进它（`_desktop_folder_at`，文件夹快捷方式不解析目标）。落资源管理器窗口/
-    其他应用照旧交文件 URL 给对方真实移动。空白格子拖出前先把隐藏图标放出来
-    （对方真实移动时隐藏属性不能跟过去），拖完没搬走的（取消/复制）重新藏；
-    拖拽期间 `self._dragging` 记账：`refresh()` 直接返回（不然重建列表会把拖拽源那一行
-    清掉）、`_entries_from_items()` 不会把放出来的图标当场收回。落放后图标用
-    `_place_desktop_icons()` 摆到落点（Explorer 只会把新图标扔到第一列空位）。
+    统一抬一次兄弟序），落桌面由它接住走 `mgr.overlay_drop()`：落桌面根 = 划账 +
+    放图标（文件不挪窝，**被占用的文件夹也能拖出**，DeskGo 同款）；落点命中桌面文件夹
+    图标则落进它（`begin()` 时快照的 `_icon_zones`，文件夹快捷方式不解析目标）。
+    落资源管理器窗口/其他应用照旧交文件 URL 给对方真实移动。
+    **图标放出的时机是硬约束**（用户实测「没松手图标就出现在别处/挤乱桌面」）：
+    空白格子拖出时**不**先放图标，落到桌面根的由落放层在落点这一刻才 `_show_icon`——
+    放之前快照其他图标位置，放完 `_place_icons_at` 摆到落点、被挤的按快照摆回；
+    只有拖到外部窗口（Explorer 文件夹等，对方真搬文件、隐藏属性会跟过去）才需要
+    提前摘——`mgr._note_drag_leave_own` 的 150ms 延迟定时器判定「离开了我们所有
+    窗口」（格子/落放层的 dragLeave 启动、dragEnter/drop 取消）才 `_show_icon`。
+    连带：格子间直转隐藏文件时 `ungroup_paths` 要把 `attrs` 账本键一起搬走（不然
+    解散/退出时还原不回来）；落进映射格子/格子内文件夹由 `import_paths(unhide=)`
+    摘掉隐藏位（外来拖拽的隐藏文件不动）。拖拽期间 `self._dragging` 记账：
+    `refresh()` 直接返回（不然重建列表会把拖拽源那一行清掉）、`_entries_from_items()`
+    不会把放出来的图标当场收回。
     旧版用隐藏暂存夹 `桌面\.zbox\` 周转（`stage_for_drag`，已删）：文件夹被占用时
     `shutil.move` 退化成整树复制、留下半拉子副本还没人清理（用户实测）——
     旧残留由 `_upgrade_blank_boxes()`（内部 `_recover_files`）搬回桌面并补进记账。
+  - **落点判定与反馈徽标（`_DragBadge`）**：拖到格子内某个文件夹条目上 = 落进该文件夹
+    （`BoxList._drop_loc` 按光标下条目判定，`import_paths(dest=)` 纯物理搬/复制、
+    不进账本），落到条目间隙/空白处/标题栏 = 落进格子根；落放层同理——`begin()` 时快照桌面
+    图标落点区（`_snapshot_icon_zones`），命中文件夹图标 = 落进它，否则桌面根。落点反馈徽标
+    是自绘浮签 `_DragBadge`（跟随光标显示「移动到/复制到 XX」；**2026-10 起整体停用**——
+    `show_text` 直接隐藏：系统气泡已说明移动/复制、落点另有引导线/高亮框反馈，
+    不再叠第二行文字，调用点与让位记账保留、以下机制描述供恢复参考）：系统的白色拖拽气泡文字
+    **改不了**——Qt 自绘拖拽光标、不走 `IDragSourceHelper2`（查 Qt6.8 源码
+    `qwindowsdrag.cpp` 确认），CFSTR_DROPDESCRIPTION 写了也不渲染（实测写了只显示通用
+    「移动/复制」）；外来拖拽的气泡归 Explorer 画，改它要对 OLE IDataObject SetData，
+    Qt 不暴露该指针。徽标只能自绘并让位：系统气泡（Explorer 源）占光标下方 ~64px，
+    进程内拖拽让到跟随图之下（`drag_pm_h`）。鼠标穿透不挡落放，dragLeave/drop/结束收起。
+  - **Qt 坑：`QListView.setViewMode` 会顺手关拖拽**：6.8 源码里 `setViewMode` 末尾按
+    movement 调 `setDragEnabled(movable)`/`setAcceptDrops(movable)`——ListMode 是 Static →
+    全关（用户实测：图标视图切回列表后，拖出退化成橡皮筋框选、拖入也不收）。`set_view`
+    每次切完必须重新 `setDragEnabled(True)` + `setAcceptDrops(True)`。
   - 拖到别的空白格子 = 换归属（`ungroup_paths`）；格子里改名要同步 `items`/`attrs` 的键
     （`rename_item`，否则文件会「藏着但不在任何格子里」）。
   - **落放效果（鼠标旁那个徽标）分两步，别混为一谈**：OLE 里徽标由 **DragOver** 报回的效果
