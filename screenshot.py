@@ -878,6 +878,12 @@ class ShotOverlay(QWidget):
     def _slider_changed(self, v):
         if self._tool == 'text':
             self._text_size = v
+            if self._editor:   # 编辑中拖字号同样立刻生效（同换颜色/反色），不等提交
+                ed = self._editor[0]
+                f = ed.font()
+                f.setPixelSize(v)
+                ed.setFont(f)
+                self._fit_editor(ed, ed.pos())
         else:
             self._stroke = v
             if self._edit_shape is not None:
