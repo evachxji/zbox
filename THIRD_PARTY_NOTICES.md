@@ -1,40 +1,52 @@
-﻿# 第三方组件声明（Third-Party Notices）
+﻿# Third-Party Notices
 
-Zbox 本体以 [MIT License](LICENSE) 发布。以下第三方组件按其各自的许可证分发，
-本文件仅为声明与致谢，不改变各组件的许可条款。
+Zbox itself is released under the [MIT License](LICENSE). The third-party
+components listed below are distributed under their own licenses; this file is
+for attribution and compliance purposes only and does not change their terms.
 
-## 运行时按需下载的组件
+## Components downloaded on demand at runtime
 
-以下组件不在安装包内，由用户首次启用「视频解析」功能时从上游或镜像下载到本地
-`tools\` 目录，作为独立子进程调用：
+The following components are not bundled in the installer. They are downloaded
+from upstream sources or mirrors into the local `tools\` directory when the user
+first enables the "Video Download" feature, and are invoked as standalone
+subprocesses:
 
 ### yt-dlp
 
-- 主页：https://github.com/yt-dlp/yt-dlp
-- 许可证：[Unlicense](https://github.com/yt-dlp/yt-dlp/blob/master/LICENSE)（公有领域）
+- Homepage: https://github.com/yt-dlp/yt-dlp
+- License: [Unlicense](https://github.com/yt-dlp/yt-dlp/blob/master/LICENSE)
+  (public domain)
 
 ### FFmpeg
 
-- 主页：https://ffmpeg.org ／ https://github.com/yt-dlp/FFmpeg-Builds
-- 许可证：所下载的 `win64-gpl` 静态构建适用 [GPL v2 或更高版本](https://ffmpeg.org/legal.html)，
-  对应源码见 https://github.com/yt-dlp/FFmpeg-Builds
-- 说明：Zbox 仅以命令行子进程方式调用 ffmpeg.exe 合并音视频流，未与其链接；
-  ffmpeg 二进制由其上游构建方分发，许可证文本与源码出处见上述链接。
+- Homepage: https://ffmpeg.org / https://github.com/yt-dlp/FFmpeg-Builds
+- License: the downloaded `win64-gpl` static build is licensed under
+  [GPL v2 or later](https://ffmpeg.org/legal.html); corresponding source code
+  is available at https://github.com/yt-dlp/FFmpeg-Builds
+- Note: Zbox only invokes ffmpeg.exe as a command-line subprocess to mux audio
+  and video streams; it is not linked against FFmpeg. The FFmpeg binary is
+  distributed by its upstream builder; license texts and source availability
+  are provided at the links above.
 
-## 协议参考
+## Protocol reference
 
 ### LocalSend
 
-- 主页：https://localsend.org ／ https://github.com/localsend/localsend
-- 许可证：MIT
-- 说明：Zbox 的局域网传输功能参照 LocalSend v2 开放协议文档独立实现，
-  未包含 LocalSend 的代码。
+- Homepage: https://localsend.org / https://github.com/localsend/localsend
+- License: MIT
+- Note: Zbox's LAN file transfer is an independent implementation based on the
+  open LocalSend v2 protocol documentation and contains no LocalSend code.
 
-## 开发/打包依赖
+## Build / packaging dependency
 
-### Qt for Python（PySide6）
+### Qt for Python (PySide6)
 
-- 主页：https://www.qt.io/qt-for-python ／ https://doc.qt.io/qtforpython/
-- 许可证：[LGPL v3](https://doc.qt.io/qtforpython/licenses.html)
-- 说明：Zbox 以动态链接方式使用 PySide6，发行版以 onedir 形式分发，
-  Qt 动态库位于安装目录内、可由用户替换，满足 LGPL 的重链接要求。
+- Homepage: https://www.qt.io/qt-for-python / https://doc.qt.io/qtforpython/
+- License: [LGPL v3](https://doc.qt.io/qtforpython/licenses.html)
+- Note: Zbox uses PySide6 via dynamic linking and ships in onedir form, with
+  Qt shared libraries present in the installation directory and replaceable by
+  the user, satisfying the LGPL relinking requirement.
+
+---
+
+[中文版 Third-Party Notices](THIRD_PARTY_NOTICES.zh-CN.md)
