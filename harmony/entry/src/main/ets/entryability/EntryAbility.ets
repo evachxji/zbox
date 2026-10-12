@@ -9,7 +9,7 @@ import { systemShare } from '@kit.ShareKit'
 import { backgroundTaskManager } from '@kit.BackgroundTasksKit'
 import { BusinessError } from '@kit.BasicServicesKit'
 import { AppUtil, LogUtil, ToastUtil } from '@pura/harmony-utils'
-import { initSettings } from '../utils/Settings'
+import { initSettings, privacyAccepted, setPrivacyAcceptedCallback } from '../utils/Settings'
 import { TransferServer } from '../utils/Server'
 import { Receiver, hasActiveReceiving, registerReceiver, unregisterReceiver } from '../utils/Receiver'
 import { hasActiveSending } from '../utils/Sender'
@@ -23,6 +23,8 @@ export default class EntryAbility extends UIAbility {
     AppUtil.init(this.context)
     LogUtil.init(0x1010, 'ZboxTransfer', true)
     initSettings(this.context)
+    // 隐私政策同意后才起服务（首启弹窗在 Index 页确认）
+    setPrivacyAcceptedCallback(() => this.startServices())
     this.handleShareWant(want)
   }
 
@@ -60,9 +62,17 @@ export default class EntryAbility extends UIAbility {
     })
   }
 
-  /** 仅前台传输：回到前台才起 HTTP 服务与组播发现（对齐 Android onStart） */
+  /** 仅前台传输：回到前台才起 HTTP 服务与组播发现（对齐 Android onStart）；隐私政策未同意前不起服务 */
   onForeground(): void {
     this.stopBackgroundTask()
+    if (!privacyAccepted()) {
+      return
+    }
+    this.startServices()
+  }
+
+  /** 起 HTTP 服务与组播发现；首启场景由隐私政策同意回调触发 */
+  private startServices(): void {
     if (this.server !== null) {
       return
     }

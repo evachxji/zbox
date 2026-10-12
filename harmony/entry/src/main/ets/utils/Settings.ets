@@ -63,3 +63,24 @@ export function localInfo(): DeviceInfo {
     announce: false,
   }
 }
+
+// ---------- 隐私政策（华为上架审核 7.5：首启显著提示，同意前不启动网络服务） ----------
+
+let onPrivacyAccepted: (() => void) | null = null
+
+/** 是否已同意隐私政策（preferences 持久化） */
+export function privacyAccepted(): boolean {
+  return ensurePrefs().getSync('privacyAccepted', false) as boolean
+}
+
+/** 记录同意，并通知 EntryAbility 补起传输服务 */
+export function acceptPrivacy(): void {
+  const p = ensurePrefs()
+  p.putSync('privacyAccepted', true)
+  p.flush()
+  onPrivacyAccepted?.()
+}
+
+export function setPrivacyAcceptedCallback(cb: () => void): void {
+  onPrivacyAccepted = cb
+}

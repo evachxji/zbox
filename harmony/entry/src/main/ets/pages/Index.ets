@@ -5,6 +5,7 @@
  */
 import { picker, fileIo as fs, fileUri } from '@kit.CoreFileKit'
 import { photoAccessHelper } from '@kit.MediaLibraryKit'
+import { common } from '@kit.AbilityKit'
 import { LogUtil, ToastUtil } from '@pura/harmony-utils'
 import {
   DeviceStore,
@@ -18,7 +19,7 @@ import {
 import { addDeviceByIp, refreshDiscovery } from '../utils/Discovery'
 import { IncomingState, PendingRequest } from '../utils/Receiver'
 import { cancelRecord, sendFiles } from '../utils/Sender'
-import { getAlias, setAlias } from '../utils/Settings'
+import { acceptPrivacy, getAlias, privacyAccepted, setAlias } from '../utils/Settings'
 
 const BG: string = '#FF14161A'
 const CARD: string = '#FF1F232A'
@@ -27,6 +28,7 @@ const TEXT_DIM: string = '#FF9AA0A8'
 const ACCENT: string = '#FF4C8DFF'
 const RED: string = '#FFE5534B'
 const GREEN: string = '#FF3FB950'
+const PRIVACY_URL: string = 'https://zbox.wzyjc.cn/harmony/privacy.html'
 
 @Entry
 @Component
@@ -38,6 +40,7 @@ struct Index {
   @State aliasEdit: string = ''
   @State pickTarget: PeerDevice | null = null
   @State showManualIp: boolean = false
+  @State showPrivacy: boolean = false
   @State manualIp: string = ''
   @StorageLink('shareUris') shareUris: string[] = []
   @StorageLink('serverOn') serverOn: boolean = true
@@ -57,6 +60,7 @@ struct Index {
 
   aboutToAppear(): void {
     this.aliasEdit = getAlias()
+    this.showPrivacy = !privacyAccepted()
     DeviceStore.onChange(this.onDevices)
     TransferStore.onChange(this.onRecords)
     IncomingState.onChange(this.onPending)
@@ -69,6 +73,27 @@ struct Index {
     DeviceStore.offChange(this.onDevices)
     TransferStore.offChange(this.onRecords)
     IncomingState.offChange(this.onPending)
+  }
+
+  // ---------- 隐私政策（华为审核 7.5：首启显著提示） ----------
+
+  /** 浏览器打开线上隐私政策全文 */
+  openPrivacyPolicy(): void {
+    const context = getContext(this) as common.UIAbilityContext
+    context.openLink(PRIVACY_URL, { appLinkingOnly: false })
+      .catch(() => {
+        ToastUtil.showToast('打开浏览器失败')
+      })
+  }
+
+  exitApp(): void {
+    const context = getContext(this) as common.UIAbilityContext
+    context.terminateSelf()
+  }
+
+  /** 隐私弹窗期间吞掉返回键，必须明确选择同意或退出 */
+  onBackPress(): boolean {
+    return this.showPrivacy
   }
 
   // ---------- 发送 ----------
@@ -137,12 +162,21 @@ struct Index {
   build() {
     Stack({ alignContent: Alignment.Center }) {
       Column() {
-        Text('Zbox 传输')
-          .fontSize(24)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(TEXT_MAIN)
-          .width('100%')
-          .margin({ top: 16, bottom: 12 })
+        Row() {
+          Text('Zbox 传输')
+            .fontSize(24)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(TEXT_MAIN)
+          Blank()
+          Text('隐私政策')
+            .fontSize(12)
+            .fontColor(TEXT_DIM)
+            .onClick(() => {
+              this.openPrivacyPolicy()
+            })
+        }
+        .width('100%')
+        .margin({ top: 16, bottom: 12 })
 
         // 别名卡片
         Row() {
@@ -419,6 +453,53 @@ struct Index {
                 .margin({ left: 12 })
                 .onClick(() => {
                   this.pending?.onAccept()
+                })
+            }
+            .width('100%')
+          }
+          .width('85%')
+          .padding(20)
+          .backgroundColor(CARD)
+          .borderRadius(16)
+        }
+        .width('100%')
+        .height('100%')
+        .justifyContent(FlexAlign.Center)
+        .backgroundColor('#99000000')
+      }
+
+      // 首次启动隐私政策弹窗：不同意则退出，同意前不启动传输服务（EntryAbility 门禁）
+      if (this.showPrivacy) {
+        Column() {
+          Column() {
+            Text('隐私政策提示')
+              .fontSize(18)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(TEXT_MAIN)
+              .margin({ bottom: 12 })
+            Text('感谢您使用 Zbox 传输！我们非常重视您的个人信息和隐私保护。\n\n本应用是一款局域网文件传输工具：不收集、不上传任何个人信息，没有账号体系、统计埋点和广告 SDK，所有文件传输均仅在您的局域网内直接完成，不经过任何服务器。网络权限仅用于局域网设备发现与文件传输。\n\n为便于您了解相关信息，请在使用前仔细阅读《隐私政策》。点击「同意并继续使用」即表示您已阅读并同意隐私政策的全部内容；如不同意，本应用将无法为您提供服务并退出。')
+              .fontSize(14)
+              .fontColor(TEXT_DIM)
+            Text('查看《隐私政策》全文 >')
+              .fontSize(14)
+              .fontColor(ACCENT)
+              .margin({ top: 12, bottom: 20 })
+              .onClick(() => {
+                this.openPrivacyPolicy()
+              })
+            Row() {
+              Button('不同意并退出')
+                .layoutWeight(1)
+                .backgroundColor('#FF3A3F47')
+                .onClick(() => {
+                  this.exitApp()
+                })
+              Button('同意并继续使用')
+                .layoutWeight(1)
+                .margin({ left: 12 })
+                .onClick(() => {
+                  acceptPrivacy()
+                  this.showPrivacy = false
                 })
             }
             .width('100%')
