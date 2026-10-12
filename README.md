@@ -2,7 +2,7 @@
   <img src="assets/icon.png" width="96" alt="Zbox">
 </p>
 
-# Zbox 桌面格子 v0.4
+# Zbox 桌面格子 v0.4.1
 
 Windows 桌面整理工具：桌面格子 + 悬浮面板（日历 / 待办 / 传输 / 视频解析）+ 截图。Win10 / Win11。
 
