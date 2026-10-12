@@ -60,11 +60,38 @@
   tickClock();
   setInterval(tickClock, 1000);
 
+  /* ---------- 导航选中态（scrollspy）：当前分镜对应的 tab 高亮 ----------
+     独立于 GSAP，reduced-motion / 无 JS 库时照常工作；判定线 = 视口 35% 高度 */
+  var spyLinks = qa(".nav-links a");
+  var spyMap = [];
+  for (var si = 0; si < spyLinks.length; si++) {
+    var spyTarget = q(spyLinks[si].getAttribute("href"));
+    if (spyTarget) spyMap.push({ el: spyTarget, link: spyLinks[si] });
+  }
+  function spy() {
+    var line = window.scrollY + window.innerHeight * 0.35;
+    var current = null;
+    for (var i = 0; i < spyMap.length; i++) {
+      if (spyMap[i].el.getBoundingClientRect().top + window.scrollY <= line) current = spyMap[i].link;
+    }
+    for (var j = 0; j < spyLinks.length; j++) spyLinks[j].classList.toggle("on", spyLinks[j] === current);
+  }
+  var spyTick = false;
+  window.addEventListener("scroll", function () {
+    if (!spyTick) {
+      spyTick = true;
+      requestAnimationFrame(function () { spy(); spyTick = false; });
+    }
+  }, { passive: true });
+  window.addEventListener("resize", spy);
+  spy();
+
   /* ---------- reduced-motion / 无 GSAP：静态可读版 ---------- */
   var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (reduced || typeof gsap === "undefined" || typeof ScrollTrigger === "undefined") {
     document.body.classList.add("rm");
     document.body.classList.add("ready");
+    qa("video").forEach(function (v) { v.removeAttribute("autoplay"); v.pause(); });
     return;
   }
 
@@ -80,12 +107,6 @@
   gsap.set("#stage-main .frow", { autoAlpha: 0, x: -10 });
   gsap.set("#stage-main .fly", { autoAlpha: 0, scale: .92 });
   gsap.set("#stage-main .lock-chip", { autoAlpha: 0, y: -6 });
-
-  gsap.set("#stage-map .map-win", { autoAlpha: 0, x: -70, yPercent: -50 });
-  gsap.set("#stage-map .map-grid", { autoAlpha: 0, x: 70, yPercent: -50 });
-  gsap.set("#stage-map .map-link", { scaleX: 0, transformOrigin: "left center" });
-  gsap.set("#stage-map .map-pulse", { autoAlpha: 0 });
-  gsap.set("#stage-map .new-file", { autoAlpha: 0, y: 8 });
 
   gsap.set("#stage-clean .ripple", { autoAlpha: 0, scale: .25 });
 
@@ -261,31 +282,6 @@
   capOut(tl, "#cap-yours", 10.55);
 
   /* ============================================================
-     第五幕：文件夹映射
-     ============================================================ */
-  var tlMap = gsap.timeline({
-    scrollTrigger: {
-      trigger: "#pin-map", start: "top top",
-      end: SHORT ? "+=220%" : "+=260%",
-      scrub: 1, pin: true, anticipatePin: 1, invalidateOnRefresh: true
-    }
-  });
-  gsap.set("#cap-map-1", { autoAlpha: 1 });
-  tlMap.to("#stage-map .map-win", { autoAlpha: 1, x: 0, duration: .6 }, .15);
-  tlMap.to("#stage-map .map-grid", { autoAlpha: 1, x: 0, duration: .6 }, .5);
-  tlMap.to("#stage-map .map-link", { scaleX: 1, duration: .5, ease: "none" }, 1.05);
-  tlMap.to("#stage-map .map-pulse", { autoAlpha: 1, duration: .15 }, 1.5);
-  tlMap.to("#stage-map .map-pulse", {
-    x: function () { return q("#stage-map .map-link").offsetWidth; },
-    duration: .7, ease: "none"
-  }, 1.65);
-  tlMap.to("#stage-map .map-pulse", { x: 0, duration: .7, ease: "none" }, 2.35);
-  capOut(tlMap, "#cap-map-1", 2.5);
-  tlMap.to("#stage-map .new-file", { autoAlpha: 1, y: 0, duration: .4 }, 2.9);
-  capIn(tlMap, "#cap-map-2", 3.15);
-  capOut(tlMap, "#cap-map-2", 3.75);
-
-  /* ============================================================
      第六幕：双击显隐
      ============================================================ */
   var tlClean = gsap.timeline({
@@ -366,6 +362,39 @@
   tlWs.to("#stage-space .ws-phone", { xPercent: 0, duration: .8, ease: "power2.out" }, .5);
   tlWs.to("#stage-space .ws-words span", { autoAlpha: 1, y: 0, duration: .5, stagger: .25 }, .9);
   capIn(tlWs, "#cap-space", 1.85);
+
+  /* ============================================================
+     滚动演示舞台：教程 / 截图 / 视频解析
+     叠放帧交叉淡入（DOM 顺序即叙事顺序），文案随幕进出；
+     reduced-motion / 无 JS 时：叠放帧最后一张 + cap-final 可见 = 最终态
+     ============================================================ */
+  function filmTimeline(triggerSel, stageSel, count, caps, endPct) {
+    var tl = gsap.timeline({
+      defaults: { ease: "power2.out" },
+      scrollTrigger: {
+        trigger: triggerSel, start: "top top",
+        end: SHORT ? "+=" + Math.round(endPct * 0.78) + "%" : "+=" + endPct + "%",
+        scrub: 1, pin: true, anticipatePin: 1, invalidateOnRefresh: true
+      }
+    });
+    gsap.set(stageSel + " img:not(:first-child)", { autoAlpha: 0 });
+    capIn(tl, caps[0], 0.1);
+    for (var i = 1; i < count; i++) {
+      var at = 0.35 + i * 1.05;
+      capOut(tl, caps[i - 1], at - 0.18);
+      tl.to(stageSel + " .f" + i, { autoAlpha: 0, duration: .3 }, at);
+      tl.to(stageSel + " .f" + (i + 1), { autoAlpha: 1, duration: .3 }, at);
+      capIn(tl, caps[i], at + 0.12);
+    }
+    return tl;
+  }
+
+  filmTimeline("#sec-how", "#stage-how", 5,
+    ["#cap-how1", "#cap-how2", "#cap-how3", "#cap-how4", "#cap-howf"], 430);
+  filmTimeline("#sec-shot", "#stage-shot", 4,
+    ["#cap-shot1", "#cap-shot2", "#cap-shot3", "#cap-shotf"], 350);
+  filmTimeline("#sec-video", "#stage-video", 4,
+    ["#cap-video1", "#cap-video2", "#cap-video3", "#cap-videof"], 350);
 
   /* ---------- 静态区块的入场揭示 ---------- */
   qa(".reveal").forEach(function (el) {

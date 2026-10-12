@@ -93,10 +93,9 @@
       </a>
       <ul class="nav-links">
         <li><a href="#pin-main">功能</a></li>
-        <li><a href="#pin-map">工作原理</a></li>
-        <li><a href="#sec-video">视频解析</a></li>
         <li><a href="#sec-shot">截图</a></li>
         <li><a href="#pin-transfer">多端互传</a></li>
+        <li><a href="#sec-video">视频解析</a></li>
       </ul>
       <a class="nav-gh" data-dl="github" href="https://github.com/evachxji/zbox" aria-label="在 GitHub 上查看 Zbox 仓库" title="GitHub">
         <svg width="18" height="18" aria-hidden="true"><use href="#i-github"/></svg>
@@ -241,79 +240,43 @@
       </section>
     </div>
 
-    <!-- ============ 主题条 ============ -->
-    <section class="sec" id="sec-theme">
-      <div class="sec-inner center reveal">
-        <span class="kick">主题</span>
-        <h2 class="h2">深色、浅色，或跟随系统。</h2>
-        <p class="sub">设置里一键切换，自动记忆你的选择。</p>
-        <div class="theme-grid">
+    <!-- ============ 快速上手：新建格子教程（滚动演示） ============ -->
+    <div id="sec-how">
+      <section class="stage" id="stage-how" aria-label="新建格子教程演示">
+        <div class="film film-how">
+          <img class="f1" src="assets/desktop/menu-desktop-newbox.png" width="1920" height="1080" loading="lazy" decoding="async" alt="桌面空白处右键，级联菜单 zbox桌面格子 展开，高亮在新建格子上" />
+          <img class="f2" src="assets/desktop/newbox-blank.png" width="740" height="960" loading="lazy" decoding="async" alt="新建的空格子出现在桌面上：标题栏「新建格子」与空白内容区" />
+          <img class="f3" src="assets/desktop/menu-desktop-folderbox.png" width="1920" height="1080" loading="lazy" decoding="async" alt="同一个级联菜单，高亮在新建文件夹格子上" />
+          <img class="f4" src="assets/desktop/pick-folder-dialog.png" width="991" height="405" loading="lazy" decoding="async" alt="原生目录选择框「选择要映射的文件夹」，选中项目资料文件夹" />
+          <img class="f5" src="assets/desktop/grid-folder-mapping.png" width="330" height="460" loading="lazy" decoding="async" alt="项目资料映射格实时列出该目录的真实内容" />
+        </div>
+        <div class="cap" id="cap-how1">
+          <span class="kick">快速上手</span>
+          <h2>桌面空白处，右键。</h2>
+        </div>
+        <div class="cap" id="cap-how2"><h2>「新建格子」，就这么出现了。</h2></div>
+        <div class="cap" id="cap-how3"><h2>要映射真文件夹？同一个菜单。</h2></div>
+        <div class="cap" id="cap-how4"><h2>选一个目录。</h2></div>
+        <div class="cap cap-final" id="cap-howf">
+          <h2>格子与目录，实时联动。</h2>
+          <p>建个格子，一次右键的事。</p>
+        </div>
+      </section>
+    </div>
+    <section class="sec sec-strip" id="how-strip" aria-label="新建格子完整录屏">
+      <div class="sec-inner">
+        <div class="how-extra reveal">
           <figure>
-            <div class="shot"><img src="assets/desktop/theme-light-overview.png" width="1920" height="1080" loading="lazy" decoding="async" alt="浅色主题下的 Zbox 桌面格子全景" /></div>
-            <figcaption class="shot-cap">浅色主题 · 同一桌面</figcaption>
+            <div class="shot"><video src="assets/video/newbox-flow.mp4" width="1920" height="1080" muted autoplay loop playsinline preload="metadata">你的浏览器不支持视频播放。</video></div>
+            <figcaption class="shot-cap">完整过程 · 一遍看完（10 秒）</figcaption>
           </figure>
           <figure>
-            <div class="shot"><img src="assets/desktop/settings-window.png" width="309" height="419" loading="lazy" decoding="async" alt="Zbox 设置窗口：主题三档、截图热键与视频解析开关，改动即时生效" /></div>
-            <figcaption class="shot-cap">设置 · 一键切换</figcaption>
+            <div class="shot"><img src="assets/desktop/explorer-context-menu.png" width="390" height="590" loading="lazy" decoding="async" alt="资源管理器里右键文件夹，菜单中的添加到zbox桌面格子高亮可见" /></div>
+            <figcaption class="shot-cap">也可以：资源管理器里右键文件夹 → 添加到zbox桌面格子</figcaption>
           </figure>
         </div>
       </div>
     </section>
-
-    <!-- ============ 第五幕：文件夹映射 ============ -->
-    <div id="pin-map">
-      <section class="stage" id="stage-map" aria-label="文件夹映射演示">
-        <div class="map-win">
-          <div class="win">
-            <div class="win-bar">
-              <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
-              <span>文件资源管理器</span>
-            </div>
-            <div class="win-addr"><svg class="fi t-folder" width="14" height="14" aria-hidden="true"><use href="#i-folder"/></svg>此电脑 &gt; 桌面 &gt; 项目资料</div>
-            <div class="win-list">
-              <div class="frow"><svg class="fi t-folder" aria-hidden="true"><use href="#i-folder"/></svg><span class="nm">设计稿</span></div>
-              <div class="frow"><svg class="fi t-folder" aria-hidden="true"><use href="#i-folder"/></svg><span class="nm">参考链接</span></div>
-              <div class="frow"><svg class="fi t-zip" aria-hidden="true"><use href="#i-zip"/></svg><span class="nm">Project.zip</span></div>
-              <div class="frow"><svg class="fi t-doc" aria-hidden="true"><use href="#i-doc"/></svg><span class="nm">产品演示.pptx</span></div>
-              <div class="frow"><svg class="fi t-doc" aria-hidden="true"><use href="#i-doc"/></svg><span class="nm">培训材料.pptx</span></div>
-              <div class="frow new-file"><svg class="fi t-doc" aria-hidden="true"><use href="#i-doc"/></svg><span class="nm">季度复盘.docx</span></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="map-link" aria-hidden="true"></div>
-        <div class="map-pulse" aria-hidden="true"></div>
-
-        <div class="map-grid">
-          <div class="grid">
-            <div class="grid-head">
-              <span class="grid-title">项目资料 · 映射</span>
-              <span class="grid-tools">
-                <svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg>
-                <svg class="lock-ic" aria-hidden="true"><use href="#i-lock"/></svg>
-                <svg aria-hidden="true"><use href="#i-menu"/></svg>
-              </span>
-            </div>
-            <div class="grid-body">
-              <div class="frow"><svg class="fi t-folder" aria-hidden="true"><use href="#i-folder"/></svg><span class="nm">设计稿</span></div>
-              <div class="frow"><svg class="fi t-folder" aria-hidden="true"><use href="#i-folder"/></svg><span class="nm">参考链接</span></div>
-              <div class="frow"><svg class="fi t-zip" aria-hidden="true"><use href="#i-zip"/></svg><span class="nm">Project.zip</span></div>
-              <div class="frow"><svg class="fi t-doc" aria-hidden="true"><use href="#i-doc"/></svg><span class="nm">产品演示.pptx</span></div>
-              <div class="frow"><svg class="fi t-doc" aria-hidden="true"><use href="#i-doc"/></svg><span class="nm">培训材料.pptx</span></div>
-              <div class="frow new-file"><svg class="fi t-doc" aria-hidden="true"><use href="#i-doc"/></svg><span class="nm">季度复盘.docx</span></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="cap" id="cap-map-1">
-          <h2>让真正的文件夹，直接出现在桌面上。</h2>
-          <p>格子实时映射任意目录，资源管理器里右键，一键建格。</p>
-        </div>
-        <div class="cap cap-final" id="cap-map-2">
-          <h2>在资源管理器里改，格子里就变。</h2>
-        </div>
-      </section>
-    </div>
 
     <!-- ============ 第六幕：双击显隐 ============ -->
     <div id="pin-clean">
@@ -405,7 +368,29 @@
         <div class="cap" id="cap-dbl"><h2>双击。</h2></div>
         <div class="cap cap-final" id="cap-back">
           <h2>一切如旧。</h2>
-          <p>格子、面板、文件，都在。Win+D 也吹不散。</p>
+          <p>格子、面板、文件，都在。</p>
+        </div>
+      </section>
+    </div>
+
+    <!-- ============ 截图（滚动演示） ============ -->
+    <div id="sec-shot">
+      <section class="stage" id="stage-shot" aria-label="截图功能演示">
+        <div class="film film-shot">
+          <img class="f1" src="assets/desktop/shot-overlay.png" width="1920" height="1080" loading="lazy" decoding="async" alt="Zbox 截图：全屏灰罩中框选区域，底部工具条提供矩形、椭圆、文字标注" />
+          <img class="f2" src="assets/desktop/shot-annotated.png" width="1920" height="1080" loading="lazy" decoding="async" alt="Zbox 截图标注完成态：椭圆圈出格子标题，矩形框选文件，附两行文字说明" />
+          <img class="f3" src="assets/desktop/shot-pin.png" width="1920" height="1080" loading="lazy" decoding="async" alt="Zbox 钉图：无边框置顶贴图窗贴在桌面上" />
+          <img class="f4" src="assets/desktop/shot-long.png" width="1920" height="1080" loading="lazy" decoding="async" alt="Zbox 截长图：拼接进行中，右侧缩略预览实时延伸" />
+        </div>
+        <div class="cap" id="cap-shot1">
+          <span class="kick">截图</span>
+          <h2>截屏，从一把热键开始。</h2>
+        </div>
+        <div class="cap" id="cap-shot2"><h2>圈一圈，写两句。</h2></div>
+        <div class="cap" id="cap-shot3"><h2>钉在桌面，随用随看。</h2></div>
+        <div class="cap cap-final" id="cap-shotf">
+          <h2>长页面？自动滚着截。</h2>
+          <p>截图、标注、钉在桌面——全局热键唤起，键位自定义。</p>
         </div>
       </section>
     </div>
@@ -435,81 +420,6 @@
           <li><svg aria-hidden="true"><use href="#i-check"/></svg>双击空白新建待办</li>
           <li><svg aria-hidden="true"><use href="#i-check"/></svg>勾选完成，置灰沉底</li>
         </ul>
-      </div>
-    </section>
-
-    <!-- ============ 新功能：视频解析（真实截图） ============ -->
-    <section class="sec" id="sec-video">
-      <div class="sec-inner">
-        <div class="center reveal">
-          <span class="kick">视频解析</span>
-          <h2 class="h2">面板里，直接下视频。</h2>
-          <p class="sub">粘贴链接即解析，选好清晰度就下载——YouTube、Bilibili 等主流平台，组件全部本地运行。</p>
-        </div>
-        <div class="cal-grid video-grid reveal">
-          <figure>
-            <div class="shot"><img src="assets/desktop/video-gate.png" width="359" height="476" loading="lazy" decoding="async" alt="Zbox 视频解析页默认关闭状态：高斯模糊底与启用按钮" /></div>
-            <figcaption class="shot-cap">默认关闭 · 一键启用</figcaption>
-          </figure>
-          <figure>
-            <div class="shot"><img src="assets/desktop/video-parsed.png" width="359" height="476" loading="lazy" decoding="async" alt="Zbox 视频解析完成：视频卡片显示标题与时长，清晰度下拉列出 1080P 等档位" /></div>
-            <figcaption class="shot-cap">解析完成 · 清晰度按源站档位</figcaption>
-          </figure>
-          <figure>
-            <div class="shot"><img src="assets/desktop/video-downloading.png" width="359" height="476" loading="lazy" decoding="async" alt="Zbox 视频下载中：卡片环绕彩虹进度描边，显示已下载大小、速度与剩余时间" /></div>
-            <figcaption class="shot-cap">下载中 · 暂停续传</figcaption>
-          </figure>
-          <figure>
-            <div class="shot"><img src="assets/desktop/video-done.png" width="359" height="476" loading="lazy" decoding="async" alt="Zbox 视频下载完成：两条任务卡片各带文件大小与打开按钮" /></div>
-            <figcaption class="shot-cap">完成 · 多任务列表</figcaption>
-          </figure>
-        </div>
-        <ul class="facts reveal">
-          <li><svg aria-hidden="true"><use href="#i-check"/></svg>粘贴即解析：标题、时长、清晰度档位</li>
-          <li><svg aria-hidden="true"><use href="#i-check"/></svg>最高 4K，视源站实际档位</li>
-          <li><svg aria-hidden="true"><use href="#i-check"/></svg>多任务并行 · 断点续传</li>
-          <li><svg aria-hidden="true"><use href="#i-check"/></svg>组件本地运行（yt-dlp / ffmpeg）</li>
-          <li><svg aria-hidden="true"><use href="#i-check"/></svg>默认关闭 · 不用不装</li>
-        </ul>
-      </div>
-    </section>
-
-    <!-- ============ 新功能：截图（真实截图） ============ -->
-    <section class="sec" id="sec-shot">
-      <div class="sec-inner">
-        <div class="center reveal">
-          <span class="kick">截图</span>
-          <h2 class="h2">截图、标注、钉在桌面。</h2>
-          <p class="sub">全局热键唤起，框选、标注、钉图、截长图，一气呵成。</p>
-        </div>
-        <div class="shot-grid reveal">
-          <figure>
-            <div class="shot"><img src="assets/desktop/shot-overlay.png" width="1920" height="1080" loading="lazy" decoding="async" alt="Zbox 截图：全屏灰罩中框选区域，底部工具条提供矩形、椭圆、文字标注" /></div>
-            <figcaption class="shot-cap">灰罩框选 · 八手柄微调</figcaption>
-          </figure>
-          <figure>
-            <div class="shot"><img src="assets/desktop/shot-annotated.png" width="1920" height="1080" loading="lazy" decoding="async" alt="Zbox 截图标注完成态：椭圆圈出格子标题，矩形框选文件，附两行文字说明" /></div>
-            <figcaption class="shot-cap">矩形 · 椭圆 · 多行文字标注</figcaption>
-          </figure>
-          <figure>
-            <div class="shot"><img src="assets/desktop/shot-pin.png" width="1920" height="1080" loading="lazy" decoding="async" alt="Zbox 钉图：无边框置顶贴图窗贴在桌面上" /></div>
-            <figcaption class="shot-cap">钉在桌面 · 置顶随看</figcaption>
-          </figure>
-          <figure>
-            <div class="shot"><img src="assets/desktop/shot-long.png" width="1920" height="1080" loading="lazy" decoding="async" alt="Zbox 截长图：拼接进行中，右侧缩略预览实时延伸" /></div>
-            <figcaption class="shot-cap">截长图 · 自动下滚拼接</figcaption>
-          </figure>
-        </div>
-        <ul class="facts reveal">
-          <li><svg aria-hidden="true"><use href="#i-check"/></svg>全局热键唤起，键位自定义</li>
-          <li><svg aria-hidden="true"><use href="#i-check"/></svg>六色三档，矩形 / 椭圆 / 文字</li>
-          <li><svg aria-hidden="true"><use href="#i-check"/></svg>钉图滚轮缩放 · 双击关闭</li>
-          <li><svg aria-hidden="true"><use href="#i-check"/></svg>长图自动下滚 · 实时预览</li>
-        </ul>
-        <p class="toolbar-note reveal">
-          <img src="assets/desktop/shot-toolbar-light.png" width="360" height="95" loading="lazy" decoding="async" alt="浅色主题下的 Zbox 截图工具条" />
-          <span>工具条跟随面板主题 —— 图为浅色版</span>
-        </p>
       </div>
     </section>
 
@@ -615,6 +525,28 @@
         <div class="cap cap-final" id="cap-trf">
           <h2>文件，随时流动。</h2>
           <p>局域网互传 · 手动启用 · 接收需确认</p>
+        </div>
+      </section>
+    </div>
+
+    <!-- ============ 视频解析（滚动演示） ============ -->
+    <div id="sec-video">
+      <section class="stage" id="stage-video" aria-label="视频解析演示">
+        <div class="film film-video">
+          <img class="f1" src="assets/desktop/video-gate.png" width="359" height="476" loading="lazy" decoding="async" alt="Zbox 视频解析页默认关闭状态：高斯模糊底与启用按钮" />
+          <img class="f2" src="assets/desktop/video-parsed.png" width="359" height="476" loading="lazy" decoding="async" alt="Zbox 视频解析完成：视频卡片显示标题与时长，清晰度下拉列出 1080P 等档位" />
+          <img class="f3" src="assets/desktop/video-downloading.png" width="359" height="476" loading="lazy" decoding="async" alt="Zbox 视频下载中：卡片环绕彩虹进度描边，显示已下载大小、速度与剩余时间" />
+          <img class="f4" src="assets/desktop/video-done.png" width="359" height="476" loading="lazy" decoding="async" alt="Zbox 视频下载完成：两条任务卡片各带文件大小与打开按钮" />
+        </div>
+        <div class="cap" id="cap-video1">
+          <span class="kick">视频解析</span>
+          <h2>面板里，多了个视频解析。</h2>
+        </div>
+        <div class="cap" id="cap-video2"><h2>粘贴链接，解析出清晰度。</h2></div>
+        <div class="cap" id="cap-video3"><h2>多任务并行，断点续传。</h2></div>
+        <div class="cap cap-final" id="cap-videof">
+          <h2>下好了，直接打开。</h2>
+          <p>YouTube、Bilibili 等 · 最高 4K 视源站 · 组件本地运行 · 默认关闭。</p>
         </div>
       </section>
     </div>
