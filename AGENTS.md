@@ -910,7 +910,12 @@ HTTP 模式无加密，只面向可信局域网。组播失效时有 /24 子网�
   NetworkUtil.getIpAddress 走 Wi-Fi GetIpInfo，模拟器返回 0.0.0.0）；④ fs.writeSync 的 WriteOptions.offset
   是**文件位置**而非 buffer 偏移（分块写必须 buf.slice 后顺序写，readSync 的 offset 才是文件读位置）；
   ⑤ 记录行刷新必须 @Observed + @ObjectLink 子组件（ForEach 按 key 复用时 @Builder 行不刷新）；
-  ⑥ polka 的 getRemoteIpAddress 在 prepare/upload 两条连接上可能一个 undefined 一个正常，session IP 为空时跳过校验。
+  ⑥ polka 的 getRemoteIpAddress 在 prepare/upload 两条连接上可能一个 undefined 一个正常，session IP 为空时跳过校验；
+  ⑦ 它其实是**异步回调赋值**（IncomingMessage 构造里 getRemoteAddress），路由执行时几乎必然还没填好（实测回调晚 ~2ms）——
+  /register 里延迟 100ms 再读、仍为空则不登记：空 IP 设备条目会让发送方连 '' 必超时，upsert 还会覆盖组播
+  announce 拿到的正确 IP（2026-10-12 真机「发送必超时」的根因）；
+  ⑧ 记录「导出」用 DocumentSavePicker DOWNLOAD 模式直达「下载/<包名>/」：该模式 newFileNames 等参数全部不生效，
+  save() 返回的是**目录 URI**，文件名要自己拼（fileUri.FileUri(dirUri).path + '/' + fileName 后 openSync CREATE|TRUNC）。
   CLI 自主调试：devecocli build / run / log --bundle-name com.zbox.transfer / ui screenshot|layout|click|text
   （模拟器免签名直装；devecocli 子命令详见 devecocli --help）。
 - `config.json` 新增键：`transfer_fingerprint` / `transfer_alias` / `transfer_dir` / `transfer_enabled`（默认 false；zviber→zbox 迁移时旧值被 `_reset_migrated_transfer` 重置为关闭，升级用户需手动启用一次）。

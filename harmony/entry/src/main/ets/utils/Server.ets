@@ -69,9 +69,16 @@ export class TransferServer {
       const pd = req.files.get('postData')
       const text = pd !== undefined ? pd.toString() : ''
       const info = parseDeviceInfo(text)
-      if (info !== null && info.fingerprint !== fingerprint()) {
-        DeviceStore.upsert(info, req.getRemoteIpAddress() ?? '')
-      }
+      // polka 的 remoteIp 是异步回调赋值（IncomingMessage 构造里 getRemoteAddress），
+      // 路由执行时几乎必然还没填好（实测回调晚 ~2ms）——延迟 100ms 再读；
+      // 仍拿不到就跳过登记：空 IP 的设备条目会让发送方连 '' 直接超时，
+      // 还会 upsert 覆盖组播 announce 拿到的正确 IP
+      setTimeout(() => {
+        const ip = req.getRemoteIpAddress() ?? ''
+        if (info !== null && info.fingerprint !== fingerprint() && ip.length > 0) {
+          DeviceStore.upsert(info, ip)
+        }
+      }, 100)
       this.sendInfo(res)
     } catch (e) {
       res.writeHead(500, { 'Content-Type': 'application/json' })

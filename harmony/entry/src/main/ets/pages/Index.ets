@@ -3,9 +3,9 @@
  * 深色单主题；picker 用法参考 LocalSendLite_HarmonyOS_NEXT 的 utils/PickFile.ets
  * （MIT，见 harmony/NOTICE）。
  */
-import { picker, fileIo as fs } from '@kit.CoreFileKit'
+import { picker, fileIo as fs, fileUri } from '@kit.CoreFileKit'
 import { photoAccessHelper } from '@kit.MediaLibraryKit'
-import { ToastUtil } from '@pura/harmony-utils'
+import { LogUtil, ToastUtil } from '@pura/harmony-utils'
 import {
   DeviceStore,
   FileMeta,
@@ -116,15 +116,18 @@ struct Index {
     try {
       const savePicker = new picker.DocumentViewPicker(getContext(this))
       const options = new picker.DocumentSaveOptions()
-      options.newFileNames = [record.fileName]
+      // DOWNLOAD 模式直达「下载/<包名>/」：不弹系统面板，save() 返回的是**目录** URI，
+      // newFileNames 等其它选项在该模式下不生效，文件名要自己拼（官方 save-user-file 指南）
       options.pickerMode = picker.DocumentPickerMode.DOWNLOAD
       const result = await savePicker.save(options)
       if (result.length === 0) {
         return
       }
-      copyFile(record.savedPath, result[0])
-      ToastUtil.showToast('已导出')
+      const dstDir = new fileUri.FileUri(result[0]).path
+      copyFile(record.savedPath, `${dstDir}/${record.fileName}`)
+      ToastUtil.showToast('已导出到「下载」目录')
     } catch (e) {
+      LogUtil.error(`export failed: ${JSON.stringify(e)}`)
       ToastUtil.showToast('导出失败')
     }
   }

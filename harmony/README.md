@@ -6,6 +6,15 @@ PC 端 zbox 面板「传输」的鸿蒙配套 App：局域网内与 PC 互传文
 `transfer_selftest.py` 为准。移植计划与参考项目分析见
 `docs/superpowers/plans/2026-10-06-harmonyos-port.md`。
 
+## 隐私合规（上架审核 7.5）
+
+- 线上隐私政策：https://zbox.wzyjc.cn/harmony/privacy.html （源码在 `website/harmony/privacy.html`，随站点部署）
+- 首次启动弹隐私政策弹窗（`Index.ets` 的 `showPrivacy` 弹层）：必须「同意并继续使用」或
+  「不同意并退出」，返回键被拦截，不可绕过；标题行右侧常驻「隐私政策」入口可随时回看。
+- 同意前不启动任何网络服务：`EntryAbility.onForeground` 检查 `privacyAccepted()`，
+  未同意直接返回；同意后经 `acceptPrivacy()` 回调补起 HTTP 服务与组播发现。
+  同意状态存 preferences（`privacyAccepted` 键）。
+
 ## 构建
 
 1. 安装 **DevEco Studio 5.x**（HarmonyOS NEXT SDK，API 12+），注册华为开发者账号并实名认证。
@@ -42,6 +51,14 @@ PC 端 zbox 面板「传输」的鸿蒙配套 App：局域网内与 PC 互传文
 
 待真机验证：组播发现（模拟器 addMembership EINVAL）、后台长时任务保活、Share Kit 分享入口、
 拒绝/取消/会话冲突等异常路径（协议语义与 PC selftest 13 用例对齐，代码已按语义实现）。
+
+2026-10-12 双模拟器（Mate 90 Pro ↔ Mate X7，经 hdc fport 互通）回归修复：
+- 修复记录「导出」必失败：DOWNLOAD 模式 save() 返回**目录 URI**（Download/<包名>/）且 newFileNames
+  不生效，之前当文件 URI 直接打开必抛异常；改为 fileUri 转路径后自行拼文件名，导出文件 sha256 逐字节一致。
+- 修复发送到互发现设备必报「连接或传输超时」：polka 的 getRemoteIpAddress 是异步回调赋值，/register
+  处理时几乎必然还是 undefined，空 IP 条目 upsert 进设备表（还覆盖 announce 拿到的正确 IP），
+  发送方连 'http://:53327' 必超时；改为延迟 100ms 再读、仍为空不登记。复现链路：POST /register →
+  设备条目空 IP → 发送报超时；修复后同链路发送成功。
 
 ## 验收（对照移植计划第八节）
 
