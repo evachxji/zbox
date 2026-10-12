@@ -65,6 +65,12 @@ PySide6 (Qt 6.8 LTS), Python 3.10+, Windows 10 / 11.
 The LAN transfer feature implements the v2 protocol of the open-source project [LocalSend](https://github.com/localsend/localsend) (Apache License 2.0) as a private instance (port 53327 / multicast 224.0.0.168) and is not interoperable with the official LocalSend apps.
 Video downloading is powered by [yt-dlp](https://github.com/yt-dlp/yt-dlp), with audio/video merging by [ffmpeg](https://ffmpeg.org/).
 
+## Links
+
+- 🌐 Website: [zbox.wzyjc.cn](https://zbox.wzyjc.cn)
+- 📦 Releases: [github.com/evachxji/zbox/releases](https://github.com/evachxji/zbox/releases)
+- 🐛 Issues: [github.com/evachxji/zbox/issues](https://github.com/evachxji/zbox/issues)
+
 ## License
 
 [MIT](LICENSE)

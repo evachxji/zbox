@@ -66,6 +66,12 @@ PySide6（Qt 6.8 LTS），Python 3.10+，Win10 / Win11。
 v2 协议实现，为私有实例（端口 53327 / 组播 224.0.0.168），与官方 LocalSend 应用不互通。
 视频解析功能由 [yt-dlp](https://github.com/yt-dlp/yt-dlp) 驱动，音视频合并由 [ffmpeg](https://ffmpeg.org/) 完成。
 
+## 链接
+
+- 🌐 官网：[zbox.wzyjc.cn](https://zbox.wzyjc.cn)
+- 📦 下载发布：[github.com/evachxji/zbox/releases](https://github.com/evachxji/zbox/releases)
+- 🐛 问题反馈：[github.com/evachxji/zbox/issues](https://github.com/evachxji/zbox/issues)
+
 ## License
 
 [MIT](LICENSE)
