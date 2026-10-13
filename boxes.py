@@ -1031,6 +1031,10 @@ class BoxWindow(QWidget):
         self._op = None          # ('move', 起点全局坐标, 起始几何) 或 ('resize', 边缘掩码, ...)
         self._press_pos = None   # 拖拽起点（全局坐标），用于区分点击与拖动
         self._last_drag_ts = 0.0   # 最近一次发生位移的拖拽结束时间（抑制拖拽连带的双击收起）
+        self._hover_peek = False   # 收起态悬停预览中（临时展开，不改 rec、不落盘）
+        self._peek_timer = QTimer(self)   # 移开后延迟收回：菜单/拖拽进行中由 _peek_tick 推迟
+        self._peek_timer.setInterval(120)
+        self._peek_timer.timeout.connect(self._peek_tick)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMouseTracking(True)
         # 整窗接受拖放：只有文件列表（视口）注册了拖放目标，拖到标题栏/空白提示区/
@@ -1714,6 +1718,7 @@ class BoxWindow(QWidget):
 
     # ---------- 格子操作 ----------
     def set_collapsed(self, on, save=True):
+        self._hover_peek = False   # 真正展开/收起都结束预览态（预览期点 ▼ 展开后移开不再收回）
         self.rec['collapsed'] = on
         self.pages.currentWidget().setVisible(not on)
         self.btn_collapse.setText('▼' if on else '▲')
@@ -1726,6 +1731,43 @@ class BoxWindow(QWidget):
             self.resize(self.width(), self.rec.get('h') or ui.sc(DEF_H))
         if save:
             self.mgr.save_rec(self)
+
+    # ---------- 收起态悬停预览 ----------
+    def _peek_expand(self):
+        """收起态悬停预览：临时展开内容页——不改 rec['collapsed']、不落盘，
+        光标移开由 _peek_tick 收回。预览期点 ▼/双击标题走 set_collapsed 真正展开，
+        之后移开不再收回。"""
+        self._hover_peek = True
+        self.pages.currentWidget().setVisible(True)
+        self.setMinimumHeight(ui.sc(TITLE_H) + ui.sc(60))
+        self.setMaximumHeight(16777215)
+        self.resize(self.width(), self.rec.get('h') or ui.sc(DEF_H))
+
+    def _peek_tick(self):
+        """预览收回判定（leaveEvent 后每拍一问）：菜单/模态弹窗/文件拖出/窗口拖动
+        进行中推迟；光标回窗内（enterEvent 有漏发场景，坐标说了算）停表。"""
+        if not self._hover_peek:
+            self._peek_timer.stop()
+            return
+        if QApplication.activePopupWidget() is not None or \
+                QApplication.activeModalWidget() is not None or \
+                self._dragging or self._op is not None:
+            return   # 进行中，下一拍再看
+        if self.geometry().contains(QCursor.pos()):
+            self._peek_timer.stop()
+            return
+        self._peek_collapse()
+
+    def _peek_collapse(self):
+        """收回悬停预览（未在预览 = 空操作；期间被真正展开则不收）。"""
+        self._peek_timer.stop()
+        if not self._hover_peek:
+            return
+        self._hover_peek = False
+        if not self.rec.get('collapsed'):
+            return
+        self.pages.currentWidget().setVisible(False)
+        self.setFixedHeight(ui.sc(TITLE_H))
 
     def set_locked(self, on, save=True):
         self.rec['locked'] = on
@@ -1933,11 +1975,21 @@ class BoxWindow(QWidget):
 
     def enterEvent(self, e):
         self.unsetCursor()   # 从窗外划入时复位，不残留上次的缩放箭头
+        self._peek_timer.stop()
+        if self.rec.get('collapsed') and not self._hover_peek:
+            self._peek_expand()   # 收起态悬停标题栏 = 临时展开预览，移开收回
         super(BoxWindow, self).enterEvent(e)
 
     def leaveEvent(self, e):
         self.unsetCursor()
+        if self._hover_peek:
+            self._peek_timer.start()   # 延迟一拍判定：瞬移出窗/弹菜单的误收由 _peek_tick 挡
         super(BoxWindow, self).leaveEvent(e)
+
+    def hideEvent(self, e):
+        # 双击桌面全隐藏等整体隐藏路径：预览态直接收回，恢复显示时保持收起形态
+        self._peek_collapse()
+        super(BoxWindow, self).hideEvent(e)
 
     def mousePressEvent(self, e):
         if e.button() != Qt.LeftButton or self.rec.get('locked'):

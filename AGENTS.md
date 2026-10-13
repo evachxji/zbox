@@ -90,6 +90,7 @@ Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyS
 格子拖出落回桌面由 `_DesktopDropOverlay`（桌面带最底层的全屏透明落放层，仅拖拽期间显示）接住内部处理、不走 Explorer（被占用的文件夹也能拖出），落到资源管理器窗口/其他应用才交 URL 给对方真实移动；拖拽默认「移动」、按住 Ctrl 落放 = 复制；Delete 删除走外壳原生确认弹窗（`_shell_op` 包 SHFileOperation）；
 格子内拖放（外部拖入同规则，`BoxList._drop_loc`）落点三态：条目间缝显白色引导线、松手插入该位并切自定义排序（`sort='custom'`——空白格子 = items 记账顺序、映射格子 = `rec['order']` 文件名表、表外新文件排最后，排序菜单三项勾勾因此全灭；行高中部 50% = 落在条目上、上下各 25% = 缝，图标视图看左右），落文件夹条目上 = 移进去（.lnk 指向目录时按文件夹处理：`_lnk_target_dir` 经 IShellLinkW 解析目标、落上去 = 移进目标目录，`BoxList._lnk_dir` 带缓存随 refresh 清空），落可执行文件/快捷方式上 = 用它打开被拖文件（`_shell_exec_async`，普通文件无此语义、退化为就近引导线——资源管理器同款）；
 列表视图光标超出条目内容宽度（图标+文件名右缘 `_content_right`）的行尾空白区不做落点判定——一律视为移动/复制到格子根，引导线长度与高亮框也收缩到内容区
+收起态（▲ 按钮/双击标题）悬停标题栏 = 临时展开预览、移开自动收回（`_peek_expand`/`_peek_tick`：预览不改 `rec['collapsed']`、不落盘；预览期点 ▼/双击标题走 `set_collapsed` 真正展开后移开不再收回；弹菜单/模态窗/文件拖出/窗口拖动进行中推迟收回；`hideEvent` 随全隐藏直接收回）
 - `calendar_data.py` — 内置国务院节假日数据、农历换算、三源联网回退与离线导入
 - `updater.py` — 应用自身更新：`latest_release` 查 GitHub 最新 release 并挑当前架构的 Setup exe（API 直连优先、ghproxy 镜像兜底）、`has_update` 版本号数值化补齐比较、`download_setup` 镜像优先下载（`.new` + replace）。纯标准库零 Qt，供设置窗在后台线程调用
 - `transfer.py` — 局域网文件传输协议核心（参照 LocalSend v2 的私有实例）：UDP 组播发现 + HTTP REST 传输，纯标准库零 Qt；接收方落盘文件名经 `_sanitize_filename` 清洗（`:` 不洗会把数据写进 NTFS 备用数据流——主文件 0 字节还回 200，`?` `*` 等则 500）
