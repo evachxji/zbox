@@ -36,9 +36,10 @@ RUN_KEY = r'Software\Microsoft\Windows\CurrentVersion\Run'
 # 右键菜单键相对 HKCR 的路径；ExtendedSubCommandsKey 要的就是这段（不带 Software\Classes\）
 SHELL_SUBKEY = r'Directory\Background\shell\zbox'
 SHELL_KEY = r'Software\Classes\\' + SHELL_SUBKEY
-# 文件夹（Directory）右键「添加到Zbox桌面格子」静态动词：仅运行中注入，随面板启停写删
+# 文件夹（Directory）与盘符（Drive）右键「添加到Zbox桌面格子」静态动词：仅运行中注入，随面板启停写删
 FOLDER_MENU_TEXT = '添加到Zbox桌面格子'
 FOLDER_SHELL_KEY = r'Software\Classes\Directory\shell\zbox'
+DRIVE_SHELL_KEY = r'Software\Classes\Drive\shell\zbox'
 LEGACY_SHELL_KEY = r'Software\Classes\Directory\Background\shell\zviber'  # 旧名残留，安装/退出时清掉
 COMMANDSTORE_KEY = r'Software\Microsoft\Windows\CurrentVersion\Explorer\CommandStore\shell'  # 只为清理旧版残留
 UNINSTALL_KEY = r'Software\Microsoft\Windows\CurrentVersion\Uninstall\zbox'
@@ -217,13 +218,15 @@ def _delete_shell_tree(root):
 
 
 def _delete_folder_shell_tree(root):
-    """文件夹右键项（Directory\\shell\\zbox）：先删 command 再删键（winreg 不能删带子键的键）。
-    折进 _delete_shell_tree：它的全部调用点（安装/卸载/启停切换）语义都是「删干净」。"""
-    for sub in (FOLDER_SHELL_KEY + r'\command', FOLDER_SHELL_KEY):
-        try:
-            winreg.DeleteKey(root, sub)
-        except OSError:
-            pass
+    """文件夹/盘符右键项（Directory\\shell\\zbox、Drive\\shell\\zbox）：先删 command 再删键
+    （winreg 不能删带子键的键）。折进 _delete_shell_tree：它的全部调用点
+    （安装/卸载/启停切换）语义都是「删干净」。"""
+    for base in (FOLDER_SHELL_KEY, DRIVE_SHELL_KEY):
+        for sub in (base + r'\command', base):
+            try:
+                winreg.DeleteKey(root, sub)
+            except OSError:
+                pass
 
 
 def _delete_legacy_shell_tree(root):
@@ -311,16 +314,19 @@ def _write_cascade(root, exe, icon_path):
 
 
 def _write_folder_item(root, exe, icon_path):
-    """文件夹（Directory）右键项「添加到Zbox桌面格子」：静态动词，%1 = 选中的文件夹路径。
-    仅运行中存在（见 context_menu_set_running），点击经 --add-folder 由 IPC 转发给面板建格子。"""
-    with winreg.CreateKey(root, FOLDER_SHELL_KEY) as k:
-        winreg.SetValueEx(k, 'MUIVerb', 0, winreg.REG_SZ, FOLDER_MENU_TEXT)
-        icon = _menu_icon(exe, icon_path)
-        if icon:
-            winreg.SetValueEx(k, 'Icon', 0, winreg.REG_SZ, icon)
-    with winreg.CreateKey(root, FOLDER_SHELL_KEY + r'\command') as k:
-        winreg.SetValueEx(k, None, 0, winreg.REG_SZ,
-                          launcher_cmd(arg='--add-folder "%1"', exe=exe))
+    """文件夹（Directory）/盘符（Drive）右键项「添加到Zbox桌面格子」：静态动词，%1 = 选中路径。
+    仅运行中存在（见 context_menu_set_running），点击经 --add-folder 由 IPC 转发给面板建格子。
+    盘符右键走 HKCR\\Drive，%1 = 盘根（F:\\），main.pyw 的 --add-folder 分支已兜住
+    尾反斜杠吃掉闭合引号与 "F:" 两种形态。"""
+    for base in (FOLDER_SHELL_KEY, DRIVE_SHELL_KEY):
+        with winreg.CreateKey(root, base) as k:
+            winreg.SetValueEx(k, 'MUIVerb', 0, winreg.REG_SZ, FOLDER_MENU_TEXT)
+            icon = _menu_icon(exe, icon_path)
+            if icon:
+                winreg.SetValueEx(k, 'Icon', 0, winreg.REG_SZ, icon)
+        with winreg.CreateKey(root, base + r'\command') as k:
+            winreg.SetValueEx(k, None, 0, winreg.REG_SZ,
+                              launcher_cmd(arg='--add-folder "%1"', exe=exe))
 
 
 def context_menu_install(icon_path=None, exe=None, all_users=False):
@@ -340,7 +346,7 @@ def context_menu_set_running(running, icon_path=None):
     - 源码运行（无安装记录）：启动时注入级联菜单、退出时整体删除，不留残留
       （崩溃残留由下次启动时 installer.sync_context_menu() 清掉）。
     进程崩溃会让菜单停在级联态——此时点二级项会新起实例并本地执行动作，可接受的降级。
-    文件夹右键「添加到Zbox桌面格子」（FOLDER_SHELL_KEY）与级联菜单同生共死：只随
+    文件夹/盘符右键「添加到Zbox桌面格子」（FOLDER_SHELL_KEY / DRIVE_SHELL_KEY）与级联菜单同生共死：只随
     running=True 注入，退出/卸载/覆盖安装时随 _delete_shell_tree 一并删除——未运行时不该
     出现，崩溃残留被点到则静默退出（main.pyw 的 --add-folder 分支）。"""
     hkcu_installed = uninstall_reg_get('InstallLocation', False)

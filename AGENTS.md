@@ -415,7 +415,7 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
   **IPC 名重新起为 `zbox-panel-v1`**（旧版 zviber 用 `zviber-panel-v2`）：新旧版数据目录与注册表会互相覆盖，
   让它俩互不串话（各起一个实例）比新旧混用一个安全。
 - 涉及的键：`Run`（自启）、`Directory\Background\shell\zbox`（桌面右键菜单）、
-  `Directory\shell\zbox`（文件夹右键「添加到Zbox桌面格子」，仅运行中注入，安装不写）、
+  `Directory\shell\zbox` 与 `Drive\shell\zbox`（文件夹/盘符右键「添加到Zbox桌面格子」，仅运行中注入，安装不写）、
   `Uninstall\zbox`（应用列表卸载项）。
 - **桌面右键菜单只属于 exe 安装**：只有 `installer.install()` 会写菜单，`install.py` 只写开机自启。
   每次启动 `installer.sync_context_menu()` 按 `Uninstall\zbox` 的 `InstallLocation` 判定——
@@ -502,7 +502,7 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
 桌面文件归类格子：`BoxManager` 总管（恢复/新建/解散/显隐），`BoxWindow` 单格，
 `BoxStore` 存 `%APPDATA%\zbox\boxes.json`（`visible` + 格子记录列表）。
 格子管理入口在桌面右键级联菜单（新建格子 / 新建文件夹格子 / 显示隐藏格子）；截图自检模式不创建格子。
-另有**资源管理器文件夹右键「添加到Zbox桌面格子」**（`Directory\shell\zbox` 静态动词，
+另有**资源管理器文件夹/盘符右键「添加到Zbox桌面格子」**（`Directory\shell\zbox` 与 `Drive\shell\zbox` 静态动词，
 `--add-folder "%1"` 传路径）：仅运行中注入（随 `context_menu_set_running` 与桌面级联菜单同生共死，
 退出/卸载/覆盖安装时随 `_delete_shell_tree` 一并删除，崩溃残留被点到静默退出），路径经 `b'folder:'`
 IPC 通道（与 `--pick-folder` 同一条）发回面板建格子；`new_folder` 按 normcase 去重——同一路径
