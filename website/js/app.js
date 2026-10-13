@@ -6,9 +6,9 @@
   "use strict";
 
   /* ---------- 下载地址（单一配置点，可修改） ---------- */
-  var WINDOWS_DOWNLOAD_URL = "https://github.com/evachxji/zbox/releases/download/v0.4.1/zbox-Setup-v0.4.1-x64.exe";
-  var MOBILE_DOWNLOAD_URL = "https://github.com/evachxji/zbox/releases/download/v0.4.1/zbox-Android-v0.4.1.apk";
-  var HARMONY_DOWNLOAD_URL = "https://github.com/evachxji/zbox/releases/download/v0.4.1/zbox-HarmonyOS-v0.4.1-unsigned.hap";
+  var WINDOWS_DOWNLOAD_URL = "https://github.com/evachxji/zbox/releases/download/v0.4.2/zbox-Setup-v0.4.2-x64.exe";
+  var MOBILE_DOWNLOAD_URL = "https://github.com/evachxji/zbox/releases/download/v0.4.2/zbox-Android-v0.4.2.apk";
+  var HARMONY_DOWNLOAD_URL = "https://github.com/evachxji/zbox/releases/download/v0.4.2/zbox-HarmonyOS-v0.4.2-unsigned.hap";
   var GITHUB_URL = "https://github.com/evachxji/zbox";
 
   function wireLinks(key, url) {
