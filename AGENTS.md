@@ -92,7 +92,7 @@ Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyS
 列表视图光标超出条目内容宽度（图标+文件名右缘 `_content_right`）的行尾空白区不做落点判定——一律视为移动/复制到格子根，引导线长度与高亮框也收缩到内容区
 - `calendar_data.py` — 内置国务院节假日数据、农历换算、三源联网回退与离线导入
 - `updater.py` — 应用自身更新：`latest_release` 查 GitHub 最新 release 并挑当前架构的 Setup exe（API 直连优先、ghproxy 镜像兜底）、`has_update` 版本号数值化补齐比较、`download_setup` 镜像优先下载（`.new` + replace）。纯标准库零 Qt，供设置窗在后台线程调用
-- `transfer.py` — 局域网文件传输协议核心（参照 LocalSend v2 的私有实例）：UDP 组播发现 + HTTP REST 传输，纯标准库零 Qt
+- `transfer.py` — 局域网文件传输协议核心（参照 LocalSend v2 的私有实例）：UDP 组播发现 + HTTP REST 传输，纯标准库零 Qt；接收方落盘文件名经 `_sanitize_filename` 清洗（`:` 不洗会把数据写进 NTFS 备用数据流——主文件 0 字节还回 200，`?` `*` 等则 500）
 - `transfer_ui.py` — 面板「传输」tab：设备列表、文件多选 + 拖拽发送、传输记录（「传输中」的记录行亮彩色跑马灯轮廓）、接收确认弹窗、发送方取消；传输服务生命周期自持（默认关闭的门禁层、启用/停用、「?」说明弹窗）；`enable_service()` 成功后后台查一次 Windows 防火墙阻止规则（`sysutil.firewall_blocked` 按 exe 路径匹配、免管理员；命中弹 `_ConfirmDialog` 引导一键修复，UAC 被拒静默，每会话最多提示一次）
 - `video_dl.py` — 视频解析核心：yt-dlp / ffmpeg 组件下载（ghproxy 镜像优先、GitHub 直连兜底；ffmpeg 优先 npmmirror 的 ffmpeg-static 单文件 gz）、版本查询（本地 `--version` + PyPI JSON / GitHub API，比较走 `version_key` 数值化——本地输出 `2026.08.19`、PyPI 归一成 `2026.8.19`，字符串直接比会误报有新版）、视频下载子进程（照搬参考脚本 `bestvideo[height<=N]+bestaudio` 合并 mp4，解析/下载一律带 `--encoding utf-8` 并按 utf-8 解码——默认 cp936 会把文件名里的 emoji（🎞/▪︎ 等 GBK 外字符）替换成空格，Merger 行路径与真实文件不符导致 `isfile` 失败、完成态卡片丢失「打开」按钮；`--newline` 逐行进度解析并映射成**单趟进度条**：下载段 0→95%（分流源 视频 0–85 / 音频 85–95，合流源 0–95），95→100 留给合并（done 置 100）——不再每路流各走一遍；阶段文案仍按 Destination 计数标「(1/3) 下载视频/(2/3) 下载音频/(3/3) 合并中」（合流源不带计数，由解析时的 `split_heights` 判定；`-f` 带 `/best` 兜底合流单文件）；中间流文件下在保存目录，成功由 yt-dlp 自删，失败/中止由 `_cleanup_parts` 清掉本次 Destination 及 .part/.ytdl 边车；同名成品撞车被 yt-dlp 跳过时自动追加 `-2160P` 式分辨率后缀重试一次，后缀也撞车才报「未重复下载」）；浏览器 cookie：`tools\cookies.txt` 存在即随解析/下载命令带 `--cookies`（抖音等站点匿名请求 403 必需，`import_cookies` 做 Netscape 格式轻校验、缺 douyin.com 条目仅警告，卸载组件时一并删除）。纯标准库零 Qt，回调全在后台线程
 - `glow.py` — 共享轮廓灯效控件 `GlowCard`（待机呼吸灯 / 彩色跑马灯，自绘描边 + 定时器相位；跑马灯是把圆角矩形边框 toSubpathPolygons 离散成折线再按 ~6px 细分（折线只细分圆弧，直边是一整段，不细分就一条边一个颜色）、逐段按「累计周长位置 − 相位」取色——别用线性渐变+转色相，那样上下边同向变色不像追跑；独立成模块而非放 app.py——基类在 import 期就要被求值，放 app.py 会撞三方循环 import；`_sc` 运行期惰性取 app.sc）。传输记录行（`_ClickRow` 继承）与视频解析视频卡共用
@@ -119,7 +119,7 @@ Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyS
 - `designs/` — 两套主题的设计稿（HTML，浏览器可直接打开）
 - `website/` — 产品介绍页（纯静态无构建），线上 https://zbox.wzyjc.cn（腾讯云 COS 静态托管）；
   `deploy-cos.py` 一键上传部署 / `--bind-cert <ID>` 绑定续期证书，细节见 `.claude/skills/site-deploy/`
-- `android/` — Android 端独立 Gradle 工程（Kotlin + Compose，与 PC 代码完全分离）
+- `android/` — Android 端独立 Gradle 工程（Kotlin + Compose，与 PC 代码完全分离）；发送时文件长度不信相册数据库的 SIZE 列（编辑/优化/动态照片会过期，与实际流字节数不符时 OkHttp 写到末尾抛 ProtocolException），优先取 AssetFileDescriptor 的真实文件长度，SIZE 列只作为兜底
 - `harmony/` — 鸿蒙端独立 DevEco 工程（ArkTS + ArkUI，HarmonyOS NEXT API 12+，与 PC 代码完全分离；ohpm 依赖 polka/axios/harmony-utils/harmony-dialog；移植计划与验收标准见 `docs/superpowers/plans/2026-10-06-harmonyos-port.md`，构建说明见 `harmony/README.md`）
 - `assets/` — README 引用的图标与功能截图
 - `docs/` — 历史实现计划存档（`superpowers/plans/`）

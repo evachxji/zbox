@@ -127,6 +127,16 @@ def load_or_create_fingerprint(cfg_path):
     return fp
 
 
+def _sanitize_filename(name):
+    '''接收方落盘前清洗文件名：Windows 非法字符替换为下划线。
+
+    不清洗的后果：带 ":" 的名字会把数据写进 NTFS 备用数据流
+    （主文件 0 字节、响应还是 200）；? * < > | " 则直接让 os.open 抛
+    OSError 变成 500。结尾点/空格会被 Windows 静默剥掉，提前去除。'''
+    cleaned = ''.join('_' if c in '<>:"\\|?*' or ord(c) < 32 else c for c in name)
+    return cleaned.rstrip(' .')
+
+
 def _create_unique(directory, name):
     '''原子占位创建（O_EXCL），冲突时自动加 " (2)" / " (3)" 后缀。
 
@@ -329,7 +339,7 @@ class _ApiHandler(BaseHTTPRequestHandler):
         meta = session['files'][file_id]
         session['state'] = 'transferring'
         # 防目录穿越：只取文件名部分
-        file_name = os.path.basename(meta.get('fileName') or '') or file_id
+        file_name = _sanitize_filename(os.path.basename(meta.get('fileName') or '')) or file_id
         with session['lock']:
             fd, target = _create_unique(session['save_dir'], file_name)
             session['partial'][file_id] = target

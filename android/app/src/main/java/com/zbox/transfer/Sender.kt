@@ -95,15 +95,15 @@ object Sender {
         val files = uris.mapNotNull { uri ->
             val (name, size0) = queryMeta(context, uri)
             if (name == null) return@mapNotNull null
-            // 大小未知时用 AssetFileDescriptor 兜底取真实长度
-            var size = size0
-            if (size < 0) {
-                size = try {
-                    resolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
-                } catch (_: Exception) {
-                    -1L
-                }
+            // 优先用 AssetFileDescriptor 的真实文件长度：相册数据库的 SIZE 列可能是
+            // 过期值（编辑/优化/动态照片），与实际流出的字节数不符会让 OkHttp
+            // 在写到末尾时抛 ProtocolException("unexpected end of stream")
+            val fdLen = try {
+                resolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
+            } catch (_: Exception) {
+                -1L
             }
+            var size = if (fdLen > 0) fdLen else size0
             if (size < 0) {
                 // 协议要求必须知道长度：拒绝该文件并在记录中提示
                 TransferRecord(

@@ -152,6 +152,8 @@ fun friendlyNetError(e: Throwable, fallback: String): String = when (e) {
     is java.net.SocketTimeoutException -> "连接或传输超时，请重试"
     is java.net.SocketException -> "连接被中断"
     is java.net.UnknownHostException -> "找不到对方设备"
+    // 声明长度与实际流字节数不符（相册 SIZE 列过期等）
+    is java.net.ProtocolException -> "文件内容与声明大小不符，请在相册里重新保存该图片后重试"
     else -> {
         val msg = e.message ?: ""
         when {
