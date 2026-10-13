@@ -649,7 +649,7 @@ IPC 通道（与 `--pick-folder` 同一条）发回面板建格子；`new_folder
     报 Drop=Copy 又只剩「复制」徽标；解耦之后徽标与文件实际去向各归各的。
     回归工具 `%TEMP%\dsh_badge_e2e.py`（真机从桌面图标拖进空白格子：抓徽标 + 校验源文件还在、
     图标被隐藏、进了记账、无错误框）。
-- **映射格子只读目录**、`QFileSystemWatcher` 300ms 去抖刷新；路径失效显示「解散格子」页。
+- **映射格子只读目录**、`QFileSystemWatcher` 300ms 去抖刷新；路径失效切失效页（缺省图 + 「刷新」重测 + 「解散格子」）；文件夹被整个删掉时 watcher 收不到事件，双击打开由 `open_path` 补存在性检测兜底。
   空白格子也挂同一个 watcher，但看的是桌面目录（外面的删除/改名/剪切粘贴都要跟着刷新）。
 - **整窗接受拖放（`BoxWindow.setAcceptDrops(True)` + `dragEnter/dragMove/dropEvent`）**：
   只有文件列表视口注册了拖放目标，拖到标题栏/空白提示区/边缘时 Qt 的 `findDnDTarget()`

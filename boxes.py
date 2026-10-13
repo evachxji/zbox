@@ -14,7 +14,8 @@
   落放 = 复制（徽标变加号）；落放效果只在真会搬走时才敢报「移动」
   （报 Move 而文件没走，资源管理器会把源文件删掉）。
 - 文件夹映射格子：实时映射任意磁盘文件夹，QFileSystemWatcher 监听内容变化自动刷新；
-  路径失效时显示提示 + 「解散格子」按钮。
+  路径失效时切失效页（缺省图 + 「刷新」重测按钮 + 提示文案 + 「解散格子」）；文件夹被整个
+  删掉时 watcher 静默失效收不到事件，双击打开文件由 open_path 补一道存在性检测兜底。
 - 窗口：无边框 Tool 窗，半透明磨砂；挂桌面带免疫 Win+D（面板同款 pin_to_desktop）。
   与面板的差异：永不主动沉底（格子沉到应用窗口之下 = 用户眼里的「消失」）；
   只在被桌面整理软件表层压住时由 WinEvent 钩子/看门狗抬回表层之上。
@@ -263,6 +264,7 @@ QMenu::separator { height: 1px; background: rgba(255,255,255,20); margin: 4px 8p
 QPushButton { background: rgba(255,255,255,30); color: #fff; border: none;
               border-radius: 4px; padding: 5px 18px; font-size: @HFS@px; }
 QPushButton:hover { background: rgba(255,255,255,55); }
+QPushButton#boxRefresh { padding: 3px 12px; }
 """
     vals = {'@CN@': ui.pick_fonts()[0], '@TFS@': ui.sc(12), '@HFS@': ui.sc(11),
             '@BFS@': ui.sc(11), '@LFS@': ui.sc(12), '@IH@': ui.sc(26),
@@ -1110,19 +1112,36 @@ class BoxWindow(QWidget):
         page_invalid = QWidget()
         il = QVBoxLayout(page_invalid)
         il.addStretch(1)
+        pix = QLabel()
+        pix.setAlignment(Qt.AlignCenter)
+        pix.setPixmap(self._invalid_pm())
         t1 = QLabel('无法显示在桌面')
         t1.setObjectName('boxInvalid1')
         t1.setAlignment(Qt.AlignCenter)
         t2 = QLabel('文件夹路径已经失效')
         t2.setObjectName('boxInvalid2')
         t2.setAlignment(Qt.AlignCenter)
+        btn_refresh = QPushButton('刷新')
+        btn_refresh.setObjectName('boxRefresh')
+        btn_refresh.setCursor(Qt.PointingHandCursor)
+        btn_refresh.setToolTip('重新检测文件夹是否存在')
+        # 文件夹回来了 refresh 自己会扫目录切回列表页，没回来就停在失效页
+        btn_refresh.clicked.connect(self.refresh)
         btn = QPushButton('解散格子')
         btn.setCursor(Qt.PointingHandCursor)
         btn.clicked.connect(self.dissolve)
+        il.addWidget(pix)
+        il.addSpacing(ui.sc(6))
         il.addWidget(t1)
         il.addWidget(t2)
         il.addSpacing(ui.sc(10))
-        il.addWidget(btn, 0, Qt.AlignCenter)
+        row = QHBoxLayout()          # 刷新在左、解散在右，整体居中
+        row.setSpacing(ui.sc(8))
+        row.addStretch(1)
+        row.addWidget(btn_refresh)
+        row.addWidget(btn)
+        row.addStretch(1)
+        il.addLayout(row)
         il.addStretch(1)
         self.pages.addWidget(page_invalid)
 
@@ -1224,6 +1243,30 @@ class BoxWindow(QWidget):
     def display_dir(self):
         """格子内容所在目录：映射格子是映射的目录，空白格子是桌面（文件都在桌面上）。"""
         return self.rec['path'] if self.rec['kind'] == 'folder' else desktop_dir()
+
+    def _invalid_pm(self):
+        """失效页缺省图：半透明灰圆角方块 + 文件夹剪影 + 问号（映射路径失效的占位提示）。"""
+        s = ui.sc(64)
+        pm = QPixmap(s, s)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(255, 255, 255, 16))
+        p.drawRoundedRect(QRect(0, 0, s, s), ui.sc(12), ui.sc(12))
+        p.setBrush(QColor(255, 255, 255, 120))
+        p.drawRoundedRect(QRect(ui.sc(15), ui.sc(18), ui.sc(14), ui.sc(7)),
+                          ui.sc(2), ui.sc(2))                       # 文件夹 tab
+        body = QRect(ui.sc(13), ui.sc(25), ui.sc(38), ui.sc(23))
+        p.drawRoundedRect(body, ui.sc(3), ui.sc(3))
+        p.setPen(QColor(38, 40, 47))
+        f = QFont(ui.pick_fonts()[0])
+        f.setPixelSize(ui.sc(16))
+        f.setBold(True)
+        p.setFont(f)
+        p.drawText(body, Qt.AlignCenter, '?')
+        p.end()
+        return pm
 
     def refresh(self):
         """重新扫描填充列表；映射文件夹失效时切到失效页。
@@ -1700,6 +1743,11 @@ class BoxWindow(QWidget):
         f = sys._getframe(1)
         ui._dbg('open: %s ← %s:%d' % (os.path.basename(path),
                                       os.path.basename(f.f_code.co_filename), f.f_lineno))
+        if self.rec['kind'] == 'folder' and not os.path.isdir(self.rec['path'] or ''):
+            # 映射文件夹被整个删掉时 watcher 静默失效、列表还停在旧内容：双击打开才发现
+            # 路径没了。refresh 会切到失效页（缺省图 + 「刷新」重测），别白开不存在的路径。
+            self.refresh()
+            return
         try:
             os.startfile(path)
         except OSError:
