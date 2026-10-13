@@ -2,7 +2,7 @@
   <img src="assets/icon.png" width="96" alt="Zbox">
 </p>
 
-# Zbox v0.4.1
+<h1 align="center">Zbox</h1>
 
 <p align="center">
   <a href="https://github.com/evachxji/zbox/releases/latest"><img src="https://img.shields.io/github/v/release/evachxji/zbox" alt="Release"></a>
