@@ -98,7 +98,33 @@ gh release create v<VER> --title "zbox v<VER>" --notes-file dist\release-notes.m
 
 验证：`gh release view v<VER>` 显示 4 个 assets 且非 draft。
 
-## 5. 官网同步并上线
+## 5. 上传安装包到 CDN（dl.wzyjc.cn）
+
+官网与应用内更新（`updater.py`）的下载都走 CDN 优先——**不传这步，新版 exe/apk 的 CDN 地址 404，静默回落 GitHub 镜像**。
+把 exe 和 apk 传到 COS 桶 `dl/` 前缀并校验完整性（hap/app 不上，鸿蒙走 AppGallery）：
+
+`powershell
+@'
+import json
+from pathlib import Path
+from qcloud_cos import CosConfig, CosS3Client
+cred = json.loads((Path.home()/'.tccli'/'default.credential').read_text(encoding='utf-8'))
+client = CosS3Client(CosConfig(Region='ap-shanghai', SecretId=cred['secretId'], SecretKey=cred['secretKey']))
+for name in ['zbox-Setup-v<VER>-x64.exe', 'zbox-Android-v<VER>.apk']:
+    src = str(Path('dist/release') / name)
+    client.upload_file(Bucket='zbox-wzyjc-cn-1257727321', Key='dl/' + name, LocalFilePath=src,
+                       ContentType='application/octet-stream',
+                       CacheControl='public, max-age=31536000, immutable',
+                       EnableMD5=True, PartSize=8, MAXThread=8)
+    print('uploaded', name)
+'@ | python -
+`
+
+验证：`curl.exe -sI https://dl.wzyjc.cn/dl/zbox-Setup-v<VER>-x64.exe` 返回 200 且 Content-Length 与本地一致
+（本机有 Clash 时按 site-deploy 说明书的 DoH + `--resolve` 方法直连边缘节点测）。
+CRC64 完整性比对脚本见 `.claude/skills/site-deploy/SKILL.md` 下载 CDN 节。
+
+## 6. 官网同步并上线
 
 - `website/index.html` + `website/js/app.js` 里所有旧版本号全局替换为新版本号
   （下载链接同样含版本号，替换 `0.x.y` 串即一并更新；同样用 python 读写）。替换后 grep 旧版本号应为 0。
@@ -112,4 +138,5 @@ gh release create v<VER> --title "zbox v<VER>" --notes-file dist\release-notes.m
 - [ ] `dist\release\` 四个 v<VER> 产物齐全，`.app` 与上一版 hash 不同
 - [ ] `git ls-remote --tags origin` 有 `v<VER>`，指向版本号提交
 - [ ] `gh release view v<VER>`：非 draft，4 个 assets（exe/apk/hap/app.zip），大小与本地一致
+- [ ] COS `dl/` 下有 v<VER> 的 exe 与 apk，`https://dl.wzyjc.cn/dl/...` 200 且大小一致
 - [ ] 官网首页与 js 里版本号为 v<VER>，下载链接指向 v<VER> assets

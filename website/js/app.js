@@ -5,10 +5,24 @@
 (function () {
   "use strict";
 
+  /* ---------- URL 锚点（如 /#download）接管 ----------
+     目标分镜在文档里的位置要等 ScrollTrigger 插入 pin-spacer 后才确定；浏览器原生
+     锚点滚动可能抢在布局稳定前发生（Edge 冷缓存首访必现错位），这里先把 hash 摘下来，
+     布局就绪后由 scrollToHash / rm 分支自己滚过去，再把 hash 写回地址栏。 */
+  var initialHash = window.location.hash;
+  var hasInitialHash = !!(initialHash && initialHash.length > 1);
+  if (hasInitialHash) {
+    if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+    try { history.replaceState(null, "", window.location.pathname + window.location.search); } catch (_) {}
+  }
+  function restoreInitialHash() {
+    try { history.replaceState(null, "", initialHash); } catch (_) {}
+  }
+
   /* ---------- 下载地址（单一配置点，可修改） ---------- */
-  var WINDOWS_DOWNLOAD_URL = "https://github.com/evachxji/zbox/releases/download/v0.4.2/zbox-Setup-v0.4.2-x64.exe";
-  var MOBILE_DOWNLOAD_URL = "https://github.com/evachxji/zbox/releases/download/v0.4.2/zbox-Android-v0.4.2.apk";
-  var HARMONY_DOWNLOAD_URL = "https://github.com/evachxji/zbox/releases/download/v0.4.2/zbox-HarmonyOS-v0.4.2-unsigned.hap";
+  var WINDOWS_DOWNLOAD_URL = "https://dl.wzyjc.cn/dl/zbox-Setup-v0.4.2-x64.exe";
+  var MOBILE_DOWNLOAD_URL = "https://dl.wzyjc.cn/dl/zbox-Android-v0.4.2.apk";
+  var HARMONY_DOWNLOAD_URL = "https://appgallery.huawei.com/app/detail?id=com.zbox.transfer";
   var GITHUB_URL = "https://github.com/evachxji/zbox";
 
   function wireLinks(key, url) {
@@ -116,6 +130,14 @@
   if (reduced || typeof gsap === "undefined" || typeof ScrollTrigger === "undefined") {
     document.body.classList.add("rm");
     document.body.classList.add("ready");
+    if (hasInitialHash) {
+      var rmEl = null;
+      try { rmEl = document.querySelector(initialHash); } catch (_) {}
+      if (rmEl) {
+        window.scrollTo({ top: rmEl.getBoundingClientRect().top + window.scrollY, behavior: "auto" });
+        restoreInitialHash();
+      }
+    }
     return;
   }
 
@@ -474,5 +496,28 @@
     });
   });
 
-  window.addEventListener("load", function () { ScrollTrigger.refresh(); });
+  /* ---------- URL 锚点定位：pin 布局就绪后滚到目标分镜 ----------
+     pin 分镜用 ScrollTrigger 记录的 start，普通分镜用元素实际偏移；首访即达不做
+     平滑滚动。load 里 refresh 后再校正一次（图片/视频元数据可能二次位移），
+     其间用户已手动滚动则不抢。 */
+  var userScrolled = false;
+  ["wheel", "touchstart", "keydown"].forEach(function (evt) {
+    window.addEventListener(evt, function () { userScrolled = true; }, { once: true, passive: true });
+  });
+  function scrollToHash() {
+    if (!hasInitialHash) return;
+    var el = null;
+    try { el = document.querySelector(initialHash); } catch (_) { return; }
+    if (!el) return;
+    var st = pinStageAt[initialHash];
+    var top = st ? st.start : el.getBoundingClientRect().top + window.scrollY;
+    window.scrollTo({ top: top, behavior: "auto" });
+    restoreInitialHash();
+  }
+  scrollToHash();
+
+  window.addEventListener("load", function () {
+    ScrollTrigger.refresh();
+    if (!userScrolled) scrollToHash();
+  });
 })();

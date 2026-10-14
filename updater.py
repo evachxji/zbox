@@ -18,6 +18,9 @@ _API = GITHUB_URL.replace('https://github.com/',
 # 安装包文件名里的架构标识（build.py 命名 zbox-Setup-v<版本>-<架构>.exe）← platform.machine()
 _ARCH = {'AMD64': 'x64', 'x86': 'x86', 'ARM64': 'arm64'}
 
+# 官网同款 CDN 下载域（腾讯云 COS + CDN，国内直连；发版时安装包同步传一份到桶的 dl/ 前缀）
+_CDN_DL = 'https://dl.wzyjc.cn/dl/'
+
 
 def latest_release():
     """最新 release 的 PC 安装包信息 {'tag', 'name', 'url'}；查询失败或没有安装包资产返回 None。
@@ -58,15 +61,15 @@ def has_update(tag):
 
 
 def download_setup(rel, dst_dir, progress_cb=None):
-    """下载安装包（latest_release 的返回值）到 dst_dir，加速镜像优先、直连兜底；
+    """下载安装包（latest_release 的返回值）到 dst_dir，CDN 优先、GitHub 加速镜像兜底；
     成功返回本地路径，全部失败抛最后一个异常。"""
     os.makedirs(dst_dir, exist_ok=True)
     dst = os.path.join(dst_dir, rel['name'])
     err = None
     try:
-        for prefix in GH_MIRRORS:
+        for url in [_CDN_DL + rel['name']] + [p + rel['url'] for p in GH_MIRRORS]:
             try:
-                _fetch(prefix + rel['url'], dst + '.new', progress_cb)
+                _fetch(url, dst + '.new', progress_cb)
                 os.replace(dst + '.new', dst)
                 return dst
             except Exception as e:

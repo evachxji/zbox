@@ -69,6 +69,17 @@ python website/deploy-cos.py --bind-cert <新ID>
 | DNS（DNSPod） | `zbox CNAME → <桶>.cos-website...`（RecordId 2423123639）+ `tencent-cloud-cos-verification=330f9099920642360956aeb752cb0d34` TXT（RecordId 2423123845，所有权长期证明，别删）+ `_dnsauth.zbox` TXT（RecordId 2423181873，证书验证记录，续期时换新值） |
 | SSL 证书 | 免费 DV（TrustAsia C1），90 天有效；当前证书 `bHHeKE6h`（2026-10-03 ~ 2027-01-01），PEM 直传绑定后 COS 侧 CertId 为 `bHLrlbdc` |
 
+## 下载 CDN（dl.wzyjc.cn，2026-10-14 接入）
+
+官网的 .exe / .apk 下载走 **CDN 加速域名 `dl.wzyjc.cn`**（回源 COS，不再用 GitHub Releases 直链）：
+
+- 安装包放桶内 `dl/` 前缀（`dl/zbox-Setup-v<版本>-x64.exe`、`dl/zbox-Android-v<版本>.apk`），用 `upload_file` multipart 上传，`Cache-Control: public, max-age=31536000, immutable`（文件名带版本号 = 内容不可变）；上传后用 `head_object` 的 `x-cos-hash-crc64ecma` 与本地 CRC64 比对验完整性
+- 官网下载地址在 `website/js/app.js` 顶部常量区（WINDOWS/MOBILE/HARMONY_DOWNLOAD_URL）+ `index.html` 同名 href 兜底，发版时两处同步改
+- CDN 配置：ServiceType=download，Area=mainland，OriginType=cos 回源桶默认 REST 域名（`zbox-wzyjc-cn-1257727321.cos.ap-shanghai.myqcloud.com`，桶公有读无需回源鉴权）；已开强制 HTTPS（301）；TLS 1.2/1.3
+- DNS：`dl CNAME → dl.wzyjc.cn.cdn.dnsv1.com`（RecordId 2430106319）+ `_cdnauth` TXT（RecordId 2430105898，CDN 归属权验证，**别删**）+ `_dnsauth.dl` TXT（RecordId 2430112750，证书验证，续期换新值）
+- 证书：免费 DV `bYdFQFsB`（2026-10-14 ~ 2027-01-12），ssl `DeployCertificateInstance`（ResourceType=cdn, InstanceIdList=[dl.wzyjc.cn]）部署，约 10 分钟全网生效；**到期前需续期**，流程同上方证书续期节，但部署目标是 CDN 而非 COS
+- 新接 CDN 域名流程：CDN 报 `CdnDomainRecordNotVerified` → `CreateVerifyRecord` 拿 TXT 值 → DNSPod 加 `_cdnauth` TXT → `VerifyDomainRecord` → `AddCdnDomain` → 加 CNAME
+- 坑：`DescribeCertificateDetail` 的 DvAuths 可能长时间为 null（实测卡了 15 分钟），换 `DescribeCertificate`（无 Detail）能拿到 `DvAuthDetail.DvAuthKey/DvAuthValue`；本机 Clash fake-ip 会劫持 nslookup（198.18.x.x），验证 CDN 用 DoH（doh.pub）查 `dl.wzyjc.cn.cdn.dnsv1.com` 的 A 记录 + curl `--resolve` 直连边缘节点
 首次部署顺序（2026-10-03 实操，可复现）：
 
 1. `create_bucket(ACL='public-read')` + `put_bucket_website(IndexDocument=index.html)`
