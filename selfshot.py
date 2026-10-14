@@ -251,6 +251,8 @@ class _Runner(object):
                      lambda: ui.TimePickerPopup(p, '18:30', lambda t: None))
             self.job('%s_transfer_info' % theme, 300, None,
                      lambda: transfer_ui.TransferInfoDialog(p))
+            self.job('%s_mobile_guide' % theme, 300, None,
+                     lambda: transfer_ui.MobileGuideDialog(p))
             self.job('%s_video_info' % theme, 300, None,
                      lambda: video_ui.VideoInfoDialog(p))
             # 接收确认弹窗放每主题最后：_show_recv 会往传输记录区加一条记录，

@@ -244,10 +244,10 @@ class _ClickRow(glow.GlowCard):
 
 
 class TransferInfoDialog(QDialog):
-    '''传输页门禁层 / 设置窗的「?」共用的说明弹窗：解释局域网传输 + Android 版入口。
+    '''传输页门禁层 / 设置窗的「?」共用的说明弹窗：解释局域网传输 + 移动端入口。
     样式复用设置窗（#settingsDlg / #settingsPanel 区段）。'''
 
-    APK_URL = 'https://github.com/evachxji/zbox/releases'
+    DOWNLOAD_URL = 'https://zbox.wzyjc.cn/#download'
 
     def __init__(self, parent=None):
         super(TransferInfoDialog, self).__init__(parent)
@@ -295,14 +295,14 @@ class TransferInfoDialog(QDialog):
         para('安全提示', 'transferTitle')
         para('请只在自己家、公司等可信的局域网使用，公共 Wi-Fi 下建议保持关闭。')
         para('手机端', 'transferTitle')
-        para('Android 手机安装 Zbox 手机端，即可与电脑互传。')
+        para('移动端手机安装 Zbox 手机端，即可与电脑互传。')
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(ui.sc(8))
-        apk = QPushButton('下载 Android 版')
+        apk = QPushButton('下载移动端安装包')
         apk.setObjectName('setBtn')
         apk.setCursor(Qt.PointingHandCursor)
-        apk.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self.APK_URL)))
+        apk.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self.DOWNLOAD_URL)))
         btn_row.addWidget(apk)
         btn_row.addStretch(1)
         ok = QPushButton('我知道了')
@@ -316,6 +316,67 @@ class TransferInfoDialog(QDialog):
         para('可随时在「设置 → 传输」中关闭此功能。', 'transferHint')
 
         self.setFixedWidth(ui.sc(320))
+        self.adjustSize()
+
+
+class MobileGuideDialog(QDialog):
+    '''「搜索不到设备」引导弹窗：提示同 WiFi + 装移动端，跳转官网下载页。
+    样式复用设置窗（#settingsDlg / #settingsPanel 区段）。'''
+
+    def __init__(self, parent=None):
+        super(MobileGuideDialog, self).__init__(parent)
+        self.setObjectName('settingsDlg')
+        self.setWindowTitle('搜索不到设备')
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        card = QWidget()
+        card.setObjectName('settingsPanel')
+        root.addWidget(card)
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(ui.sc(16), ui.sc(6), ui.sc(16), ui.sc(14))
+        lay.setSpacing(ui.sc(8))
+
+        tb = QHBoxLayout()
+        tb.setContentsMargins(0, 0, 0, 0)
+        title = QLabel('搜索不到设备')
+        title.setObjectName('setTitle')
+        tb.addWidget(title)
+        tb.addStretch(1)
+        close = QToolButton()
+        close.setObjectName('closeBtn')
+        close.setText('\u2715')
+        close.setFixedSize(ui.sc(28), ui.sc(24))
+        close.setToolTip('关闭')
+        close.clicked.connect(self.reject)
+        tb.addWidget(close)
+        lay.addLayout(tb)
+
+        para = QLabel('请确认手机与电脑连接同一 WiFi。\n'
+                      '手机上需要安装 Zbox 移动端，安装并打开后即可互相发现。')
+        para.setObjectName('infoText')
+        para.setWordWrap(True)
+        lay.addWidget(para)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(ui.sc(8))
+        dl = QPushButton('下载移动端安装包')
+        dl.setObjectName('setBtn')
+        dl.setCursor(Qt.PointingHandCursor)
+        dl.clicked.connect(lambda: QDesktopServices.openUrl(
+            QUrl(TransferInfoDialog.DOWNLOAD_URL)))
+        btn_row.addWidget(dl)
+        btn_row.addStretch(1)
+        ok = QPushButton('我知道了')
+        ok.setObjectName('setSave')
+        ok.setCursor(Qt.PointingHandCursor)
+        ok.setDefault(True)
+        ok.clicked.connect(self.accept)
+        btn_row.addWidget(ok)
+        lay.addLayout(btn_row)
+
+        self.setFixedWidth(ui.sc(300))
         self.adjustSize()
 
 
@@ -970,6 +1031,12 @@ class TransferWidget(QWidget):
             hint.setObjectName('transferHint')
             hint.setAlignment(Qt.AlignCenter)
             self.dev_lay.insertWidget(0, hint)
+            nofind = QToolButton()
+            nofind.setObjectName('linkBtn')     # 无边框链接样式
+            nofind.setText('搜索不到设备')
+            nofind.setCursor(Qt.PointingHandCursor)
+            nofind.clicked.connect(self._show_mobile_guide)
+            self.dev_lay.insertWidget(1, nofind, alignment=Qt.AlignCenter)
         else:
             for fp, (info, ip) in sorted(merged.items(),
                                          key=lambda kv: kv[1][0].alias.lower()):
@@ -994,6 +1061,12 @@ class TransferWidget(QWidget):
                 row.clicked.connect(lambda fp=fp: self._select_device(fp))
                 self.dev_lay.insertWidget(self.dev_lay.count() - 1, row)
         self._sync_send_enabled()
+
+    def _show_mobile_guide(self):
+        try:
+            MobileGuideDialog(self).exec()
+        except Exception:
+            pass
 
     def _select_device(self, fp):
         try:
