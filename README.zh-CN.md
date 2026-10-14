@@ -71,6 +71,7 @@ v2 协议实现，为私有实例（端口 53327 / 组播 224.0.0.168），与�
 - 🌐 官网：[zbox.wzyjc.cn](https://zbox.wzyjc.cn)
 - 📦 下载发布：[github.com/evachxji/zbox/releases](https://github.com/evachxji/zbox/releases)
 - 🐛 问题反馈：[github.com/evachxji/zbox/issues](https://github.com/evachxji/zbox/issues)
+- 💬 LINUX DO 社区：[linux.do](https://linux.do)
 
 ## License
 

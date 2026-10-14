@@ -1,4 +1,4 @@
-<p align="center">
+﻿<p align="center">
   <img src="assets/icon.png" width="96" alt="Zbox">
 </p>
 
@@ -70,6 +70,7 @@ Video downloading is powered by [yt-dlp](https://github.com/yt-dlp/yt-dlp), with
 - 🌐 Website: [zbox.wzyjc.cn](https://zbox.wzyjc.cn)
 - 📦 Releases: [github.com/evachxji/zbox/releases](https://github.com/evachxji/zbox/releases)
 - 🐛 Issues: [github.com/evachxji/zbox/issues](https://github.com/evachxji/zbox/issues)
+- 💬 LINUX DO Community: [linux.do](https://linux.do)
 
 ## License
 
