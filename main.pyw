@@ -17,6 +17,10 @@ import sys
 import time
 from datetime import date, datetime, timedelta
 
+# 设计尺寸由 app.sc() 按系统 DPI 换算到物理像素；关闭 Qt 的坐标再缩放，
+# 避免 125%/150%/200% 下两套缩放叠加。必须在创建 QApplication 前设置。
+os.environ['QT_ENABLE_HIGHDPI_SCALING'] = '0'
+
 
 from PySide6.QtCore import (Qt, QTimer, QThread, QUrl, Signal, QCoreApplication,
                               QTranslator, QLibraryInfo)
@@ -225,10 +229,6 @@ def main():
     # ⇒ **Qt 所有窗口的拖放目标都注册不上**（实测 RevokeDragDrop：MTA 下 DRAGDROP_E_NOTREGISTERED，
     # STA 下 S_OK）⇒ 往格子里拖任何文件都是红色禁止光标（用户报的 bug 1 真身）。
     ctypes.windll.ole32.CoInitializeEx(None, 0x2)   # COINIT_APARTMENTTHREADED
-    # Qt6 高 DPI 恒开（Qt5 的 AA_EnableHighDpiScaling/AA_UseHighDpiPixmaps 已废弃）；
-    # 取整策略对齐 Qt5.15 默认（Round）：非整数缩放比屏幕的布局与旧版一致
-    QApplication.setHighDpiScaleFactorRoundingPolicy(
-        Qt.HighDpiScaleFactorRoundingPolicy.Round)
     QApplication.setQuitOnLastWindowClosed(False)
     qapp = QApplication(sys.argv)
     qapp.setApplicationName(sysutil.APP_NAME)
