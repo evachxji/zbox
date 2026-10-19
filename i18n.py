@@ -71,3 +71,14 @@ def t(key, **kwargs):
     catalog = EN_CATALOG if _language == EN else ZH_CATALOG
     text = catalog.get(key) or ZH_CATALOG.get(key) or key
     return text.format(**kwargs) if kwargs else text
+
+
+def t_data(value):
+    """数据值（农历/节日名）按当前语言翻译；没有对应键时原样返回。"""
+    if not value:
+        return value
+    from i18n_zh import CATALOG as ZH_CATALOG
+    key = 'data.' + value
+    if key not in ZH_CATALOG:
+        return value
+    return t(key)

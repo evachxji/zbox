@@ -11,9 +11,10 @@ QFrame#todoEditRow { background: transparent; }
 """
 
 NOCTURNE = {
-    'name': '深色',
-    'count_fmt': '{:02d} OPEN',
-    'week': ['周一', '周二', '周三', '周四', '周五', '周六', '周日'],
+    'name_key': 'theme.nocturne',
+    'count_fmt_key': 'theme.count.nocturne',
+    'week_keys': ['week.mon', 'week.tue', 'week.wed', 'week.thu',
+                  'week.fri', 'week.sat', 'week.sun'],
     'qss': COMMON.replace('%TOOLTIP%', '#e8e6e1').replace('%SCROLL%', 'rgba(255,255,255,40)') + """
 QWidget#panelRoot { background: #1b1d24; }
 QWidget#panel {
@@ -338,9 +339,10 @@ QToolButton#parseBtn:disabled { border-color: rgba(255,255,255,20); color: #5755
 }
 
 MICA = {
-    'name': '浅色',
-    'count_fmt': '{:d} 项未完成',
-    'week': ['周一', '周二', '周三', '周四', '周五', '周六', '周日'],
+    'name_key': 'theme.mica',
+    'count_fmt_key': 'theme.count.mica',
+    'week_keys': ['week.mon', 'week.tue', 'week.wed', 'week.thu',
+                  'week.fri', 'week.sat', 'week.sun'],
     'qss': COMMON.replace('%TOOLTIP%', '#1b1b1f').replace('%SCROLL%', 'rgba(0,0,0,50)') + """
 QWidget#panelRoot { background: #f7f8fa; }
 QWidget#panel {

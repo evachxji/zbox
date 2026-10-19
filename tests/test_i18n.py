@@ -31,6 +31,24 @@ class I18nCoreTest(unittest.TestCase):
     def test_detection_maps_chinese_variants_to_simplified(self, _ui_lang):
         self.assertEqual(i18n.detect_system_language(), 'zh-CN')
 
+    def test_zh_and_en_catalogs_have_identical_keys(self):
+        import i18n_en
+        import i18n_zh
+        self.assertEqual(set(i18n_zh.CATALOG), set(i18n_en.CATALOG))
+
+    def test_missing_key_falls_back_to_key(self):
+        i18n.set_language('en-US')
+        self.assertEqual(i18n.t('no.such.key'), 'no.such.key')
+
+    def test_data_values_translate_and_fall_back(self):
+        i18n.set_language('en-US')
+        self.assertEqual(i18n.t_data('春节'), 'Spring Festival')
+        i18n.set_language('zh-CN')
+        self.assertEqual(i18n.t_data('春节'), '春节')
+        self.assertEqual(i18n.t_data('自定义节日'), '自定义节日')
+        self.assertEqual(i18n.t_data(''), '')
+        self.assertIsNone(i18n.t_data(None))
+
 
 if __name__ == '__main__':
     unittest.main()

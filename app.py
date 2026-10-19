@@ -25,6 +25,7 @@ import sysutil
 import transfer_ui
 import updater
 import video_ui
+from i18n import t, t_data
 from snapping import (SNAP_ENGAGE, SNAP_RELEASE, SnapGuideOverlay,
                       guide_segments, snap_move)
 from themes import THEMES, THEME_ORDER, THEME_CHOICES, AUTO, build_qss
@@ -178,11 +179,11 @@ def due_chip(due_str):
         return None, False
     delta = (d - date.today()).days
     if delta < 0:
-        return ('逾期 %d 天' % -delta, True)
+        return (t('todo.due.overdue', days=-delta), True)
     if delta == 0:
-        return ('今天', False)
+        return (t('common.today'), False)
     if delta <= 7:
-        return ('还剩 %d 天' % delta, False)
+        return (t('todo.due.remaining', days=delta), False)
     return (fmt_due_date(d), False)
 
 
@@ -258,6 +259,12 @@ class DayCell(QFrame):
         self.sub = QLabel(self)
         self.sub.setObjectName('daySub')
         self.sub.setAlignment(Qt.AlignCenter)
+        # 英文节日名远比格子宽：不参与最小宽度计算（否则会把日历/面板撑宽），
+        # 实际显示按格子宽度省略（_elide_sub）。
+        self._sub_full = ''
+        self.sub.setMinimumWidth(0)
+        self.sub.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.sub.installEventFilter(self)   # 字体/字重变化（主题切换）时重算省略显示
         self.badge = QLabel(self)   # 贴右上角的「休」/「班」圆角标签，配色由主题 QSS 按 kind 给
         self.badge.setObjectName('badge')
         self.badge.setAlignment(Qt.AlignCenter)
@@ -267,14 +274,42 @@ class DayCell(QFrame):
         lay.setSpacing(0)
         lay.addStretch(1)
         lay.addWidget(self.num, 0, Qt.AlignHCenter)
-        lay.addWidget(self.sub, 0, Qt.AlignHCenter)
+        # 副标题不按文字宽度参与布局：占满格子宽度、按宽度省略（英文节日名远比格子宽）
+        lay.addWidget(self.sub, 0)
         lay.addStretch(1)
         for w in (self.num, self.sub, self.badge):
             w.setAttribute(Qt.WA_TransparentForMouseEvents)  # 点击穿透到格子本身
 
     def resizeEvent(self, e):
         super(DayCell, self).resizeEvent(e)
+        self.sub.setMaximumWidth(self.width())
+        self._elide_sub()
         self._place_badge()
+
+    def changeEvent(self, e):
+        super(DayCell, self).changeEvent(e)
+        if e.type() == QEvent.FontChange:
+            self._elide_sub()   # 主题切换会改字体/字重，省略结果要跟着重算
+
+    def eventFilter(self, obj, ev):
+        # QSS 按 QLabel#daySub[fest] 改字重时，FontChange 发给的是 sub 本身而不是 DayCell
+        if obj is self.sub and ev.type() == QEvent.FontChange:
+            self._elide_sub()
+        return super(DayCell, self).eventFilter(obj, ev)
+
+    def _elide_sub(self):
+        """按格子实际宽度省略副标题；完整文本保留在 _sub_full 里供重新计算。"""
+        fm = self.sub.fontMetrics()
+        # 布局尚未跑完时 sub.width() 可能还是旧值/0，用格子宽度兜底并封顶，
+        # 保证显示宽度永远不超出格子。
+        width = min(self.sub.width() or self.width(), self.width())
+        text = fm.elidedText(self._sub_full, Qt.ElideRight, max(0, width))
+        if self.sub.text() != text:
+            self.sub.setText(text)
+
+    def _set_sub_text(self, text):
+        self._sub_full = text or ''
+        self._elide_sub()
 
     def _place_badge(self):
         """角标贴格子右上角：先按 QSS 字号自适应尺寸，再摆到设计稿的 top/right 内缩位置。"""
@@ -292,11 +327,11 @@ class DayCell(QFrame):
         name, kind = store.info(d)
         show_name = name if kind == 'off' else None  # 调休班日不显示“班”，只显示农历
         fest = bool(show_name or cd.festival_name(d))
-        self.sub.setText(show_name or cd.lunar_text(d))
+        self._set_sub_text(t_data(show_name or cd.lunar_text(d)))
         self.sub.setProperty('fest', 'true' if fest else 'false')
         # 右上角标签：法定节假日「休」、调休上班日「班」；普通双休日不标
         if kind:
-            self.badge.setText('休' if kind == 'off' else '班')
+            self.badge.setText(t('calendar.badge.off') if kind == 'off' else t('calendar.badge.work'))
             self.badge.setProperty('kind', kind)
             self.badge.show()
         else:
@@ -386,8 +421,8 @@ class CalendarWidget(QWidget):
         self.store = store
         self.cfg = cfg
         self.theme_key = theme_key
-        t = date.today()
-        self.year, self.month = t.year, t.month
+        today = date.today()
+        self.year, self.month = today.year, today.month
 
         root = QVBoxLayout(self)
         root.setContentsMargins(sc(16), 0, sc(16), 0)
@@ -410,6 +445,8 @@ class CalendarWidget(QWidget):
         self.clock_hm.setFixedHeight(sc(53.6))
         self.sub = QLabel()
         self.sub.setObjectName('calSub')
+        self._sub_full = ''
+        self.sub.setMinimumWidth(0)
         self._sub_fm_key = None    # _sync_sub_baseline 的缓存：字体没变就不重复量
         clock_row.addWidget(bar)
         clock_row.addWidget(self.clock_hm)
@@ -420,7 +457,7 @@ class CalendarWidget(QWidget):
         head.addStretch(1)
         self.btn_today = QToolButton()
         self.btn_today.setObjectName('todayBtn')
-        self.btn_today.setText('今天')
+        self.btn_today.setText(t('common.today'))
         self.btn_today.setFixedSize(sc(46), sc(24))
         self.btn_today.clicked.connect(self.go_today)
         head.addWidget(self.btn_today, 0, Qt.AlignVCenter)
@@ -515,33 +552,54 @@ class CalendarWidget(QWidget):
 
         self.sub.setContentsMargins(0, 0, 0, max(0, inset(big) - inset(fm)))
 
+    def resizeEvent(self, e):
+        super(CalendarWidget, self).resizeEvent(e)
+        self._elide_sub()
+
+    def _elide_sub(self):
+        """按实际分配宽度省略倒计时/月份小字；完整文本保留在 _sub_full 里。
+        控件几何与拖动行为不变（eventFilter 仍装在 self.sub 上）。"""
+        fm = self.sub.fontMetrics()
+        text = fm.elidedText(self._sub_full, Qt.ElideRight, max(0, self.sub.width()))
+        if self.sub.text() != text:
+            self.sub.setText(text)
+
+    def _set_sub_text(self, text):
+        self._sub_full = text or ''
+        # 先让完整文本参与一次布局，拿到真实可用宽度再决定是否省略
+        # （直接改显示文本会让 sizeHint 反过来压缩分配宽度）
+        if self.sub.text() != self._sub_full:
+            self.sub.setText(self._sub_full)
+        self.layout().activate()
+        self._elide_sub()
+
     def _update_sub(self):
         self._sync_sub_baseline()
-        t = date.today()
+        today = date.today()
         y, m = self._visible_month()
         if (y, m) != self._dim_month:  # 显示月变化：置灰滞后到停手（平移中逐帧重刷样式会卡）
             self._dim_month = (y, m)
             self._dim_dirty = True
             if not self._panning:
                 self._apply_dim()
-        vis = (y, m) != (t.year, t.month)
+        vis = (y, m) != (today.year, today.month)
         if self.btn_today.isVisible() != vis:
             self.btn_today.setVisible(vis)
-        txt = ('%d年%d月' % (y, m)) if vis else self._countdown_text(t)
-        if self.sub.text() != txt:
-            self.sub.setText(txt)
+        txt = t('calendar.year_month', year=y, month=m) if vis else self._countdown_text(today)
+        if self._sub_full != txt:
+            self._set_sub_text(txt)
         accent = 'true' if vis else 'false'
         if self.sub.property('accent') != accent:
             self.sub.setProperty('accent', accent)
             self.sub.style().unpolish(self.sub)
             self.sub.style().polish(self.sub)
 
-    def _countdown_text(self, t):
+    def _countdown_text(self, today):
         """距离下一个节点的倒计时：午休前→距午休，午休区间内→距上班（午休结束），之后→距下班。
         休息日显示「今天休息」；午休与下班时间只要有一个留空，就整块不显示倒计时。"""
-        _, kind = self.store.info(t)
-        if kind == 'off' or (t.weekday() >= 5 and kind != 'work'):
-            return '今天休息'
+        _, kind = self.store.info(today)
+        if kind == 'off' or (today.weekday() >= 5 and kind != 'work'):
+            return t('calendar.rest_day')
         noon = parse_noon_range(self.cfg.data.get('off_noon'))
         off_text = parse_time_text(self.cfg.data.get('off_evening'))
         if not noon or not off_text:
@@ -553,19 +611,20 @@ class CalendarWidget(QWidget):
 
         noon_a, noon_b, off = at(noon[0]), at(noon[1]), at(off_text)
         if now < noon_a:
-            target, label = noon_a, '午休'
+            target, label = noon_a, t('calendar.label.noon')
         elif noon_b > noon_a and now < noon_b:   # 区间反了就跳过「上班」这一档
-            target, label = noon_b, '上班'
+            target, label = noon_b, t('calendar.label.work')
         elif now < off:
-            target, label = off, '下班'
+            target, label = off, t('calendar.label.off')
         else:
-            return '今天已下班'
+            return t('calendar.off_work_done')
         total_min = -(-(target - now).seconds // 60)  # 向上取整
-        return '距%s %d:%02d' % (label, total_min // 60, total_min % 60)
+        return t('calendar.countdown', label=label,
+                 hour=total_min // 60, minute=total_min % 60)
 
     def set_theme(self, key):
         self.theme_key = key
-        for lb, txt in zip(self.week_labels, THEMES[key]['week']):
+        for lb, txt in zip(self.week_labels, [t(k) for k in THEMES[key]['week_keys']]):
             lb.setText(txt)
 
     def refresh(self):
@@ -745,8 +804,8 @@ class CalendarWidget(QWidget):
             super(CalendarWidget, self).mouseReleaseEvent(e)
 
     def go_today(self):
-        t = date.today()
-        self.year, self.month = t.year, t.month
+        today = date.today()
+        self.year, self.month = today.year, today.month
         self.refresh()
 
 
@@ -940,24 +999,24 @@ class DuePopup(QFrame):
             qd = QDate.fromString(current, 'yyyy-MM-dd')
             if qd.isValid():
                 cal.setSelectedDate(qd)
-        for name, t in (('qt_calendar_prevmonth', '<'), ('qt_calendar_nextmonth', '>')):
+        for name, arrow in (('qt_calendar_prevmonth', '<'), ('qt_calendar_nextmonth', '>')):
             b = cal.findChild(QToolButton, name)
             if b:
                 b.setIcon(QIcon())   # 默认箭头图标在深色主题下看不清，改用字符
-                b.setText(t)
+                b.setText(arrow)
         lay.addWidget(cal)
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(sc(6))
         clr = QToolButton(self)
         clr.setObjectName('todayBtn')
-        clr.setText('清除')
+        clr.setText(t('common.clear'))
         clr.clicked.connect(lambda: self._choose(None))
         row.addWidget(clr)
         row.addStretch(1)
         ok = QToolButton(self)
         ok.setObjectName('todayBtn')
-        ok.setText('确定')
+        ok.setText(t('common.ok'))
         ok.clicked.connect(lambda: self._choose(cal.selectedDate().toPython()))
         row.addWidget(ok)
         lay.addLayout(row)
@@ -1022,7 +1081,7 @@ class _TodoDangerActionWidget(QWidget):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(sc(19), 0, sc(22), 0)
         lay.setSpacing(0)
-        text = QLabel('删除')
+        text = QLabel(t('common.delete'))
         text.setObjectName('todoDeleteActionText')
         text.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         text.setAttribute(Qt.WA_TransparentForMouseEvents)
@@ -1090,12 +1149,12 @@ class TodoUndoToast(QFrame):
         lay = QHBoxLayout(content)
         lay.setContentsMargins(sc(12), sc(8), sc(8), sc(7))
         lay.setSpacing(sc(8))
-        text = QLabel('已删除')
+        text = QLabel(t('todo.deleted'))
         text.setObjectName('todoUndoText')
         lay.addWidget(text)
         self.undo_btn = QToolButton()
         self.undo_btn.setObjectName('todoUndoBtn')
-        self.undo_btn.setText('撤销')
+        self.undo_btn.setText(t('todo.undo'))
         self.undo_btn.setCursor(Qt.PointingHandCursor)
         self.undo_btn.clicked.connect(self._undo)
         lay.addWidget(self.undo_btn)
@@ -1192,7 +1251,7 @@ class TodoWidget(QWidget):
 
         head = QHBoxLayout()
         head.setContentsMargins(sc(10), 0, sc(10), sc(2))
-        title = QLabel('待办清单')
+        title = QLabel(t('todo.title'))
         title.setObjectName('todoTitle')
         self.count = QLabel()
         self.count.setObjectName('todoCount')
@@ -1214,7 +1273,7 @@ class TodoWidget(QWidget):
 
         hint = QToolButton()
         hint.setObjectName('addHint')
-        hint.setText('＋ 双击空白处新建待办')
+        hint.setText(t('todo.add_hint'))
         hint.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         hint.clicked.connect(self.start_add)
         pl.addWidget(hint)
@@ -1234,7 +1293,7 @@ class TodoWidget(QWidget):
         self._layout_undo_toasts()
 
     def _update_count(self):
-        self.count.setText(THEMES[self.theme_key].get('count_fmt', '{:d} 未完成').format(self.store.pending_count()))
+        self.count.setText(t(THEMES[self.theme_key]['count_fmt_key']).format(self.store.pending_count()))
 
     def _make_row(self, it):
         row = QFrame()
@@ -1369,7 +1428,7 @@ class TodoWidget(QWidget):
         btn.setObjectName('todoDateBtn')
         btn.setFocusPolicy(Qt.NoFocus)   # 不接受焦点：弹层关闭后焦点交还编辑框（失焦提交由延迟兜底拦截）
         btn.setCursor(Qt.PointingHandCursor)
-        btn.setToolTip('设置截止时间')
+        btn.setToolTip(t('todo.set_due'))
         btn.setFixedSize(sc(32), sc(30))
         btn.setIcon(make_cal_icon(DUE_ICON_COLORS.get(self.theme_key, '#8a8a90')))
         btn.setIconSize(QSize(sc(17), sc(17)))
@@ -1379,7 +1438,7 @@ class TodoWidget(QWidget):
         save_btn.setObjectName('todoSaveBtn')
         save_btn.setFocusPolicy(Qt.NoFocus)
         save_btn.setCursor(Qt.PointingHandCursor)
-        save_btn.setToolTip('保存')
+        save_btn.setToolTip(t('common.save'))
         save_btn.setText('✓')
         save_btn.setFixedSize(sc(32), sc(30))
         save_btn.clicked.connect(lambda: self._commit(li, ed, item_id))
@@ -1496,10 +1555,10 @@ class TodoWidget(QWidget):
                 text = it['text']
                 break
         m = QMenu(self)
-        act_edit = m.addAction('编辑')
-        act_copy = m.addAction('复制')
+        act_edit = m.addAction(t('common.edit'))
+        act_copy = m.addAction(t('common.copy'))
         act_del = QWidgetAction(m)
-        act_del.setText('删除')
+        act_del.setText(t('common.delete'))
         danger = _TodoDangerActionWidget(act_del)
         act_del.setDefaultWidget(danger)
         act_del.triggered.connect(lambda: self._delete_item(item_id))
@@ -1842,7 +1901,7 @@ class HolidayImportDialog(QDialog):
     def __init__(self, panel, on_download, on_pick):
         super(HolidayImportDialog, self).__init__(panel)
         self.setObjectName('settingsDlg')
-        self.setWindowTitle('导入节假日数据')
+        self.setWindowTitle(t('holiday.title'))
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setWindowModality(Qt.NonModal)  # 与设置窗口一致：不阻塞面板
         self._drag = None
@@ -1862,7 +1921,7 @@ class HolidayImportDialog(QDialog):
         self.titlebar.setFixedHeight(sc(34))
         tb = QHBoxLayout(self.titlebar)
         tb.setContentsMargins(0, 0, 0, 0)
-        title = QLabel('导入节假日数据')
+        title = QLabel(t('holiday.title'))
         title.setObjectName('setTitle')
         tb.addWidget(title)
         tb.addStretch(1)
@@ -1870,7 +1929,7 @@ class HolidayImportDialog(QDialog):
         close.setObjectName('closeBtn')
         close.setText('✕')
         close.setFixedSize(sc(28), sc(24))
-        close.setToolTip('关闭')
+        close.setToolTip(t('common.close'))
         close.clicked.connect(self.close)
         tb.addWidget(close)
         lay.addWidget(self.titlebar)
@@ -1881,22 +1940,21 @@ class HolidayImportDialog(QDialog):
             lb.setWordWrap(True)
             lay.addWidget(lb)
 
-        note('三个数据源任选，年份 JSON 的格式程序都认。点「下载并导入」由程序直接抓取并导入，'
-             '不用再手动另存；抓不到时（内网 / 代理）会自动用浏览器打开，另存成文件后再用下面的按钮导入。')
+        note(t('holiday.note'))
 
         # 每源一行：主源 / 备用1 / 备用2 + 可改的 URL + 下载并导入
         self.sources = []
         for i, src in enumerate(cd.SOURCES):
             row = QHBoxLayout()
             row.setSpacing(sc(6))
-            tag = QLabel('主源' if i == 0 else '备用%d' % i)
+            tag = QLabel(t('holiday.source_primary') if i == 0 else t('holiday.source_backup', n=i))
             tag.setObjectName('setLabel')
             tag.setFixedWidth(sc(32))
             ed = QLineEdit(src['url'] % year)
             ed.setObjectName('srcEdit')
             ed.setCursorPosition(0)   # 默认露出域名（URL 尾巴不如域名好认）
-            ed.setToolTip('%s\nURL 可以改：内网镜像、换年份直接改链接里的数字' % src['name'])
-            btn = QPushButton('下载并导入')
+            ed.setToolTip(t('holiday.url_tooltip', name=src['name']))
+            btn = QPushButton(t('holiday.download_import'))
             btn.setObjectName('setBtn')
             btn.clicked.connect(lambda _=False, s=src, e=ed, b=btn: self._download(on_download, s['name'], e, b))
             row.addWidget(tag)
@@ -1905,19 +1963,19 @@ class HolidayImportDialog(QDialog):
             lay.addLayout(row)
             self.sources.append((ed, btn))
 
-        note('也可以自己另存成文件后从这里导入（三个源的 JSON 都能直接导入）：')
+        note(t('holiday.import_note'))
         self.status = QLabel()
         self.status.setObjectName('setLabel')
         lay.addWidget(self.status)
         row2 = QHBoxLayout()
-        pick = QPushButton('选择文件导入…')
+        pick = QPushButton(t('holiday.pick_file'))
         pick.setObjectName('setBtn')
         pick.clicked.connect(lambda: (self.close(), on_pick()))
         row2.addWidget(pick)
         row2.addStretch(1)
-        open_dir = QPushButton('打开下载目录')
+        open_dir = QPushButton(t('holiday.open_dir'))
         open_dir.setObjectName('setBtn')
-        open_dir.setToolTip('「下载并导入」抓到的年份 JSON 都保存在这个目录')
+        open_dir.setToolTip(t('holiday.open_dir_tooltip'))
         open_dir.clicked.connect(self._open_download_dir)
         row2.addWidget(open_dir)
         lay.addLayout(row2)
@@ -1935,14 +1993,14 @@ class HolidayImportDialog(QDialog):
         """点「下载并导入」：按钮 loading + 禁用，后台抓取结束后恢复（结果在本窗口中央 toast 反馈）。"""
         url = edit.text().strip()
         if not url:
-            self.status.setText('URL 不能为空')
+            self.status.setText(t('holiday.url_empty'))
             return
         btn.setEnabled(False)
-        btn.setText('下载中…')
+        btn.setText(t('common.downloading'))
         if on_download(name, url, lambda: self._download_done(btn), self):
-            self.status.setText('正在下载 %s…' % name)
+            self.status.setText(t('holiday.downloading', name=name))
         else:
-            self.status.setText('上一次下载还没结束，本次随它一起完成')
+            self.status.setText(t('holiday.download_busy'))
 
     def _open_download_dir(self):
         d = sysutil.download_dir()
@@ -1952,7 +2010,7 @@ class HolidayImportDialog(QDialog):
     def _download_done(self, btn):
         try:
             btn.setEnabled(True)
-            btn.setText('下载并导入')
+            btn.setText(t('holiday.download_import'))
         except RuntimeError:
             pass  # 导入窗已关，按钮随窗口销毁
 
@@ -1984,7 +2042,7 @@ class SettingsDialog(QDialog):
     def __init__(self, panel, on_fetch, on_import, boxmgr=None, on_hotkey=None):
         super(SettingsDialog, self).__init__(panel)
         self.setObjectName('settingsDlg')
-        self.setWindowTitle('设置')
+        self.setWindowTitle(t('settings.title'))
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         # QDialog 默认 ApplicationModal，会连面板一起冻结；设置窗口开着时面板仍可拖拽 / 点日历
         self.setWindowModality(Qt.NonModal)
@@ -2008,7 +2066,7 @@ class SettingsDialog(QDialog):
         self.titlebar.setFixedHeight(sc(34))
         tb = QHBoxLayout(self.titlebar)
         tb.setContentsMargins(0, 0, 0, 0)
-        title = QLabel('设置')
+        title = QLabel(t('settings.title'))
         title.setObjectName('setTitle')
         tb.addWidget(title)
         tb.addStretch(1)
@@ -2016,7 +2074,7 @@ class SettingsDialog(QDialog):
         close.setObjectName('closeBtn')
         close.setText('✕')
         close.setFixedSize(sc(28), sc(24))
-        close.setToolTip('关闭')
+        close.setToolTip(t('common.close'))
         close.clicked.connect(self.reject)
         tb.addWidget(close)
         lay.addWidget(self.titlebar)
@@ -2033,25 +2091,25 @@ class SettingsDialog(QDialog):
             return lb
 
         # 开机自启
-        auto = QCheckBox('登录 Windows 后自动启动')
+        auto = QCheckBox(t('settings.autostart'))
         auto.setChecked(bool(sysutil.autostart_get()))
         auto.toggled.connect(lambda on: sysutil.autostart_set() if on else sysutil.autostart_remove())
-        form.addRow(row_label('开机自启'), auto)
+        form.addRow(row_label(t('settings.autostart.label')), auto)
 
         # 主题
         theme_row = QHBoxLayout()
         theme_row.setSpacing(sc(14))
         for key in THEME_CHOICES:
-            r = QRadioButton('跟随系统' if key == AUTO else THEMES[key]['name'])
+            r = QRadioButton(t('theme.auto') if key == AUTO else t(THEMES[key]['name_key']))
             r.setChecked(key == panel._theme)
             r.toggled.connect(lambda on, k=key: panel.apply_theme(k) if on else None)
             theme_row.addWidget(r)
         theme_row.addStretch(1)
-        form.addRow(row_label('主题'), theme_row)
+        form.addRow(row_label(t('settings.theme')), theme_row)
 
 
         # 桌面格子
-        dbl = QCheckBox('双击桌面显示 / 隐藏格子')
+        dbl = QCheckBox(t('settings.dblclick'))
         dbl.setChecked(bool(cfg.data.get('box_dblclick', True)))
 
         def commit_dblclick(on):
@@ -2059,15 +2117,15 @@ class SettingsDialog(QDialog):
             if boxmgr is not None:
                 boxmgr.set_dblclick_enabled(bool(on))
         dbl.toggled.connect(commit_dblclick)
-        form.addRow(row_label('格子'), dbl)
+        form.addRow(row_label(t('settings.boxes')), dbl)
 
         # 截图快捷键（留空 = 不启用）：外框复用时间框的 #timeField 交互样式
         # （hover/focus 描边由 _time_rows 驱动），点框后按组合键录入，框内 ✕ 清空
         self._time_rows = []
         self.key_edit = QLineEdit(cfg.data.get('shot_hotkey') or '')
         self.key_edit.setReadOnly(True)
-        self.key_edit.setPlaceholderText('点击后按组合键')
-        self.key_edit.setToolTip('按下组合键录入；留空 = 不启用截图热键')
+        self.key_edit.setPlaceholderText(t('settings.hotkey.placeholder'))
+        self.key_edit.setToolTip(t('settings.hotkey.tooltip'))
         key_field = QWidget()
         key_field.setObjectName('timeField')
         key_field.setFocusProxy(self.key_edit)
@@ -2082,7 +2140,7 @@ class SettingsDialog(QDialog):
         self.key_clear.setStyleSheet('color: #8a8a90;')
         self.key_clear.setFixedSize(sc(24), sc(24))
         self.key_clear.setCursor(Qt.PointingHandCursor)
-        self.key_clear.setToolTip('清空快捷键')
+        self.key_clear.setToolTip(t('settings.hotkey.clear'))
         self.key_clear.clicked.connect(self._clear_hotkey)
         self.key_clear.setVisible(bool(cfg.data.get('shot_hotkey')))
         kf.addWidget(self.key_clear)
@@ -2096,7 +2154,7 @@ class SettingsDialog(QDialog):
         self.key_warn.setStyleSheet('color: #e05252;')
         key_row.addWidget(self.key_warn)
         key_row.addStretch(1)
-        form.addRow(row_label('截图'), key_row)
+        form.addRow(row_label(t('settings.hotkey')), key_row)
 
         # 分隔线：通用设置 / 日历与时间
         sep1 = QFrame()
@@ -2108,15 +2166,15 @@ class SettingsDialog(QDialog):
         holiday_row = QHBoxLayout()
         holiday_row.setSpacing(sc(8))
         self._on_fetch = on_fetch
-        self.btn_fetch = QPushButton('联网更新')
+        self.btn_fetch = QPushButton(t('holiday.fetch'))
         self.btn_fetch.setObjectName('setBtn')
         self.btn_fetch.clicked.connect(self._fetch_clicked)
         holiday_row.addWidget(self.btn_fetch)
-        b = QPushButton('导入 JSON…')
+        b = QPushButton(t('holiday.import_json'))
         b.setObjectName('setBtn')
         b.clicked.connect(on_import)
         holiday_row.addWidget(b)
-        form.addRow(row_label('日历假期'), holiday_row)
+        form.addRow(row_label(t('settings.holiday')), holiday_row)
 
         # 下班倒计时（自由文本输入 + 时钟弹层）
         # 用 QLineEdit 而非 QTimeEdit：QTimeEdit 是按时/分分段校验的，全选后直接打字会被
@@ -2139,7 +2197,7 @@ class SettingsDialog(QDialog):
             btn.setIconSize(QSize(sc(14), sc(14)))
             btn.setFixedSize(sc(24), sc(24))
             btn.setCursor(Qt.PointingHandCursor)
-            btn.setToolTip('选择时间')
+            btn.setToolTip(t('settings.pick_time'))
             btn.clicked.connect(lambda _=False, e=ed, b=btn: self._pick_time(e, b))
             fb.addWidget(btn)
             ed.installEventFilter(self)    # hover/focus 态同步到外框描边
@@ -2185,7 +2243,7 @@ class SettingsDialog(QDialog):
         rb.addWidget(dash)
         rb.addWidget(f_b)
         rb.addStretch(1)
-        form.addRow(row_label('午休时间'), noon_row)
+        form.addRow(row_label(t('settings.noon')), noon_row)
         noon_a.textChanged.connect(lambda _t: commit_noon())
         noon_b.textChanged.connect(lambda _t: commit_noon())
         noon_a.editingFinished.connect(lambda: commit_noon(True))
@@ -2193,7 +2251,7 @@ class SettingsDialog(QDialog):
 
         # 下班（同样可留空）
         evening_row, evening = time_field(parse_time_text(cfg.data.get('off_evening')) or '')
-        form.addRow(row_label('下班时间'), evening_row)
+        form.addRow(row_label(t('settings.off_time')), evening_row)
         evening.textChanged.connect(lambda _t: commit_single(evening, 'off_evening', False))
         evening.editingFinished.connect(lambda: commit_single(evening, 'off_evening', True))
 
@@ -2207,7 +2265,7 @@ class SettingsDialog(QDialog):
         # 这里把勾选弹回去。右侧「?」与传输页门禁层共用同一个说明弹窗
         tr_row = QHBoxLayout()
         tr_row.setSpacing(sc(6))
-        self.transfer_chk = QCheckBox('开启局域网互传')
+        self.transfer_chk = QCheckBox(t('settings.transfer'))
         self.transfer_chk.setChecked(panel.transfer.service_enabled())
         tr_row.addWidget(self.transfer_chk)
         tr_help = QToolButton()
@@ -2215,11 +2273,11 @@ class SettingsDialog(QDialog):
         tr_help.setText('?')
         tr_help.setFixedSize(sc(20), sc(20))
         tr_help.setCursor(Qt.PointingHandCursor)
-        tr_help.setToolTip('什么是局域网传输')
+        tr_help.setToolTip(t('settings.transfer.help'))
         tr_help.clicked.connect(lambda: transfer_ui.TransferInfoDialog(self).exec())
         tr_row.addWidget(tr_help)
         tr_row.addStretch(1)
-        form.addRow(row_label('传输'), tr_row)
+        form.addRow(row_label(t('panel.transfer')), tr_row)
 
         def commit_transfer(on):
             if panel.transfer.set_enabled(bool(on)) != bool(on):
@@ -2231,7 +2289,7 @@ class SettingsDialog(QDialog):
         # 组件下载是异步的，失败经 enabled_changed(False) 把勾选弹回去
         vd_row = QHBoxLayout()
         vd_row.setSpacing(sc(6))
-        self.video_chk = QCheckBox('开启视频解析')
+        self.video_chk = QCheckBox(t('settings.video'))
         self.video_chk.setChecked(panel.video.service_enabled())
         vd_row.addWidget(self.video_chk)
         vd_help = QToolButton()
@@ -2239,11 +2297,11 @@ class SettingsDialog(QDialog):
         vd_help.setText('?')
         vd_help.setFixedSize(sc(20), sc(20))
         vd_help.setCursor(Qt.PointingHandCursor)
-        vd_help.setToolTip('什么是视频解析')
+        vd_help.setToolTip(t('settings.video.help'))
         vd_help.clicked.connect(lambda: video_ui.VideoInfoDialog(self).exec())
         vd_row.addWidget(vd_help)
         vd_row.addStretch(1)
-        form.addRow(row_label('视频解析'), vd_row)
+        form.addRow(row_label(t('panel.video')), vd_row)
 
         def commit_video(on):
             if panel.video.set_enabled(bool(on)) != bool(on):
@@ -2259,10 +2317,10 @@ class SettingsDialog(QDialog):
         ver_row.addWidget(ver)
         ver_row.addStretch(1)
         # 检查更新：查 GitHub 最新 release，有新版本则下载安装包并引导安装（updater.py）
-        self.btn_update = QPushButton('检查更新')
+        self.btn_update = QPushButton(t('update.check'))
         self.btn_update.setObjectName('setBtn')
         self.btn_update.setCursor(Qt.PointingHandCursor)
-        self.btn_update.setToolTip('检查 GitHub 上是否有新版本')
+        self.btn_update.setToolTip(t('update.check_tooltip'))
         self.btn_update.clicked.connect(self._update_clicked)
         ver_row.addWidget(self.btn_update)
         self.sig_upd.connect(self._on_upd)
@@ -2280,13 +2338,13 @@ class SettingsDialog(QDialog):
     def _fetch_clicked(self):
         """联网更新：点击即 loading + 禁用，后台抓取结束后恢复（结果在本窗口中央 toast 反馈）。"""
         self.btn_fetch.setEnabled(False)
-        self.btn_fetch.setText('更新中…')
+        self.btn_fetch.setText(t('update.updating'))
         self._on_fetch(self._fetch_done, toast_win=self)
 
     def _fetch_done(self):
         try:
             self.btn_fetch.setEnabled(True)
-            self.btn_fetch.setText('联网更新')
+            self.btn_fetch.setText(t('holiday.fetch'))
         except RuntimeError:
             pass  # 设置窗已关，按钮随窗口销毁
 
@@ -2295,7 +2353,7 @@ class SettingsDialog(QDialog):
     def _update_clicked(self):
         """点击即 loading + 禁用，后台查 GitHub 最新 release，结果经 sig_upd 回主线程。"""
         self.btn_update.setEnabled(False)
-        self.btn_update.setText('检查中…')
+        self.btn_update.setText(t('update.checking'))
         threading.Thread(target=self._upd_check_work, daemon=True).start()
 
     def _upd_check_work(self):
@@ -2309,51 +2367,51 @@ class SettingsDialog(QDialog):
         try:
             path = updater.download_setup(
                 rel, sysutil.download_dir(),
-                lambda d, t: self.sig_upd.emit({'phase': 'progress', 'done': d, 'total': t}))
+                lambda done, total: self.sig_upd.emit({'phase': 'progress', 'done': done, 'total': total}))
             self.sig_upd.emit({'phase': 'done', 'path': path})
         except Exception as e:
             self.sig_upd.emit({'phase': 'done', 'err': str(e)})
 
     def _upd_reset(self):
         self.btn_update.setEnabled(True)
-        self.btn_update.setText('检查更新')
+        self.btn_update.setText(t('update.check'))
 
     def _on_upd(self, p):
         """更新流程（主线程）：检查 → 有新版本确认下载 → 按钮上显示进度 → 下完确认安装。"""
         try:
             phase = p.get('phase')
             if phase == 'progress':
-                d, t = p['done'], p['total']
-                self.btn_update.setText('下载中 %d%%' % (d * 100 // t) if t else '下载中…')
+                done, total = p['done'], p['total']
+                self.btn_update.setText(t('update.download_progress', percent=done * 100 // total)
+                                        if total else t('common.downloading'))
                 return
             if phase == 'check':
                 self._upd_reset()
                 rel = p.get('rel')
                 if rel is None:
-                    show_toast_on(self, '检查更新失败，请检查网络后重试', ok=False, hold_ms=2200)
+                    show_toast_on(self, t('update.check_failed'), ok=False, hold_ms=2200)
                 elif not updater.has_update(rel['tag']):
-                    show_toast_on(self, '已是最新版本（v%s）' % APP_VERSION)
+                    show_toast_on(self, t('update.latest', version=APP_VERSION))
                 else:
                     box = video_ui._ConfirmDialog(
-                        self, title='发现新版本 %s' % rel['tag'],
-                        text='当前版本 v%s，最新版本 %s。是否下载安装包并更新？'
-                             % (APP_VERSION, rel['tag']),
-                        ok_text='下载并安装')
+                        self, title=t('update.found', version=rel['tag']),
+                        text=t('update.confirm', current=APP_VERSION, latest=rel['tag']),
+                        ok_text=t('update.download_install'))
                     if box.exec() == QDialog.Accepted:
                         self.btn_update.setEnabled(False)
-                        self.btn_update.setText('下载中…')
+                        self.btn_update.setText(t('common.downloading'))
                         threading.Thread(target=self._upd_dl_work, args=(rel,),
                                          daemon=True).start()
                 return
             if phase == 'done':
                 self._upd_reset()
                 if not p.get('path'):
-                    show_toast_on(self, '安装包下载失败，请检查网络后重试', ok=False, hold_ms=2200)
+                    show_toast_on(self, t('update.download_failed'), ok=False, hold_ms=2200)
                     return
                 box = video_ui._ConfirmDialog(
-                    self, title='下载完成',
-                    text='安装包已下载。点击「立即安装」将退出当前程序并启动安装向导。',
-                    ok_text='立即安装')
+                    self, title=t('update.download_done'),
+                    text=t('update.install_hint'),
+                    ok_text=t('update.install_now'))
                 if box.exec() == QDialog.Accepted:
                     os.startfile(p['path'])
                     QApplication.instance().quit()
@@ -2435,16 +2493,16 @@ class SettingsDialog(QDialog):
             if ev.type() == QEvent.KeyPress:
                 return self._record_hotkey(ev)
             if ev.type() == QEvent.FocusIn:
-                self.key_edit.setPlaceholderText('请按组合键…')
+                self.key_edit.setPlaceholderText(t('settings.hotkey.prompt'))
             elif ev.type() == QEvent.FocusOut:
-                self.key_edit.setPlaceholderText('点击后按组合键')
+                self.key_edit.setPlaceholderText(t('settings.hotkey.placeholder'))
         for te, btn, field in getattr(self, '_time_rows', []):
             if obj is te or obj is btn:
-                t = ev.type()
-                if t == QEvent.Enter or t == QEvent.Leave:
+                etype = ev.type()
+                if etype == QEvent.Enter or etype == QEvent.Leave:
                     hov = field.underMouse() or te.underMouse() or btn.underMouse()
                     field.setProperty('hov', 'true' if hov else 'false')
-                elif t == QEvent.FocusIn or t == QEvent.FocusOut:
+                elif etype == QEvent.FocusIn or etype == QEvent.FocusOut:
                     field.setProperty('focus', 'true' if te.hasFocus() else 'false')
                 else:
                     break
@@ -2488,7 +2546,7 @@ class AboutDialog(QDialog):
     def __init__(self, panel):
         super(AboutDialog, self).__init__(panel)
         self.setObjectName('settingsDlg')
-        self.setWindowTitle('关于')
+        self.setWindowTitle(t('about.title'))
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self._drag = None
 
@@ -2506,7 +2564,7 @@ class AboutDialog(QDialog):
         self.titlebar.setFixedHeight(sc(34))
         tb = QHBoxLayout(self.titlebar)
         tb.setContentsMargins(0, 0, 0, 0)
-        title = QLabel('关于')
+        title = QLabel(t('about.title'))
         title.setObjectName('setTitle')
         tb.addWidget(title)
         tb.addStretch(1)
@@ -2514,7 +2572,7 @@ class AboutDialog(QDialog):
         close.setObjectName('closeBtn')
         close.setText('✕')
         close.setFixedSize(sc(28), sc(24))
-        close.setToolTip('关闭')
+        close.setToolTip(t('common.close'))
         close.clicked.connect(self.reject)
         tb.addWidget(close)
         lay.addWidget(self.titlebar)
@@ -2529,10 +2587,10 @@ class AboutDialog(QDialog):
         head.addWidget(icon)
         info = QVBoxLayout()
         info.setSpacing(sc(4))
-        name = QLabel('Zbox桌面格子')
+        name = QLabel(t('app.name'))
         name.setObjectName('setTitle')
         info.addWidget(name)
-        ver = QLabel('版本 v%s' % APP_VERSION)
+        ver = QLabel(t('settings.version', version=APP_VERSION))
         ver.setObjectName('setLabel')
         info.addWidget(ver)
         info.addStretch(1)
@@ -2540,7 +2598,7 @@ class AboutDialog(QDialog):
         lay.addLayout(head)
 
         # 简要介绍
-        intro = QLabel('Windows 桌面悬浮面板：日历 + 待办，深色 / 浅色双主题，内置法定节假日与农历。')
+        intro = QLabel(t('about.intro'))
         intro.setObjectName('setLabel')
         intro.setWordWrap(True)
         intro.setContentsMargins(sc(2), sc(2), sc(6), sc(6))
@@ -2551,7 +2609,7 @@ class AboutDialog(QDialog):
         gh = QHBoxLayout()
         gh.setContentsMargins(sc(2), 0, sc(6), 0)
         gh.setSpacing(sc(8))
-        gh_label = QLabel('开源地址')
+        gh_label = QLabel(t('about.source'))
         gh_label.setObjectName('setLabel')
         gh.addWidget(gh_label)
         link = QLabel('<a href="%s" style="color:%s; text-decoration:none;">%s</a>'
@@ -2559,7 +2617,7 @@ class AboutDialog(QDialog):
         link.setObjectName('setUrl')
         link.setOpenExternalLinks(True)
         link.setCursor(Qt.PointingHandCursor)
-        link.setToolTip('在浏览器中打开')
+        link.setToolTip(t('about.open_browser'))
         gh.addWidget(link)
         gh.addStretch(1)
         lay.addLayout(gh)
@@ -2568,7 +2626,7 @@ class AboutDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_row.setContentsMargins(0, sc(12), sc(4), 0)
         btn_row.addStretch(1)
-        done = QPushButton('关闭')
+        done = QPushButton(t('common.close'))
         done.setObjectName('setSave')
         done.setCursor(Qt.PointingHandCursor)
         done.setDefault(True)
@@ -2691,31 +2749,31 @@ def show_toast_on(win, text, ok=True, hold_ms=1800):
     ok=False 用失败配色。toast 状态存放在 win 上，每个窗口各自独立互不影响。"""
     try:
         if not hasattr(win, '_toast'):
-            t = QLabel('', win)
-            t.setObjectName('panelToast')
-            t.setAttribute(Qt.WA_TransparentForMouseEvents)
-            t.setAlignment(Qt.AlignCenter)
-            op = QGraphicsOpacityEffect(t)
+            toast = QLabel('', win)
+            toast.setObjectName('panelToast')
+            toast.setAttribute(Qt.WA_TransparentForMouseEvents)
+            toast.setAlignment(Qt.AlignCenter)
+            op = QGraphicsOpacityEffect(toast)
             op.setOpacity(0.0)
-            t.setGraphicsEffect(op)
-            t.hide()
-            win._toast, win._toast_op = t, op
+            toast.setGraphicsEffect(op)
+            toast.hide()
+            win._toast, win._toast_op = toast, op
             win._toast_anim = None
             win._toast_seq = 0
         if win._toast_anim is not None:
             win._toast_anim.stop()
-        t = win._toast
-        t.setText(text)
+        toast = win._toast
+        toast.setText(text)
         want = 'true' if ok else 'false'
-        if t.property('ok') != want:
-            t.setProperty('ok', want)
-            t.style().unpolish(t)
-            t.style().polish(t)
-        t.adjustSize()
-        t.move(max(0, (win.width() - t.width()) // 2),
-               max(0, (win.height() - t.height()) // 2))
-        t.raise_()
-        t.show()
+        if toast.property('ok') != want:
+            toast.setProperty('ok', want)
+            toast.style().unpolish(toast)
+            toast.style().polish(toast)
+        toast.adjustSize()
+        toast.move(max(0, (win.width() - toast.width()) // 2),
+                   max(0, (win.height() - toast.height()) // 2))
+        toast.raise_()
+        toast.show()
         win._toast_anim = QPropertyAnimation(win._toast_op, b'opacity', win)
         win._toast_anim.setDuration(160)
         win._toast_anim.setStartValue(win._toast_op.opacity())
@@ -2802,7 +2860,8 @@ class FloatingPanel(QWidget):
         bx.setContentsMargins(sc(3), sc(3), sc(3), sc(3))
         bx.setSpacing(sc(6 if resolve_theme(cfg.theme) == 'nocturne' else 2))
         self.tabs = []
-        for i, name in enumerate(['日历', '待办', '传输', '视频解析']):
+        for i, name in enumerate([t('panel.calendar'), t('panel.todo'),
+                                  t('panel.transfer'), t('panel.video')]):
             b = QToolButton()
             b.setObjectName('tab')
             b.setText(name)
@@ -2817,7 +2876,7 @@ class FloatingPanel(QWidget):
         self.gear_btn.setObjectName('gearBtn')
         self.gear_btn.setText('⚙')
         self.gear_btn.setFixedSize(sc(26), sc(22))
-        self.gear_btn.setToolTip('设置')
+        self.gear_btn.setToolTip(t('settings.title'))
         self.gear_btn.clicked.connect(self.settingsRequested)
         tb.addWidget(self.gear_btn)
         # 最小化：收起整张卡片（与双击桌面/IPC 显隐同一条 close_panel 路径，
@@ -2826,7 +2885,7 @@ class FloatingPanel(QWidget):
         self.min_btn.setObjectName('minBtn')
         self.min_btn.setText('—')
         self.min_btn.setFixedSize(sc(26), sc(22))
-        self.min_btn.setToolTip('最小化')
+        self.min_btn.setToolTip(t('panel.minimize'))
         self.min_btn.clicked.connect(self.close_panel)
         tb.addWidget(self.min_btn)
 
@@ -3136,10 +3195,10 @@ class FloatingPanel(QWidget):
         """窗口内 Qt 坐标 → 边框命中码（HT*）：四角优先，其次四边，未命中返回 0。"""
         m = sc(8)
         x, y, w, h = pos.x(), pos.y(), self.width(), self.height()
-        l, r, t, b = x < m, x >= w - m, y < m, y >= h - m
-        if t and l:
+        l, r, top, b = x < m, x >= w - m, y < m, y >= h - m
+        if top and l:
             return 13   # HTTOPLEFT
-        if t and r:
+        if top and r:
             return 14   # HTTOPRIGHT
         if b and l:
             return 16   # HTBOTTOMLEFT
@@ -3149,7 +3208,7 @@ class FloatingPanel(QWidget):
             return 10   # HTLEFT
         if r:
             return 11   # HTRIGHT
-        if t:
+        if top:
             return 12   # HTTOP
         if b:
             return 15   # HTBOTTOM
@@ -3157,17 +3216,17 @@ class FloatingPanel(QWidget):
 
     def eventFilter(self, obj, ev):
         """时分秒 / 日期行和展开的顶部栏都是窗口拖拽把手；栏窗的悬浮进出也在这里接力。"""
-        t = ev.type()
-        if obj is self.titlebar and t == QEvent.WindowActivate:
+        etype = ev.type()
+        if obj is self.titlebar and etype == QEvent.WindowActivate:
             _place_below(self.titlebar, self)   # 激活会浮到面板之上，压回去
             return False
-        if obj is self.titlebar and t == QEvent.Enter:
+        if obj is self.titlebar and etype == QEvent.Enter:
             self._slide_titlebar(True)
             return False
-        if obj is self.titlebar and t == QEvent.Leave:
+        if obj is self.titlebar and etype == QEvent.Leave:
             self._schedule_hover_check()
             return False
-        if t == QEvent.MouseButtonPress and ev.button() == Qt.LeftButton:
+        if etype == QEvent.MouseButtonPress and ev.button() == Qt.LeftButton:
             self._drag = ev.globalPos() - self.frameGeometry().topLeft()
             self._snap_sticky = (None, None)
             self._hide_snap_guide()
@@ -3175,7 +3234,7 @@ class FloatingPanel(QWidget):
             unpin_from_desktop(self.titlebar)   # 栏窗一起退出：拖拽中面板浮起，栏窗留带内会被应用盖住
             self._desk_pinned = False
             return True
-        if t == QEvent.MouseMove and self._drag is not None and ev.buttons() & Qt.LeftButton:
+        if etype == QEvent.MouseMove and self._drag is not None and ev.buttons() & Qt.LeftButton:
             proposed = QRect(ev.globalPos() - self._drag, self.size())
             targets = self._card_targets()
             snapped, self._snap_sticky = snap_move(
@@ -3184,7 +3243,7 @@ class FloatingPanel(QWidget):
             self.move(snapped.topLeft())
             self._update_snap_guide(snapped, targets, self._snap_sticky)
             return True
-        if t == QEvent.MouseButtonRelease and self._drag is not None:
+        if etype == QEvent.MouseButtonRelease and self._drag is not None:
             self._drag = None
             self._snap_sticky = (None, None)
             self._hide_snap_guide()
