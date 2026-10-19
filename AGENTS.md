@@ -945,11 +945,15 @@ HTTP 模式无加密，只面向可信局域网。组播失效时有 /24 子网�
 - `transfer_selftest.py` 是自动化协议自检：`python transfer_selftest.py`，16 用例全过打印
   `SELFTEST OK`；用动态端口、不依赖组播与 Qt，**改 `transfer.py` 后必跑**。
 - Android 端在 `android/`：独立 Gradle 工程（Kotlin + Compose + OkHttp + NanoHTTPD，minSdk 26），
-  与 PC 代码完全分离；指纹/别名/保存目录存 SharedPreferences，SAF 落盘（文件夹传输按
+  与 PC 代码完全分离；界面文案全部走 `AppStrings`（`AppStrings.current` 读 `Settings.language` 这个
+  Compose 状态，切语言立即重组；**记录只持久化 `AppError` 错误码，不存成品文案**），底部
+  `NavigationBar` 两个 tab（传输 / 设置），设置页只有语言单选（简体中文 / English），应用名固定品牌
+  `Zbox`；指纹/别名/保存目录存 SharedPreferences，SAF 落盘（文件夹传输按
   `path` 字段还原目录树：`safeRelParts` 分段消毒（与 PC `_safe_rel_parts` 同语义），SAF 逐级
   `ensureSubdir` 合并复用 / MediaStore 走 `RELATIVE_PATH` 子目录，文件名仍加 " (2)" 后缀），仅前台传输
-  （`onStop` 即停服务）。接收记录**整会话一条**（文件夹/多文件 = 1 行：显示名取顶层文件夹名
-  或「x 等 N 个文件」，大小为会话总和、进度按 `bytesDone` 聚合，点击定位首个落盘文件）。
+  （`onStop` 即停服务）。接收记录**整会话一条**（文件夹/多文件 = 1 行：显示名按当前语言动态生成
+  ——顶层文件夹名 / 「x 等 N 个文件」/ “x and N more”，`TransferRecord.multiCount` 与
+  `folderName` 只存结构不存成品文案；大小为会话总和、进度按 `bytesDone` 聚合，点击定位首个落盘文件）。
 - 鸿蒙端在 `harmony/`：ArkTS + ArkUI 单 UIAbility；polka 起 53327 HTTP 服务端（5 端点），组播 `addMembership` 监听失败退化为 /24 子网扫描；发送走 TCPSocket 手写流式 POST（64KB 分块带进度/取消），接收经 polka 落沙箱 `files/received/`（文件夹传输按 `path` 字段分段消毒后递归 `mkdirSync`
   还原目录树，目录冲突=合并）后由记录页「导出」到公共目录（聚合记录按 `savedRels` 相对路径逐文件导出、还原目录结构）；
   接收记录同样整会话一条（与 Android 同语义）；指纹/别名存 preferences；分享入口走 Share Kit（`ohos.want.action.sendData`）；传输中切后台申请 DATA_TRANSFER 长时任务保活。协议常量（组播 224.0.0.168 / 端口 53327）与 PC/Android 逐字节一致，与官方 LocalSend 不互通。
@@ -1016,13 +1020,20 @@ PC 与 Android 都支持**简体中文 / English**。PC 端词典与运行时切
    （重启提示由设置页负责）；`Config.load` 用 `i18n.normalize_language` 归一，非法值回落默认语言。
 6. **截图自检按语言各跑一套**：`ZBOX_SHOT_LANG=zh-CN` / `en-US`（只在自检态生效、不写回配置）；
    英文文案普遍更宽，英文截图要重点检查标题 / 按钮 / 说明段落是否被截断。
-7. Android 侧同理：所有界面文案走 `AppStrings`，中英资源键保持对齐。
+7. Android 侧同理：所有界面文案走 `AppStrings`（中英两套 object 必须实现同一接口，新增字段
+   两套一起补）；**记录里只存 `AppError` 错误码**，HTTP 协议响应正文保持英文；切语言是**即时生效**
+   （`Settings.language` 是 Compose 状态，无需重启）；改完跑
+   `cd android && .\gradlew.bat testDebugUnitTest && .\gradlew.bat assembleDebug`，并用
+   `rg -n 'Text\("[^"]*[一-鿿]|contentDescription\s*=\s*"[^"]*[一-鿿]' android/app/src/main/java -g '*.kt'`
+   确认没有漏翻的硬编码。
 
 ## Testing Guidelines
 
 - `python -m unittest discover -s tests -v` — Python/UI 回归测试（当前 81 用例，必须全过）
 - `python transfer_selftest.py` — 传输协议自检（`SELFTEST OK`；改 `transfer.py` 后必跑）
 - `set ZBOX_SHOT=... && set ZBOX_SHOT_LANG=... && python main.pyw` — 中英双语截图自检
+- `cd android && gradlew.bat testDebugUnitTest` — Android 语言规则单元测试（`AppStringsTest`）；
+  改 Android 文案后同时跑 `gradlew.bat assembleDebug`
 - 手动检查桌面右键菜单形态切换（运行中级联 / 未运行直链）、文件夹右键项随面板启停出现/消失、开机自启
 
 改布局代码时要在 125% / 150% 缩放下确认；改文案时中英文两套截图都要看。

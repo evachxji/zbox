@@ -44,7 +44,7 @@ Windows 桌面整理工具：桌面格子 + 悬浮面板（日历 / 待办 / 传
    - 卡片四边/四角拖拽自由缩放，大小自动记忆
 3. **截图**：全局热键框选标注，支持钉图与滚动长图
 4. **语言**：PC 端与 Android 端均支持**简体中文 / English**。PC 端在 **设置 → 语言** 中切换（重启生效）；
-   安装向导首屏也可以直接选择安装语言。
+   安装向导首屏也可以直接选择安装语言。Android 端在底部「设置」tab 中切换，即时生效。
 
 ## 快速开始
 
@@ -66,6 +66,7 @@ Windows 桌面整理工具：桌面格子 + 悬浮面板（日历 / 待办 / 传
 
 - `python -m unittest discover -s tests -v` — Python/UI 回归测试
 - `python transfer_selftest.py` — 传输协议自检（`SELFTEST OK`）
+- `cd android && gradlew.bat testDebugUnitTest` — Android 语言规则单元测试
 - 双语截图自检（导出全界面场景后自动退出）：
   `set ZBOX_SHOT=designs\verify-en` + `set ZBOX_SHOT_LANG=en-US` + `python main.pyw`（中文用 `zh-CN`）。
   截图进程使用独立 IPC 名，不会干扰正在运行的面板。

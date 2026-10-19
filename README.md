@@ -43,7 +43,7 @@ A Windows desktop organizer: desktop boxes + a floating panel (calendar / todo /
    - **Video downloader**: paste a URL to download videos, multiple resolutions, resumable downloads
    - Freely resize the card by dragging its edges/corners; the size is remembered
 3. **Screenshot**: global hotkey region capture with annotations, pin-to-screen and scrolling long capture
-4. **Languages**: the PC app and Android app support **Simplified Chinese and English**. On PC, choose the language under **Settings → Language** (a restart applies it); the installer's first page also lets you pick the installation language.
+4. **Languages**: the PC app and Android app support **Simplified Chinese and English**. On PC, choose the language under **Settings → Language** (a restart applies it); the installer's first page also lets you pick the installation language. On Android, switch it in the **Settings** tab at the bottom; it applies immediately.
 
 ## Quick Start
 
@@ -63,6 +63,7 @@ Run from source: double-click `run.cmd` (it will offer to install PySide6 if mis
 
 - `python -m unittest discover -s tests -v` — Python/UI regression tests
 - `python transfer_selftest.py` — transfer protocol self-test (`SELFTEST OK`)
+- `cd android && gradlew.bat testDebugUnitTest` — Android language-rule unit tests
 - Bilingual screenshot self-check (renders every UI scene and exits):
   `set ZBOX_SHOT=designs\verify-en` + `set ZBOX_SHOT_LANG=en-US` + `python main.pyw` (use `zh-CN` for Chinese).
   Screenshot runs use an isolated IPC name, so they do not disturb a running panel.
