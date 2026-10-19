@@ -25,3 +25,6 @@ website/*.artifact.json
 
 # 截图自检输出（前后对比基线/报告，不上传仓库）
 shots/
+
+# 隔离工作树
+.worktrees/
