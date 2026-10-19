@@ -210,6 +210,7 @@ class Config(object):
         self.path = path
         self.data = {'theme': THEME_ORDER[0], 'tab': 0, 'pos': None,
                      'off_noon': '12:00-13:00', 'off_evening': '18:00',
+                     'show_lunar': True,
                      'transfer_enabled': False, 'shot_hotkey': '',
                      'shot_sizes': {},
                      'video_enabled': False, 'video_dir': '', 'video_quality': '1080P',
@@ -339,7 +340,7 @@ class DayCell(QFrame):
         self.badge.adjustSize()
         self.badge.move(self.width() - self.badge.width() - sc(2), sc(2))
 
-    def set_day(self, d, dim, store, sel=False):
+    def set_day(self, d, dim, store, sel=False, show_lunar=True):
         today = date.today()
         self.date = d
         self.setProperty('dim', 'true' if dim else 'false')
@@ -348,9 +349,10 @@ class DayCell(QFrame):
         self.setProperty('today', 'true' if d == today else 'false')
         self.num.setText(str(d.day))
         name, kind = store.info(d)
-        show_name = name if kind == 'off' else None  # 调休班日不显示“班”，只显示农历
+        show_name = name if kind == 'off' else None  # 调休班日不显示“班”，开启农历时只显示农历
         fest = bool(show_name or cd.festival_name(d))
-        self._set_sub_text(t_data(show_name or cd.lunar_text(d)))
+        sub = show_name or (cd.lunar_text(d) if show_lunar else '')
+        self._set_sub_text(t_data(sub))
         self.sub.setProperty('fest', 'true' if fest else 'false')
         # 右上角标签：法定节假日「休」、调休上班日「班」；普通双休日不标
         if kind:
@@ -419,7 +421,7 @@ class _GridPage(QWidget):
         self._grid.setSpacing(0)
         self._grid.setContentsMargins(0, 0, 0, 0)
 
-    def build(self, start, selected=None, dim_month=None):
+    def build(self, start, selected=None, dim_month=None, show_lunar=True):
         self.start = start
         while self._grid.count():
             it = self._grid.takeAt(0)
@@ -432,7 +434,8 @@ class _GridPage(QWidget):
         for i in range(35):
             d = start + timedelta(days=i)
             cell = DayCell()
-            cell.set_day(d, (d.year, d.month) != dim_month, self.store, d == selected)
+            cell.set_day(d, (d.year, d.month) != dim_month, self.store, d == selected,
+                         show_lunar=show_lunar)
             if self.on_day_click:
                 cell.clicked.connect(lambda c=cell: self.on_day_click(c.date))
             self._grid.addWidget(cell, i // 7, i % 7)
@@ -671,8 +674,10 @@ class CalendarWidget(QWidget):
                 self._pages[d] = page
         first = date(self.year, self.month, 1)
         anchor = first - timedelta(days=first.weekday())  # 当前月 1 日所在周的周一
+        show_lunar = bool(self.cfg.data.get('show_lunar', True))
         for d in (-1, 0, 1):
-            self._pages[d].build(anchor + timedelta(days=35 * d), self._selected, self._dim_month)
+            self._pages[d].build(anchor + timedelta(days=35 * d), self._selected,
+                                 self._dim_month, show_lunar=show_lunar)
         self._update_sub()
         self._layout_pages()
 
@@ -2224,6 +2229,17 @@ class SettingsDialog(QDialog):
         sep1.setFixedHeight(1)
         form.addRow(sep1)
 
+        # 农历开关：只控制日期格副标题里的农历/节日小字，休班角标与法定假日名称不受影响
+        self.lunar_chk = QCheckBox(t('settings.lunar.show'))
+        self.lunar_chk.setObjectName('showLunarChk')
+        self.lunar_chk.setChecked(bool(cfg.data.get('show_lunar', True)))
+
+        def commit_lunar(on):
+            cfg.set('show_lunar', bool(on))
+            panel.cal.refresh()
+        self.lunar_chk.toggled.connect(commit_lunar)
+        form.addRow(row_label(t('settings.lunar')), self.lunar_chk)
+
         # 日历假期数据
         holiday_row = QHBoxLayout()
         holiday_row.setSpacing(sc(8))
@@ -2371,6 +2387,22 @@ class SettingsDialog(QDialog):
         self.video_chk.toggled.connect(commit_video)
         panel.video.enabled_changed.connect(lambda _on: self._sync_video_chk())
 
+        # 语言：紧跟在视频解析下方并用分隔线分组。切换后需重启才能整体换语言，
+        # 故弹确认框；用户选择已即时落盘，稍后重启也能生效。
+        sep_lang = QFrame()
+        sep_lang.setObjectName('setSep')
+        sep_lang.setFixedHeight(1)
+        form.addRow(sep_lang)
+        self.lang_combo = QComboBox()
+        self.lang_combo.setObjectName('languageCombo')
+        self.lang_combo.setFixedSize(sc(150), sc(30))   # 内容够用即可，不随表单拉满
+        for code, name in i18n.LANGUAGE_NAMES.items():
+            self.lang_combo.addItem(name, code)
+        self.lang_combo.setCurrentIndex(
+            max(0, self.lang_combo.findData(cfg.data.get('language') or i18n.get_language())))
+        self.lang_combo.currentIndexChanged.connect(self._language_changed)
+        form.addRow(row_label(t('settings.language')), self.lang_combo)
+
         # 改动即时生效，无需保存按钮；左下角版本号与关于窗/安装程序一致
         ver_row = QHBoxLayout()
         ver_row.setContentsMargins(0, sc(12), sc(4), 0)
@@ -2387,27 +2419,6 @@ class SettingsDialog(QDialog):
         ver_row.addWidget(self.btn_update)
         self.sig_upd.connect(self._on_upd)
         lay.addLayout(ver_row)
-
-        # 语言：放最底部（版本行之后）。切换后需重启才能整体换语言，故弹确认框；
-        # 用户选择已即时落盘，稍后重启也能生效。
-        lang_form = QFormLayout()
-        lang_form.setContentsMargins(sc(2), sc(6), sc(6), 0)
-        lang_form.setHorizontalSpacing(sc(14))
-        lang_form.setVerticalSpacing(sc(12))
-        sep_lang = QFrame()
-        sep_lang.setObjectName('setSep')
-        sep_lang.setFixedHeight(1)
-        lang_form.addRow(sep_lang)
-        self.lang_combo = QComboBox()
-        self.lang_combo.setObjectName('languageCombo')
-        self.lang_combo.setFixedHeight(sc(30))   # 对齐设置窗其他输入行的 30px
-        for code, name in i18n.LANGUAGE_NAMES.items():
-            self.lang_combo.addItem(name, code)
-        self.lang_combo.setCurrentIndex(
-            max(0, self.lang_combo.findData(cfg.data.get('language') or i18n.get_language())))
-        self.lang_combo.currentIndexChanged.connect(self._language_changed)
-        lang_form.addRow(row_label(t('settings.language')), self.lang_combo)
-        lay.addLayout(lang_form)
 
         # 默认居中在屏幕可用区（不贴着面板：面板常停右下角，跟着它会被挤到屏幕边上）
         # 面板在哪个屏幕就居中到哪个屏幕，多显示器下对话框跟人待的那块屏一致

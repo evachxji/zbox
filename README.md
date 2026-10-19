@@ -37,13 +37,13 @@ A Windows desktop organizer: desktop boxes + a floating panel (calendar / todo /
    Inside a box, drop onto the white guide line between items for a custom order, onto a folder to move files into it, or onto an app/shortcut to open the dragged files with it.
    The collapse, lock, and menu icons stay hidden until the pointer enters the title bar, then fade in and fade out after it leaves.
 2. **Floating panel**:
-   - **Calendar**: clock with countdowns, public holidays and lunar calendar, scroll to flip months
+   - **Calendar**: clock with countdowns, public holidays and an optional lunar calendar, scroll to flip months
    - **Todo**: check items off (grayed out), overdue reminders (pick a date, then confirm), dated items first and sorted by due date, undated items after them, and completed items last; editing or checking does not jump the list, and the editor has a check button to save. Right-click to edit/copy/delete with stacked 5-second undo toasts, each with its own countdown; new inputs start at the list tail, and the editor grows to show all content (Enter saves, Shift+Enter adds a line)
    - **Transfer**: send files and folders between devices on the LAN (folders arrive as a recreated directory tree on the receiver), with manual accept on the receiver (allow the Windows Firewall prompt when first enabling it; if you clicked "Cancel" by mistake and devices/files stop arriving, the transfer tab detects it and offers a one-click repair)
    - **Video downloader**: paste a URL to download videos, multiple resolutions, resumable downloads
    - Freely resize the card by dragging its edges/corners; the size is remembered
 3. **Screenshot**: global hotkey region capture with window-aware selection — hover an app window to outline it, click to select the full window, or double-click to copy and exit; also supports rectangles, ellipses, QQ-style arrows, sequential number markers with auto-growing multiline dark labels and text, pin-to-screen and scrolling long capture; marker labels stay single-line until they reach the capture boundary or the user presses Enter, then wrap while keeping the number visible; per-tool size sliders are remembered across captures, labels can be dragged and reopened for editing, and clicking or dragging a pinned image opens its fixed bottom toolbar tray for annotation, saving and copying; click elsewhere to dismiss it
-4. **Languages**: the PC app and Android app support **Simplified Chinese and English**. On PC, choose the language under **Settings → Language** (a restart applies it); the installer's first page also lets you pick the installation language. On Android, switch it in the **Settings** tab at the bottom; it applies immediately.
+4. **Languages**: the PC app and Android app support **Simplified Chinese and English**. On PC, use the compact language selector directly below **Video downloader** in Settings (a restart applies it); the installer's first page also lets you pick the installation language. On Android, switch it in the **Settings** tab at the bottom; it applies immediately.
 
 ## Quick Start
 

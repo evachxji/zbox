@@ -62,6 +62,8 @@ CATALOG = {
     'settings.hotkey.prompt': 'Press a shortcut…',
     'settings.hotkey.tooltip': 'Press a shortcut to record; leave empty to disable the screenshot hotkey',
     'settings.hotkey.clear': 'Clear shortcut',
+    'settings.lunar': 'Lunar calendar',
+    'settings.lunar.show': 'Show lunar calendar',
     'settings.holiday': 'Calendar holidays',
     'settings.pick_time': 'Pick a time',
     'settings.noon': 'Lunch break',

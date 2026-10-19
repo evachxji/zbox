@@ -85,7 +85,7 @@ Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyS
 平铺布局，一个模块一个职责：
 
 - `main.pyw` — 入口：语言解析（`i18n.resolve_language`，`ZBOX_SHOT_LANG` 仅自检态）、单实例 IPC（`QLocalServer`）、节假日后台更新、局域网传输服务启动、（frozen 时）`--uninstall` 卸载向导入口；`ZBOX_SHOT` 下改用独立 IPC 名并跳过转发/菜单同步，不干扰运行中的实例
-- `app.py` — 面板 UI（日历 / 待办 / 传输 / 顶部栏滑出与拖动）、`SettingsDialog`（语言切换 + 右下角「检查更新」：后台查 GitHub 最新 release，有新版本确认后经 updater 下载安装包、再确认即启动安装向导并退出本程序）与节假日导入引导窗；面板移动复用 `snapping.py` 的同边吸附，原生边框缩放不吸附
+- `app.py` — 面板 UI（日历 / 待办 / 传输 / 顶部栏滑出与拖动）、`SettingsDialog`（语言选择紧随视频解析开关并以分割线分组，下拉框固定为 150 基准宽；右下角「检查更新」后台查 GitHub 最新 release，有新版本确认后经 updater 下载安装包、再确认即启动安装向导并退出本程序）与节假日导入引导窗；面板移动复用 `snapping.py` 的同边吸附，原生边框缩放不吸附
 - `boxes.py` — 桌面格子：空白格子（桌面文件的收纳视图，不搬文件、只隐藏桌面图标）与文件夹映射格子、双击桌面显隐；格子移动与缩放复用 `snapping.py` 的同边吸附；桌面图标位置记忆（`boxes.json['desktop_icons']`：退出时与每 60s 快照可见图标坐标——格子里的已隐藏、ListView 枚举不到，正好是「没进格子的文件」——启动时 `_DesktopIconLayout.restore_positions` 按显示名摆回并 3s 后补一次，自动排列桌面不插手）；
 - `snapping.py` — 桌面卡片共享吸附层：横纵轴分别只匹配同边（左对左 / 右对右 / 上对上 / 下对下），8px 进入、12px 释放；`snap_move` / `snap_resize` 提供纯几何结果，`SnapGuideOverlay` 在吸附期间用蓝色辅助线贯穿本卡片与目标卡片，左右或上下两条边同时对齐时逐条显示
 格子拖出落回桌面由 `_DesktopDropOverlay`（桌面带最底层的全屏透明落放层，仅拖拽期间显示）接住内部处理、不走 Explorer（被占用的文件夹也能拖出），落到资源管理器窗口/其他应用才交 URL 给对方真实移动；拖拽默认「移动」、按住 Ctrl 落放 = 复制；Delete 删除走外壳原生确认弹窗（`_shell_op` 包 SHFileOperation）；
@@ -159,7 +159,8 @@ set ZBOX_SHOT=designs\verify-en && set ZBOX_SHOT_LANG=en-US && python main.pyw  
 ```
 
 自检导出两主题全界面 59 张场景截图（面板四 tab / 顶部栏展开 / 各弹窗 / 格子各形态 / 安装卸载向导）
-后自动退出，改 UI / 主题 / 布局后必跑；**改文案或布局时中文与英文各跑一套**，英文截图重点查截断。
+后自动退出。大范围改 UI / 主题 / 布局时跑全量；局部样式小改只跑相关测试并查看目标界面截图，
+不必跑全部自检。涉及文案或可能截断的局部改动，中英文分别查看目标场景即可。
 截图 harness 在 `selfshot.py`：冻结时间源 + 注入示例数据（结束还原，不落盘用户配置）+ 离屏渲染；
 自检模式下不创建格子、不起传输服务、不注册截图热键、不跑节假日自动更新（防网络不确定性与配置写盘）。
 **截图进程与正在运行的用户实例完全隔离**：`ZBOX_SHOT` 下 `main.pyw` 把 `IPC_KEY` 改成
@@ -266,7 +267,7 @@ ClearType，文字发灰），圆角统一走遮罩（`round_corners`，SetWindo
 - 内容区是 `_SlideStack`（横向滑动切页动画）：日历/待办/传输/视频解析四页**按 tab 顺序入栈**——
   `slide_to` 靠页面在列表里的先后判断左滑/右滑，顺序错了方向就反。
 - 尺寸常量 `SINGLE_W / PANEL_H`（默认尺寸 344x370，高度按日历五周条带定）；`cfg` 键：`theme` / `tab` / `pos` / `size` /
-  `off_noon` / `off_evening` / `shot_hotkey`（截图热键，空串 = 不启用）/ `shot_sizes`（各截图标注工具
+  `off_noon` / `off_evening` / `show_lunar`（默认 True）/ `shot_hotkey`（截图热键，空串 = 不启用）/ `shot_sizes`（各截图标注工具
   上次的滑杆值），`Config` 用 `__getattr__` 暴露为属性。
   `size` 与 `pos` 同一条 `pos_screen` 分辨率校验，换屏回默认尺寸。
   视频解析相关键：`video_enabled`（默认 False，门禁层）/ `video_dir`（空串 = 桌面）/ `video_quality`。
@@ -412,6 +413,8 @@ E_HANDLE——DWM 路线在 Qt6 走不通，`round_corners()` 已改为 Win10/Wi
 `HolidayStore.info(d)` 的优先级：用户自定义（联网/导入）→ 内置官方数据 → 普通日。
 内置 `EMBEDDED_OFF` / `EMBEDDED_WORK` 是国务院公布的年份安排，**新一年安排发布后要手工补**；
 没有数据的年份只显示双休与农历节日，不标「休/班」角标。农历是 1900–2100 查表法（`LUNAR_INFO`），带缓存。
+设置页「显示农历」写 `config.json` 的 `show_lunar`（默认开）；关闭后日期格不显示农历/节日小字，
+但法定节假日名称与「休/班」角标保留。
 
 **三个数据源**（`SOURCES` 按顺序回退，三家 JSON 格式互不相同而 `parse_holiday_json` 全认）：
 timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` 扁平 `{iso:{isOffDay}}`
@@ -1042,8 +1045,9 @@ PC 与 Android 都支持**简体中文 / English**。PC 端词典与运行时切
    硬编码中文，遗漏会直接挂测试。
 5. **运行期切换语言**：设置页「语言」写 `config.json` 的 `language` 后**重启生效**
    （重启提示由设置页负责）；`Config.load` 用 `i18n.normalize_language` 归一，非法值回落默认语言。
-6. **截图自检按语言各跑一套**：`ZBOX_SHOT_LANG=zh-CN` / `en-US`（只在自检态生效、不写回配置）；
-   英文文案普遍更宽，英文截图要重点检查标题 / 按钮 / 说明段落是否被截断。
+6. **截图自检按改动范围选择**：大范围 UI / 主题 / 布局改动按语言各跑一套；
+   `ZBOX_SHOT_LANG=zh-CN` / `en-US`（只在自检态生效、不写回配置）。局部样式小改只查看目标场景，
+   英文文案普遍更宽，涉及英文时重点检查标题 / 按钮 / 说明段落是否被截断。
 7. Android 侧同理：所有界面文案走 `AppStrings`（中英两套 object 必须实现同一接口，新增字段
    两套一起补）；**记录里只存 `AppError` 错误码**，HTTP 协议响应正文保持英文；切语言是**即时生效**
    （`Settings.language` 是 Compose 状态，无需重启）；改完跑

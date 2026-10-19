@@ -62,6 +62,8 @@ CATALOG = {
     'settings.hotkey.prompt': '请按组合键…',
     'settings.hotkey.tooltip': '按下组合键录入；留空 = 不启用截图热键',
     'settings.hotkey.clear': '清空快捷键',
+    'settings.lunar': '农历',
+    'settings.lunar.show': '显示农历',
     'settings.holiday': '日历假期',
     'settings.pick_time': '选择时间',
     'settings.noon': '午休时间',

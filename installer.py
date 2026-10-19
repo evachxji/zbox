@@ -658,15 +658,21 @@ class InstallWizard(_WizardBase):
         lay.setContentsMargins(_sc(2), _sc(8), _sc(4), 0)
         lay.setSpacing(_sc(8))
 
-        lay.addWidget(self._section('installer.language'))
+        lang_row = QHBoxLayout()
+        lang_row.setSpacing(_sc(14))
+        self._language_label = self._section('installer.language')
+        lang_row.addWidget(self._language_label)
         self._language = QComboBox()
         self._language.setObjectName('installLanguage')
+        self._language.setFixedSize(_sc(150), _sc(30))   # 与设置窗语言选择一致
         for code, label in i18n.LANGUAGE_NAMES.items():
             self._language.addItem(label, code)
         self._language.setCurrentIndex(self._language.findData(i18n.get_language()))
         # 先设初值再连信号：构造期不触发回填
         self._language.currentIndexChanged.connect(self._select_language)
-        lay.addWidget(self._language)
+        lang_row.addWidget(self._language)
+        lang_row.addStretch(1)
+        lay.addLayout(lang_row)
 
         lay.addWidget(self._section('installer.location'))
         row = QHBoxLayout()

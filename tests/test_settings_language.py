@@ -8,7 +8,8 @@ from unittest.mock import MagicMock, patch
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
-from PySide6.QtWidgets import QApplication, QComboBox, QWidget
+from PySide6.QtCore import QPoint
+from PySide6.QtWidgets import QApplication, QComboBox, QFrame, QWidget
 
 import app as app_module
 import i18n
@@ -59,18 +60,29 @@ class SettingsLanguageTest(unittest.TestCase):
     def tearDown(self):
         i18n.set_language(i18n.DEFAULT_LANGUAGE)
 
-    def test_language_combo_is_last_and_persists(self):
+    def test_language_combo_follows_video_and_persists(self):
         with patch('app.sysutil.autostart_get', return_value=False):
             panel = _PanelStub()
             panel.cfg = Config(os.devnull)
             dlg = SettingsDialog(panel, lambda *a, **k: None, lambda: None)
+        self.addCleanup(dlg.close)
+        dlg.show()
+        self.qapp.processEvents()
         combo = dlg.findChild(QComboBox, 'languageCombo')
         self.assertIsNotNone(combo)
         self.assertEqual(combo.currentData(), ZH)
+        combo_y = combo.mapTo(dlg, QPoint()).y()
+        video_y = dlg.video_chk.mapTo(dlg, QPoint()).y()
+        update_y = dlg.btn_update.mapTo(dlg, QPoint()).y()
+        self.assertGreater(combo_y, video_y)
+        self.assertLess(combo_y, update_y)
+        separators = [frame for frame in dlg.findChildren(QFrame, 'setSep')
+                      if video_y < frame.mapTo(dlg, QPoint()).y() < combo_y]
+        self.assertEqual(len(separators), 1)
+        self.assertEqual(combo.width(), app_module.sc(150))
         with patch.object(dlg, '_confirm_language_restart', return_value=False):
             combo.setCurrentIndex(1)
         self.assertEqual(panel.cfg.data['language'], 'en-US')
-        self.assertEqual(combo, dlg.findChildren(QComboBox)[-1])
 
     def test_combo_lists_both_languages_and_follows_current(self):
         i18n.set_language(i18n.EN)

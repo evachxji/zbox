@@ -239,9 +239,16 @@ class InstallerWizardLanguageTest(unittest.TestCase):
         try:
             combo = wizard.findChild(QComboBox, 'installLanguage')
             self.assertIsNotNone(combo)
+            wizard.show()
+            self.qapp.processEvents()
             self.assertEqual([combo.itemText(i) for i in range(combo.count())],
                              ['简体中文', 'English'])
             self.assertEqual(combo.currentData(), i18n.ZH)
+            self.assertEqual(combo.width(), installer._sc(150))
+            self.assertGreater(combo.geometry().x(), wizard._language_label.geometry().x())
+            self.assertLess(abs(combo.geometry().center().y()
+                                - wizard._language_label.geometry().center().y()),
+                            installer._sc(4))
             combo.setCurrentIndex(combo.findData(i18n.EN))
             self.assertEqual(i18n.get_language(), i18n.EN)
             labels = [w.text() for w in wizard.findChildren(QLabel)]
