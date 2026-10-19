@@ -480,7 +480,10 @@ class CalendarWidget(QWidget):
         self.btn_today = QToolButton()
         self.btn_today.setObjectName('todayBtn')
         self.btn_today.setText(t('common.today'))
-        self.btn_today.setFixedSize(sc(46), sc(24))
+        # 宽度交给 sizeHint（QSS 字体与内边距算进去），只保底中文「今天」的 46px；
+        # 英文 Today 更宽，写死宽度会被截成「T…y」。
+        self.btn_today.setMinimumWidth(sc(46))
+        self.btn_today.setFixedHeight(sc(24))
         self.btn_today.clicked.connect(self.go_today)
         head.addWidget(self.btn_today, 0, Qt.AlignVCenter)
         root.addLayout(head)
@@ -605,7 +608,9 @@ class CalendarWidget(QWidget):
             if not self._panning:
                 self._apply_dim()
         vis = (y, m) != (today.year, today.month)
-        if self.btn_today.isVisible() != vis:
+        # 用 isHidden()（显式隐藏状态）而不是 isVisible()：窗口 show() 之前 isVisible 恒为
+        # False，按它判断就不会显式隐藏，「今天」按钮会在启动后闪现到下一次 tick。
+        if self.btn_today.isHidden() == vis:
             self.btn_today.setVisible(vis)
         txt = t('calendar.year_month', year=y, month=m) if vis else self._countdown_text(today)
         if self._sub_full != txt:
