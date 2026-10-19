@@ -1767,8 +1767,19 @@ class ShotOverlay(QWidget):
         self.update()
 
     def mouseDoubleClickEvent(self, e):
-        if (not self._pin_mode and e.button() == Qt.LeftButton and self._long is None
-                and self._mode == 'ready' and self._sel.contains(e.pos())):
+        if self._pin_mode or e.button() != Qt.LeftButton or self._long is not None:
+            return
+        if self._mode == 'idle':
+            frame = self._window_rect_at(e.globalPosition().toPoint())
+            if frame is None or not frame.contains(e.pos()):
+                return
+            self._sel = frame
+            self._mode = 'ready'
+            self._hover_frame = None
+            self._press_window = None
+            self._update_chrome()
+            self.update()
+        if self._mode == 'ready' and self._sel.contains(e.pos()):
             self._finish_copy()
 
     def _fixed_point(self, h):

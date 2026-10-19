@@ -78,6 +78,16 @@ class ScreenshotWindowSnapTest(unittest.TestCase):
         self.assertEqual(win._mode, 'idle')
         self.assertFalse(win._sel.isValid())
 
+    def test_double_click_on_window_finishes_copy(self):
+        win = self._overlay()
+        frame = QRect(100, 80, 320, 240)
+        with patch.object(screenshot, '_window_frame_at',
+                          return_value=(123, frame)), \
+                patch.object(win, '_finish_copy') as finish:
+            QTest.mouseDClick(win, Qt.LeftButton, pos=QPoint(140, 120))
+            self.qapp.processEvents()
+        finish.assert_called_once_with()
+
 
 if __name__ == '__main__':
     unittest.main()
