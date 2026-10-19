@@ -373,7 +373,9 @@ QFrame#titlebar { background: #f7f8fa; }
 QFrame#tabBox { background: rgba(0,0,0,14); border-radius: 8px; }
 QToolButton#tab {
     background: transparent; border: none; border-radius: 6px;
-    color: #5b5b60; font: 600 12px "%CN%"; padding: 5px 10px;
+    /* 英文 tab 比中文宽得多：横向 padding 收到 2px（与 nocturne 一致），
+       否则 Calendar/To-dos/Transfer/Video 四个按钮在 344px 面板里会挤成省略号 */
+    color: #5b5b60; font: 600 12px "%CN%"; padding: 5px 2px;
 }
 QToolButton#tab[active="true"] { background: #ffffff; color: #e8a33d; border: 1px solid rgba(0,0,0,10); }
 QToolButton#closeBtn {

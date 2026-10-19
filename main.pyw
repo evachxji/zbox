@@ -210,6 +210,10 @@ def main():
     sys.excepthook = _debug_excepthook
     shot_dir = os.environ.get('ZBOX_SHOT')
     if shot_dir:
+        # 截图自检与正在运行的用户实例完全隔离：改用独立 IPC 名（既不连接、也不删除
+        # 用户实例的 server），下面同时跳过单实例转发与右键菜单同步——绝不动用户的运行态。
+        global IPC_KEY
+        IPC_KEY = sysutil.IPC_KEY + '-shot'
         # 截图自检：冻结时间源（日历时钟/倒计时/「今天」高亮/待办日期 tag），
         # 让同机两次运行出图逐像素可比；必须在 FloatingPanel 构造之前冻结
         import selfshot
@@ -290,14 +294,15 @@ def main():
         return 0
 
     cli_arg = next((a for a in sys.argv[1:] if a in IPC_ACTIONS), None)
-    if notify_existing(IPC_ACTIONS.get(cli_arg, b'toggle')):
-        return 0  # 已有实例在运行，转发动作后退出
-    if cli_arg == '--quit':
-        return 0  # 没有运行中的实例可退出
+    if not shot_dir:
+        if notify_existing(IPC_ACTIONS.get(cli_arg, b'toggle')):
+            return 0  # 已有实例在运行，转发动作后退出
+        if cli_arg == '--quit':
+            return 0  # 没有运行中的实例可退出
 
-    # 清旧安装的菜单残留。必须在 IPC 转发之后：源码模式没有安装记录，
-    # 转发进程跑这里会把运行中面板刚注入的级联菜单当残留删掉（真实 bug）
-    installer.sync_context_menu()
+        # 清旧安装的菜单残留。必须在 IPC 转发之后：源码模式没有安装记录，
+        # 转发进程跑这里会把运行中面板刚注入的级联菜单当残留删掉（真实 bug）
+        installer.sync_context_menu()
 
     hstore = cd.HolidayStore(os.path.join(data_dir, 'holidays.json'))
     tstore = ui.TodoStore(os.path.join(data_dir, 'todos.json'))

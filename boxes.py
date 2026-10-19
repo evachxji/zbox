@@ -49,7 +49,7 @@ from PySide6.QtWidgets import (QWidget, QDialog, QListWidget, QListWidgetItem, Q
                              QPushButton, QStackedLayout, QMenu,
                              QFileDialog, QLineEdit,
                              QAbstractItemView, QApplication, QStyle,
-                             QGraphicsOpacityEffect)
+                             QGraphicsOpacityEffect, QSizePolicy)
 
 import app as ui   # sc / _PROG_FAMILY / _class_name / _is_desktop_surface
 from snapping import (SNAP_ENGAGE, SNAP_RELEASE, SnapGuideOverlay,
@@ -1027,6 +1027,31 @@ class BoxConfirmDialog(QDialog):
         super(BoxConfirmDialog, self).mouseReleaseEvent(e)
 
 
+class _BoxTitle(QLabel):
+    """格子标题标签：按可用宽度尾部省略。英文默认名 / 长名称比中文宽，
+    最小宽度下会被右侧操作按钮挤压，普通 QLabel 不参与布局收缩、只会被裁掉。"""
+
+    def __init__(self, text=''):
+        super(_BoxTitle, self).__init__()
+        self._full = text or ''
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self._relide()
+
+    def setText(self, text):
+        self._full = text or ''
+        self._relide()
+
+    def resizeEvent(self, e):
+        super(_BoxTitle, self).resizeEvent(e)
+        self._relide()
+
+    def _relide(self):
+        text = self.fontMetrics().elidedText(self._full, Qt.ElideRight,
+                                             max(self.width(), 0))
+        super(_BoxTitle, self).setText(text)
+        self.setToolTip(self._full if text != self._full else '')
+
+
 class BoxWindow(QWidget):
     """单个桌面格子窗口。"""
 
@@ -1077,7 +1102,7 @@ class BoxWindow(QWidget):
             # 隐藏后布局不占位（QHBoxLayout 跳过隐藏控件），标题栏只留名称
             self.icon.hide()
         tb.addWidget(self.icon)
-        self.name = QLabel(rec['name'])
+        self.name = _BoxTitle(rec['name'])
         self.name.setObjectName('boxName')
         tb.addWidget(self.name, 1)
         # 双击名称后原地替换成的重命名输入框

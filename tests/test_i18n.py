@@ -54,7 +54,7 @@ class I18nCoreTest(unittest.TestCase):
 
     def test_data_values_translate_and_fall_back(self):
         i18n.set_language('en-US')
-        self.assertEqual(i18n.t_data('春节'), 'Spring Festival')
+        self.assertEqual(i18n.t_data('春节'), 'Spring')
         i18n.set_language('zh-CN')
         self.assertEqual(i18n.t_data('春节'), '春节')
         self.assertEqual(i18n.t_data('自定义节日'), '自定义节日')

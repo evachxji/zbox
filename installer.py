@@ -857,7 +857,8 @@ class UninstallWizard(_WizardBase):
         cancel.clicked.connect(self.reject)
         ok = QPushButton()
         ok.setObjectName('dangerBtn')
-        ok.setFixedWidth(_sc(84))
+        # 英文「Uninstall」比「安装/卸载」宽：固定 84 会把末尾裁掉，改用最小宽度
+        ok.setMinimumWidth(_sc(84))
         ok.setDefault(True)
         self._bind(ok, 'installer.uninstall')
         ok.clicked.connect(self._on_uninstall)

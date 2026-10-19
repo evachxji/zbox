@@ -43,10 +43,11 @@ A Windows desktop organizer: desktop boxes + a floating panel (calendar / todo /
    - **Video downloader**: paste a URL to download videos, multiple resolutions, resumable downloads
    - Freely resize the card by dragging its edges/corners; the size is remembered
 3. **Screenshot**: global hotkey region capture with annotations, pin-to-screen and scrolling long capture
+4. **Languages**: the PC app and Android app support **Simplified Chinese and English**. On PC, choose the language under **Settings → Language** (a restart applies it); the installer's first page also lets you pick the installation language.
 
 ## Quick Start
 
-Download `zbox-Setup-v<version>-x64.exe` from [Releases](https://github.com/evachxji/zbox/releases) and double-click to open the installer (per-user install, no admin rights needed).
+Download `zbox-Setup-v<version>-x64.exe` from [Releases](https://github.com/evachxji/zbox/releases) and double-click to open the installer. It installs for all users into `Program Files` (Windows asks for administrator permission), removes any previous Zbox program files first, and always keeps your personal data in `%APPDATA%\zbox`.
 
 Upgrading: "Check for updates" in the bottom-right corner of the Settings window compares against the latest GitHub release and can download the installer and guide you through the upgrade.
 
@@ -57,6 +58,14 @@ Run from source: double-click `run.cmd` (it will offer to install PySide6 if mis
 - One-click, three platforms: double-click `build.cmd` and pick 1-7 to build a single target or a combination (default 7 = everything: Windows exe installer + Android APK + HarmonyOS HAP). Artifacts (versioned file names) are collected in `dist\release\`.
   - Requirements: PC builds need PySide6 + PyInstaller (auto-install offered if missing); Android needs JDK 17 and the Android SDK; HarmonyOS needs DevEco Studio and `devecocli` (`npm i -g @deveco/deveco-cli@stable`)
   - The HAP is an unsigned debug package that only installs on emulators / developer debug devices; distributing to real devices requires signing or AppGallery release (see `harmony\README.md`)
+
+## Verification
+
+- `python -m unittest discover -s tests -v` — Python/UI regression tests
+- `python transfer_selftest.py` — transfer protocol self-test (`SELFTEST OK`)
+- Bilingual screenshot self-check (renders every UI scene and exits):
+  `set ZBOX_SHOT=designs\verify-en` + `set ZBOX_SHOT_LANG=en-US` + `python main.pyw` (use `zh-CN` for Chinese).
+  Screenshot runs use an isolated IPC name, so they do not disturb a running panel.
 
 ## Compatibility
 

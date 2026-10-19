@@ -10,8 +10,8 @@ import time
 from datetime import date, datetime, timedelta
 
 from PySide6.QtCore import (Qt, QTimer, QSize, QPoint, QPointF, QRect, QRectF, QDate, QTime,
-                          Signal, QEvent, QPropertyAnimation, QVariantAnimation, QEasingCurve,
-                          QProcess)
+                          QLocale, Signal, QEvent, QPropertyAnimation, QVariantAnimation,
+                          QEasingCurve, QProcess)
 from PySide6.QtGui import (QFont, QFontDatabase, QPainter, QColor, QPixmap, QIcon, QPainterPath,
                          QRegion, QPen, QLinearGradient, QCursor, QKeySequence, QTextCursor)
 from PySide6.QtWidgets import (QWidget, QFrame, QLabel, QToolButton, QVBoxLayout, QHBoxLayout,
@@ -1008,6 +1008,8 @@ class DuePopup(QFrame):
         lay.setContentsMargins(sc(8), sc(8), sc(8), sc(8))
         lay.setSpacing(sc(6))
         cal = QCalendarWidget(self)
+        # 月份/星期名跟随界面语言：Qt 默认用系统 locale，英文界面下会仍是「十月 / 周一」
+        cal.setLocale(QLocale(i18n.get_language()))
         cal.setGridVisible(False)
         # Qt6 行高度量收紧，日历视口行高跟着矮一截（整个弹层比 Qt5 矮 37px）：
         # 按 Qt5 的行高固定（24*1.25=30）
@@ -1971,7 +1973,8 @@ class HolidayImportDialog(QDialog):
             row.setSpacing(sc(6))
             tag = QLabel(t('holiday.source_primary') if i == 0 else t('holiday.source_backup', n=i))
             tag.setObjectName('setLabel')
-            tag.setFixedWidth(sc(32))
+            # 英文「Backup 1」比中文「备用1」宽：32 会被裁成「Backu」，留出整列宽度
+            tag.setFixedWidth(sc(64))
             ed = QLineEdit(src['url'] % year)
             ed.setObjectName('srcEdit')
             ed.setCursorPosition(0)   # 默认露出域名（URL 尾巴不如域名好认）

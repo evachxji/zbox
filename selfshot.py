@@ -22,6 +22,7 @@ from PySide6.QtWidgets import QApplication, QMenu
 
 import app as ui
 import boxes as bx
+import i18n
 import installer
 import pinshot
 import sysutil
@@ -148,7 +149,7 @@ class _Runner(object):
         installer._dir_size = lambda _p: 100 * 2 ** 20
 
         self.panel.todo.rebuild()
-        self.panel.set_tab(0, save=False)
+        self._tab(0)
         self.panel.show()
         self._build_jobs()
         QTimer.singleShot(300, self._step)
@@ -199,22 +200,21 @@ class _Runner(object):
         p = self.panel
         for theme in THEME_ORDER:
             self.job('%s_cal' % theme, 400,
-                     lambda k=theme: (p.apply_theme(k, save=False),
-                                      p.set_tab(0, save=False)),
+                     lambda k=theme: (p.apply_theme(k, save=False), self._tab(0)),
                      lambda: p)
             self.job('%s_todo' % theme, 400,
-                     lambda: p.set_tab(1, save=False), lambda: p)
+                     lambda: self._tab(1), lambda: p)
             self.job('%s_transfer' % theme, 400,
-                     lambda: p.set_tab(2, save=False), lambda: p)
+                     lambda: self._tab(2), lambda: p)
             self.job('%s_transfer_busy' % theme, 400,
-                     lambda: (p.set_tab(2, save=False), self._make_busy_transfer()),
+                     lambda: (self._tab(2), self._make_busy_transfer()),
                      lambda: p, teardown=self._clear_busy_transfer)
             self.job('%s_transfer_records' % theme, 400,
-                     lambda: (p.set_tab(2, save=False), self._make_records_transfer(),
+                     lambda: (self._tab(2), self._make_records_transfer(),
                               p._slide_titlebar(True)),
                      lambda: _ComboShot(p), teardown=self._clear_records_transfer)
             self.job('%s_video' % theme, 400,
-                     lambda: p.set_tab(3, save=False), lambda: p)
+                     lambda: self._tab(3), lambda: p)
             self.job('%s_video_parsed' % theme, 400,
                      lambda: (p.video.url_edit.setText(
                                   'https://www.bilibili.com/video/BV1GJ411x7h7'),
@@ -225,21 +225,21 @@ class _Runner(object):
             self.job('%s_titlebar' % theme, 500,
                      lambda: p._slide_titlebar(True), lambda: p.titlebar)
             self.job('%s_todo_edit' % theme, 400,
-                     lambda: (p._slide_titlebar(False), p.set_tab(1, save=False),
+                     lambda: (p._slide_titlebar(False), self._tab(1),
                               p.todo._open_editor(2, '给妈妈回电话\n顺便问一下周末安排')),
                      lambda: p,
                      teardown=lambda: p.todo.rebuild())
             self.job('%s_todo_undo' % theme, 400,
-                     lambda: (p.set_tab(1, save=False),
+                     lambda: (self._tab(1),
                               p.todo._add_undo_toast(lambda: None),
                               p.todo._add_undo_toast(lambda: None)),
                      lambda: p, teardown=self._hide_todo_undo)
             self.job('%s_toast_ok' % theme, 500,
-                     lambda: ui.show_toast_on(p, '节假日数据已更新', ok=True,
-                                              hold_ms=3600000),
+                     lambda: ui.show_toast_on(p, i18n.t('holiday.update_ok', count=5),
+                                              ok=True, hold_ms=3600000),
                      lambda: p, teardown=self._hide_toast)
             self.job('%s_toast_fail' % theme, 500,
-                     lambda: ui.show_toast_on(p, '节假日更新失败：网络不可用',
+                     lambda: ui.show_toast_on(p, i18n.t('holiday.update_failed'),
                                               ok=False, hold_ms=3600000),
                      lambda: p, teardown=self._hide_toast)
             self.job('%s_settings' % theme, 300, None,
@@ -298,6 +298,12 @@ class _Runner(object):
 
     def job(self, name, settle, setup, target, teardown=None):
         self.jobs.append((name, settle, setup, target, teardown))
+
+    def _tab(self, idx):
+        """自检切页：切完立即结束滑动动画，避免 grab 到「左页裁一半、右页露一角」的中间帧。"""
+        self.panel.set_tab(idx, save=False)
+        self.panel.single_stack._end_transition()
+        return self.panel
 
     # ---------------- 逐场景执行 ----------------
     def _step(self):

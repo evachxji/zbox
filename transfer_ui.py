@@ -366,6 +366,10 @@ class TransferInfoDialog(QDialog):
 
         self.setFixedWidth(ui.sc(320))
         self.adjustSize()
+        # 英文文案换行后行数比中文多：adjustSize 按未换行的 sizeHint 定高会截掉段落，
+        # 固定宽度后按布局的实际换行高度补足（中文本来够高则保持原高）。
+        self.setFixedHeight(max(self.height(),
+                                self.layout().totalHeightForWidth(self.width())))
 
 
 class MobileGuideDialog(QDialog):

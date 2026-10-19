@@ -84,8 +84,8 @@ LLM 经常默默选择一种解释然后执行。这个原则强制明确推理�
 Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PySide6（Qt 6.8），Python 3.10+，Win10 / Win11。
 平铺布局，一个模块一个职责：
 
-- `main.pyw` — 入口：单实例 IPC（`QLocalServer`）、节假日后台更新、局域网传输服务启动、（frozen 时）`--uninstall` 卸载向导入口
-- `app.py` — 面板 UI（日历 / 待办 / 传输 / 顶部栏滑出与拖动）、`SettingsDialog`（右下角「检查更新」：后台查 GitHub 最新 release，有新版本确认后经 updater 下载安装包、再确认即启动安装向导并退出本程序）与节假日导入引导窗；面板移动复用 `snapping.py` 的同边吸附，原生边框缩放不吸附
+- `main.pyw` — 入口：语言解析（`i18n.resolve_language`，`ZBOX_SHOT_LANG` 仅自检态）、单实例 IPC（`QLocalServer`）、节假日后台更新、局域网传输服务启动、（frozen 时）`--uninstall` 卸载向导入口；`ZBOX_SHOT` 下改用独立 IPC 名并跳过转发/菜单同步，不干扰运行中的实例
+- `app.py` — 面板 UI（日历 / 待办 / 传输 / 顶部栏滑出与拖动）、`SettingsDialog`（语言切换 + 右下角「检查更新」：后台查 GitHub 最新 release，有新版本确认后经 updater 下载安装包、再确认即启动安装向导并退出本程序）与节假日导入引导窗；面板移动复用 `snapping.py` 的同边吸附，原生边框缩放不吸附
 - `boxes.py` — 桌面格子：空白格子（桌面文件的收纳视图，不搬文件、只隐藏桌面图标）与文件夹映射格子、双击桌面显隐；格子移动与缩放复用 `snapping.py` 的同边吸附；桌面图标位置记忆（`boxes.json['desktop_icons']`：退出时与每 60s 快照可见图标坐标——格子里的已隐藏、ListView 枚举不到，正好是「没进格子的文件」——启动时 `_DesktopIconLayout.restore_positions` 按显示名摆回并 3s 后补一次，自动排列桌面不插手）；
 - `snapping.py` — 桌面卡片共享吸附层：横纵轴分别只匹配同边（左对左 / 右对右 / 上对上 / 下对下），8px 进入、12px 释放；`snap_move` / `snap_resize` 提供纯几何结果，`SnapGuideOverlay` 在吸附期间用蓝色辅助线贯穿本卡片与目标卡片，左右或上下两条边同时对齐时逐条显示
 格子拖出落回桌面由 `_DesktopDropOverlay`（桌面带最底层的全屏透明落放层，仅拖拽期间显示）接住内部处理、不走 Explorer（被占用的文件夹也能拖出），落到资源管理器窗口/其他应用才交 URL 给对方真实移动；拖拽默认「移动」、按住 Ctrl 落放 = 复制；Delete 删除走外壳原生确认弹窗（`_shell_op` 包 SHFileOperation）；
@@ -100,16 +100,22 @@ Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyS
 - `glow.py` — 共享轮廓灯效控件 `GlowCard`（待机呼吸灯 / 彩色跑马灯，自绘描边 + 定时器相位；跑马灯是把圆角矩形边框 toSubpathPolygons 离散成折线再按 ~6px 细分（折线只细分圆弧，直边是一整段，不细分就一条边一个颜色）、逐段按「累计周长位置 − 相位」取色——别用线性渐变+转色相，那样上下边同向变色不像追跑；独立成模块而非放 app.py——基类在 import 期就要被求值，放 app.py 会撞三方循环 import；`_sc` 运行期惰性取 app.sc）。传输记录行（`_ClickRow` 继承）与视频解析视频卡共用
 - `video_ui.py` — 面板「视频解析」tab：底栏组件状态（不显示组件名/版本号，检查更新覆盖 yt-dlp 与 ffmpeg 两者、一键更新、卸载）、网址输入（先「解析」yt-dlp -J 出标题/时长/封面/实际档位再选清晰度下载，封面居中裁方圆角、加载前/取不到显示 `_placeholder_pm` 占位图（半透明灰圆角方块+播放三角，卡片高度恒定），偏好档记 `video_quality`）、保存目录（默认桌面，注册表 User Shell Folders 兼容 OneDrive 重定向）、多任务模型：输入框+「解析」即创建一个任务卡（`_VideoTask`，卡片即任务）插到列表顶部（`task_lay` 滚动区，QSS `#videoScroll/#videoBox`），解析/下载进行中输入框不锁、可随时加新任务；重复网址拒建并提示；卡片一经创建留到程序重启（`_clear_tasks` 仅供 selfshot 清场）；parsed / done / downloading 态卡片标题行右侧显示 ✕ 关闭钮（`#cardCloseBtn`，accent 色 hover 变红）：parsed/done 点击直接移出列表销毁；downloading（含暂停）先弹 `_ConfirmDialog` 二次确认（已泛化为标题/正文/确认文案参数化，组件卸载确认同款），确认后 terminate——start() 收尾的 `_cleanup_parts` 会删掉下载到一半的 .part/.ytdl 缓存；parsing/failed 态不显示。下载中右键不再弹「取消下载」（取消唯一入口是 ✕ 二次确认），右键只剩完成态的「打开所在目录」。任务列表容器是 `_TaskBox`（宽度方向 minimumSizeHint 归零——QScrollArea 按内容 minSizeHint 放大容器而横向滚动条禁用会硬裁卡片右侧，归零后恢复布局软压缩；高度照常传递供垂直滚动）；卡片标题/URL 一律按 `ui.sc(172)` elide（更宽会撑爆容器）。任务卡状态机：parsing（转圈+正在解析）→ parsed（时长+清晰度下拉+「下载」，淡蓝 `#6ea8fe` 呼吸灯）→ downloading（跑马灯；meta 行换 `dl_box` 进度区：进度条+「暂停/继续」（yt-dlp 握手期没出真实进度时该按钮位换成 `_Spinner` 自绘旋转环，首个进度到达换回），下方从左到右 已下载/总大小（`_fmt_pair` 按百分比折算同单位）·剩余时间·下载速度三栏 busy 强调色，阶段提示「合并中…」借剩余时间栏）→ done（无轮廓灯，meta 行 时长·文件大小（`_fmt_size`）+「打开」，单击打开文件）/ failed（meta 行红/灰提示文字）。暂停=杀进程树但留 .part、继续=同命令重启靠 yt-dlp 默认 --continue 断点续传（`Download.pause/resume` + `_resume_evt` 挂起等待，暂停中取消走 terminate 唤醒后正常清理 .part）；取消回 parsed 态（取消与完成竞速时完成优先）。右键任务卡：下载中弹「取消下载」、完成态弹「打开所在目录」（explorer /select, 选中文件）。卡外状态行只剩全局提示（组件更新经 `sig_msg`、网址为空/重复），cookie 类报错浮出「查看解决办法」链接开 `CookieGuideDialog`；任一任务忙（`_any_busy`）时卸载/检查更新被挡。默认关闭的门禁层与传输同款（复用 `#transferGate`/`#transferHint`/`#gateHelpBtn`/`#setSave` QSS）；开启是异步的（门禁层显示组件下载进度），失败切「不可用」形态并经 `enabled_changed(False)` 弹回设置窗勾选；启动时恢复 `video_enabled` 仅当 `video_dl.tools_ready()`（组件已下到本地）才直接开启，组件缺失（首次安装/被卸载）则回门禁层等用户手动启用——不在启动时自动联网下载；`video_autostart=False`（ZBOX_SHOT）时不下组件不盖门禁层；cookie 类报错（`video_dl.is_cookie_error`）在状态行右侧浮出「查看解决办法」链接，点开 `CookieGuideDialog` 四步引导（装导出扩展 → 刷 douyin.com → 导出 cookies.txt → 弹窗内导入/移除；弹窗开头有风控警示——2026-09 起抖音详情接口要网页端实时签名 uifid + x-secsdk-web-signature，yt-dlp 上游未实现，导入 cookie 也解析不了抖音，报错文案按 `has_cookies()` 分两态）
 - `transfer_selftest.py` — 传输协议自动化自检（16 用例，动态端口，不依赖组播/Qt）
+- `i18n.py` / `i18n_zh.py` / `i18n_en.py` — PC 语言核心：`resolve_language` 按「截图自检语言 → 用户设置 → 安装时记录 → 系统界面语言」归一，`t()` 查当前语言词典（缺失回落中文），`t_data()` 翻译农历/节日名；`i18n_zh` / `i18n_en` 两份词典**键集合与占位符必须完全一致**（`tests/test_i18n.py` 自动校验）
 - `selfshot.py` — 全界面截图自检 harness（`ZBOX_SHOT` 触发）：时间冻结（patch `ui.date`/`ui.datetime`
-  成固定时刻）+ 示例数据注入（结束还原）+ `widget.grab()` 离屏渲染，两主题约 45 个场景
+  成固定时刻）+ 示例数据注入（结束还原）+ `widget.grab()` 离屏渲染，两主题 59 个场景；
+  `ZBOX_SHOT_LANG=zh-CN|en-US` 指定出图语言（只在自检态生效、不写回配置）
+- `tests/` — Python/UI 回归测试（`unittest`，81 用例）：i18n 词典一致性、硬编码中文覆盖、设置页语言切换、
+  安装器语言、传输/格子文案、DPI 缩放、待办操作、格子吸附与标题操作
 - `tools/compare_shots.py` — 截图前后对比：逐像素 diff + 生成带前/后/差异高亮三图的 report.md
   （Pillow，仅开发依赖）；验收口径见文件头 docstring
-- `themes.py` — 两套主题 QSS（深色 `nocturne` / 浅色 `mica`）加 `auto` 伪主题；`%CN%`/`%NUM%` 为字体占位符
+- `themes.py` — 两套主题 QSS（深色 `nocturne` / 浅色 `mica`）加 `auto` 伪主题；`%CN%`/`%NUM%` 为字体占位符；
+  主题 dict 的三项文案字段是 `name_key` / `count_fmt_key` / `week_keys`（存词典键，按当前语言取），
+  不再是写死中英文的 `name` / `count_fmt` / `week`
 - `version.py` — 版本号唯一来源：关于窗、设置窗左下角、安装向导、卸载注册表项共用 `APP_VERSION`，发版只改这一个文件
-- `sysutil.py` — 注册表集成：开机自启、桌面右键菜单、应用列表卸载项（默认 HKCU，免管理员）；Windows 防火墙检测与修复（`firewall_blocked` 读规则免管理员 / `fix_firewall_rules` 经 UAC 提权删阻止规则并放行 53327 TCP/UDP 入站，临时 ps1 + `Start-Process -Verb RunAs -Wait -PassThru` 取回退出码校验）
+- `sysutil.py` — 注册表集成：开机自启、桌面右键菜单、应用列表卸载项（源码方式默认 HKCU 免管理员，exe 安装器传 `all_users=True` 写 HKLM）；Windows 防火墙检测与修复（`firewall_blocked` 读规则免管理员 / `fix_firewall_rules` 经 UAC 提权删阻止规则并放行 53327 TCP/UDP 入站，临时 ps1 + `Start-Process -Verb RunAs -Wait -PassThru` 取回退出码校验）
 - `screenshot.py` — QQ 风格截图：全屏灰罩遮罩（`ShotOverlay`）、框选/8 手柄调整（框选后点选区外灰罩无反应，防误点毁标注，右键清空才能重框）、矩形/椭圆/文字标注（颜色 + 反色 + 多行）、导出复制/保存/钉图、滚动截长图（`_LongMask` 静态灰罩 + `_LongChrome` 轮廓 + 缩略预览；「自动下滚」借鉴 SnowShot 直投 WM_MOUSEWHEEL；`_WheelGuard` 手动限长/自动期回退检测 + Esc 拦截）；`HotkeyManager` 全局热键
 - `pinshot.py` — 钉图窗 `PinWindow`：置顶无边框贴图，拖拽移动、滚轮等比缩放（窗口中心为锚点，0.1–10 倍）、双击关闭，不持久化
-- `installer.py` — 安装向导（选项/进度/完成页）与卸载向导（可选删除个人数据）；供 setup exe（安装）与程序本体 `--uninstall`（卸载）共用
+- `installer.py` — 安装向导（首屏语言 + 选项/进度/完成页）与卸载向导（可选删除个人数据）；供 setup exe（安装）与程序本体 `--uninstall`（卸载）共用。**始终按所有用户安装**（默认 `Program Files\zbox`，非管理员自动 UAC 提权），没有「仅当前用户 / 此计算机」范围选项；安装前 `cleanup_existing_zbox()` 先请旧实例退出、只删除含 `zbox.exe` 的程序目录并清系统集成，`%APPDATA%\zbox` 个人数据一律保留
 - `install.py` — 源码方式的系统集成（只装开机自启）
 - `setup.pyw` — 安装包入口：build.py 把它打成 onefile exe，内嵌 onedir 本体为 payload，双击弹安装向导
 - `build.py` / `build.cmd` — `build.cmd` 是三端一键入口（启动后选 1-7 构建单端或组合，默认 7 全量：PC exe + Android APK + 鸿蒙 HAP+APP，产物带版本号汇总到 `dist\release\`；鸿蒙段先 `assembleApp` 出 release 签名上架包 `.app`、再 `devecocli build` 出 debug 调试 hap——顺序不能反，assembleApp 会用 release 模式覆写 entry 的 hap 产物；assembleApp 走 DevEco 工具链 hvigorw，按 DEVECO_HOME / 常见安装路径探测）；`build.py` 只负责 PC：生成图标与 DPI 清单，两段式 PyInstaller——main.pyw 打 onedir 本体（`dist\build\app\`），setup.pyw 内嵌本体打成单个安装包 `dist\zbox-Setup-v<版本>-<架构>.exe`（架构标识跟随打包用的 Python：x64 / x86 / arm64）
@@ -127,7 +133,7 @@ Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyS
 - `docs/` — 历史实现计划存档（`superpowers/plans/`）
 
 运行时数据在 `%APPDATA%\zbox\`（`config.json` / `todos.json` / `holidays.json` / `boxes.json` / `icons/`）——不要提交。
-视频解析的 yt-dlp / ffmpeg 组件例外：**优先放程序所在目录的 `tools\`**（frozen 时是 exe 所在目录、源码运行时是仓库根目录，已 gitignore）——不往 C 盘塞依赖；目录不可写（「此计算机」装到 Program Files 需管理员权限）时才回落 `%APPDATA%\zbox\tools\`。
+视频解析的 yt-dlp / ffmpeg 组件例外：**优先放程序所在目录的 `tools\`**（frozen 时是 exe 所在目录、源码运行时是仓库根目录，已 gitignore）——不往 C 盘塞依赖；目录不可写（装到 Program Files 需管理员权限）时才回落 `%APPDATA%\zbox\tools\`。
 **目录名 2026-10 由 `zviber` 改成 `zbox`**：`sysutil.appdata_dir()` 首次调用时自动把旧目录搬过来
 （`_migrate_appdata`：整目录 rename → 逐文件 `_merge_tree`；同名文件以新目录为准，被占用的下次启动再搬），
 老用户的待办 / 格子 / 配置不丢。唯一例外：旧配置里的 `transfer_enabled` 会被
@@ -148,18 +154,21 @@ python transfer_selftest.py  :: 传输协议自检（全过打印 SELFTEST OK）
 python -m unittest discover -s tests -v  :: Python/UI 回归测试
 cd android && gradlew.bat assembleDebug   :: 构建 Android debug APK（build.cmd 已集成）
 cd harmony && hvigorw assembleHap          :: 构建鸿蒙 HAP（需 DevEco Studio 环境，先 ohpm install）
-set ZBOX_SHOT=designs\verify && python main.pyw   :: 截图自检
+set ZBOX_SHOT=designs\verify-zh && set ZBOX_SHOT_LANG=zh-CN && python main.pyw   :: 中文截图自检
+set ZBOX_SHOT=designs\verify-en && set ZBOX_SHOT_LANG=en-US && python main.pyw   :: 英文截图自检
 ```
 
 自检导出两主题全界面 59 张场景截图（面板四 tab / 顶部栏展开 / 各弹窗 / 格子各形态 / 安装卸载向导）
-后自动退出，改 UI / 主题 / 布局后必跑。截图 harness 在 `selfshot.py`：冻结时间源 + 注入示例数据
-（结束还原，不落盘用户配置）+ 离屏渲染；自检模式下不创建格子、不起传输服务、不注册截图热键、
-不跑节假日自动更新（防网络不确定性与配置写盘）。前后版本对比用
+后自动退出，改 UI / 主题 / 布局后必跑；**改文案或布局时中文与英文各跑一套**，英文截图重点查截断。
+截图 harness 在 `selfshot.py`：冻结时间源 + 注入示例数据（结束还原，不落盘用户配置）+ 离屏渲染；
+自检模式下不创建格子、不起传输服务、不注册截图热键、不跑节假日自动更新（防网络不确定性与配置写盘）。
+**截图进程与正在运行的用户实例完全隔离**：`ZBOX_SHOT` 下 `main.pyw` 把 `IPC_KEY` 改成
+`zbox-panel-v1-shot`、跳过单实例 `--toggle` 转发与 `installer.sync_context_menu()`，
+所以不必先退出用户面板，既不会显隐它、也不会删掉它的右键菜单。
+前后版本对比用
 `python tools/compare_shots.py <before> <after> <报告目录>`（Qt5→Qt6 文字渲染差异在引擎层
 不可消除：排版度量改用字体的 USE_TYPO_METRICS + DirectWrite 版本差异——像素级零差异不可达，
 验收 = 版式/尺寸/字体族/配色一致 + report.md 三图目检）。
-**跑之前先退出正在运行的实例**：否则单实例分支会把这次启动当成一次 `--toggle` 转发给已运行实例
-（用户的面板被显隐一次），本进程直接退出，一张图都不会导出，而且没有任何报错。
 截图目录与设计稿渲染图已 gitignore，不要提交。
 
 - 另有 `ZBOX_GRABSCREEN=<路径>`：抓取真实屏幕上面板所在区域（含系统合成效果）后退出。
@@ -181,15 +190,19 @@ set ZBOX_SHOT=designs\verify && python main.pyw   :: 截图自检
 面板只通过 store 读写，所有持久化落在 `%APPDATA%\zbox\`（`config.json`、`todos.json`、
 `holidays.json`、运行时生成的 `icons/`）——**绝不提交这些数据**。
 
-`main()` 的顺序是有意的，改动前先读懂：设置 excepthook → `installer.maybe_install()`
+`main()` 的顺序是有意的，改动前先读懂：设置 excepthook →（`ZBOX_SHOT` 时改用独立 IPC 名
+`zbox-panel-v1-shot` 并冻结时间）→ 解析语言（`i18n.resolve_language`：截图自检语言 → 设置 →
+安装记录 → 系统；`ZBOX_SHOT_LANG` 只在自检态生效且不写回配置）→ `installer.maybe_install()`
 （仅 frozen exe 生效，只处理 `--uninstall` 卸载向导，返回 True 直接退出）→ 单实例 IPC 探测
-（`QLocalSocket` 连 `sysutil.IPC_KEY`，已运行则发 `toggle` 后退出）→ 建面板
+（`QLocalSocket` 连 `IPC_KEY`，已运行则发 `toggle` 后退出；**截图自检跳过转发**）→
+`installer.sync_context_menu()`（**截图自检跳过**，否则会删掉运行实例刚注入的菜单）→ 建面板
 （传输服务由面板自持：`cfg['transfer_enabled']` 为真才创建并 start `TransferServer` + `Discovery`，
 端口 53327 被占则传输页显示「不可用」门禁层；`ZBOX_SHOT` 下不起服务也不盖门禁层）→ 起 `QLocalServer`
 接收 `toggle` / `quit` → `context_menu_set_running(True)` 注入桌面右键级联菜单。
 
 - 单实例靠 `QLocalServer` 名称 `zbox-panel-v1`；消息由 `_on_ipc` 按 `actions` 字典分发，`quit` 消息供卸载程序请求退出。
-- 桌面右键是**级联菜单**：父项「Zbox桌面格子」用 `MUIVerb` + `ExtendedSubCommandsKey` 自引用（子项放父项 `shell\` 子键下，子键名字母序即菜单顺序，故带 A_/B_… 前缀）。两个实测坑：① 别用 `SubCommands` 方案——它只按 **HKLM** 的 `Explorer\CommandStore` 解析，HKCU 的不认，免管理员安装没法用；② 父项绝不能有 `command` 子键，否则退化成直链不展开。6 个二级项：新建格子、新建文件夹格子、显示/隐藏卡片、设置、关于、退出，各走 `--new-box`/`--pick-folder`/`--toggle`/`--settings`/`--about`/`--quit` 命令行参数，经 IPC（`IPC_ACTIONS`）转发给运行中的实例，不新起进程。**菜单形态跟随运行状态**：`context_menu_set_running()` 在面板启停时改写——运行中 = 级联六项，未运行 = 直链单项「单击启动」（安装时写入的就是直链形态）；HKLM 安装无权改写，运行时往 HKCU 写覆盖层、退出删掉回落；源码运行（无安装记录）启动时注入级联菜单、退出时整体删除（崩溃残留由下次启动时 `sync_context_menu` 清掉）。
+  截图自检用 `-shot` 后缀的独立名字，避免连接/删除正在运行的用户实例的 server。
+- 桌面右键是**级联菜单**：父项「Zbox桌面格子」用 `MUIVerb` + `ExtendedSubCommandsKey` 自引用（子项放父项 `shell\` 子键下，子键名字母序即菜单顺序，故带 A_/B_… 前缀）。两个实测坑：① 别用 `SubCommands` 方案——它只按 **HKLM** 的 `Explorer\CommandStore` 解析，HKCU 的不认（源码运行 / 运行期覆盖层写 HKCU 时就没法用）；② 父项绝不能有 `command` 子键，否则退化成直链不展开。6 个二级项：新建格子、新建文件夹格子、显示/隐藏卡片、设置、关于、退出，各走 `--new-box`/`--pick-folder`/`--toggle`/`--settings`/`--about`/`--quit` 命令行参数，经 IPC（`IPC_ACTIONS`）转发给运行中的实例，不新起进程。**菜单形态跟随运行状态**：`context_menu_set_running()` 在面板启停时改写——运行中 = 级联六项，未运行 = 直链单项「单击启动」（安装时写入的就是直链形态）；HKLM 安装无权改写，运行时往 HKCU 写覆盖层、退出删掉回落；源码运行（无安装记录）启动时注入级联菜单、退出时整体删除（崩溃残留由下次启动时 `sync_context_menu` 清掉）。
   **第三种形态——全隐藏单项**：双击桌面把图标/格子/面板全收起来后，`toggle_all` 调
   `context_menu_set_icons_hidden(True)` 把桌面右键收成唯一直链项「显示桌面图标」
   （`--show-icons` 经 IPC 调 `BoxManager.show_all`，图标 + 格子 + 面板一起放回），恢复后切回级联；
@@ -357,8 +370,9 @@ placeholder，Enter 保存、Shift+Enter 换行；从列表
 （设置窗里的「跟随系统」），`THEME_CHOICES = THEME_ORDER + [AUTO]` 是设置窗选项顺序，`Config` 按它校验。
 真主题要同时进 `THEMES` 与 `THEME_ORDER`；`auto` 靠 `app.resolve_theme()` 解析成实际主题（系统「应用模式」
 是浅色就用 mica），`_check_date` 那个 30s 定时器会复查一次，所以系统里改了颜色最多 30 秒后跟着切。
-主题 dict 不只有 `qss`：`name`（设置窗口单选项文案）、`count_fmt`（待办计数文案，两套主题措辞不同）、
-`week`（周一为首的周标签）都按主题区分。QSS 内有三种占位符：`%CN%` / `%NUM%`（字体名）、
+主题 dict 不只有 `qss`：`name_key`（设置窗口单选项文案的词典键）、`count_fmt_key`（待办计数文案，
+两套主题措辞不同）、`week_keys`（周一为首的周标签键表）都存**词典键**，运行时按当前语言 `t()`；
+不要改回写死中英文的 `name` / `count_fmt` / `week`。QSS 内有三种占位符：`%CN%` / `%NUM%`（字体名）、
 `%ICON_DIR%`（`app._indicator_icons()` 在运行数据目录生成的 checkbox/radio 图标，正斜杠路径）。
 `build_qss()` 还会把所有 `Npx` 按 DPI 缩放比放大。
 
@@ -422,8 +436,9 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
 
 ### 系统集成（`sysutil.py` + `installer.py` + `install.py`）
 
-- 注册表写入默认走 HKCU（**免管理员**，Win10/11 通用）；`all_users=True` 才写 HKLM
-  （exe 安装向导的「此计算机」选项，需管理员）。清理函数对两个根都尝试、无权限时静默跳过。
+- **exe 安装向导固定按所有用户安装**：写 HKLM（`Program Files\zbox`），非管理员启动时先
+  `relaunch_elevated()` 走 UAC；没有「仅当前用户 / 此计算机」选项。源码方式运行（`install.py`、
+  面板运行期的右键菜单覆盖层）仍写 HKCU，免管理员。清理函数对两个根都尝试、无权限时静默跳过。
 - **标识符统一为全小写 `zbox`、展示文案统一为首字母大写 `Zbox`（2026-10 从 `zviber` 改名）**：程序本体 `zbox.exe`、
   安装目录（`%LOCALAPPDATA%\Programs\zbox` / `Program Files\zbox`）、安装包
   `zbox-Setup-v<版本>-<架构>.exe`、注册表键、单实例 IPC 名都跟着换。**改名前的兼容代码别当冗余删**：
@@ -440,7 +455,12 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
   每次启动 `installer.sync_context_menu()` 按 `Uninstall\zbox` 的 `InstallLocation` 判定——
   没有任何安装记录就清掉菜单残留（旧版 install.py 的源码安装、向导取消、半卸载）。**调用时机必须在 IPC 转发之后**——源码模式没有安装记录，转发进程（`--new-box` 等）若先跑这步会把运行中面板刚注入的级联菜单当残留删掉（真实 bug）。`context_menu_remove` 要自底向上清三层子键（winreg 不能删带子键的键），含旧版直链菜单的 `command` 残留。
 - `sysutil.launcher_cmd()` 区分 frozen（直接启自身）与源码（优先 `pythonw.exe` 实现无窗口静默）。
-- `installer.py` 的向导**只在 frozen 时生效**；源码运行走 `install.py`。
+- `installer.py` 的向导**只在 frozen 时生效**；源码运行走 `install.py`。首屏先选语言
+  （简体中文 / English，立即切换本窗口文案，并让提权实例与卸载项继承），随后是安装位置与选项。
+- 安装前 `cleanup_existing_zbox()`：先经 IPC 请运行中的旧实例退出（等它做完图标位置修正），
+  只删除 `_is_zbox_program_dir` 判定为 Zbox 程序目录的位置（**只认含 `zbox.exe` 的目录**），
+  并清自启 / 右键菜单 / 卸载项；`%APPDATA%\zbox`（待办、格子、配置）一律保留，目录被占用时
+  0.25s 重试、最长 15s，仍失败则中止而不带残留继续覆盖。
 - 安装 = 把安装包内嵌的 payload（onefile 运行时解压到 `_MEIPASS\payload` 的 onedir 本体：exe + `_internal\`）**整体复制**到目标位置，按字节回报进度；目标目录已有旧安装（含 `zbox.exe`）时先整体清空再复制——`_check_dir` 只放行空目录/新目录/含 `zbox.exe` 的旧安装目录，别放宽这个签名判断，否则覆盖重装与卸载会误删用户文件。
 - 卸载走与安装同风格的**卸载向导**（确认页 → 进度页 → 完成页）：确认页 checkbox「同时删除个人数据」勾选后连同 `%APPDATA%\zbox`（待办、格子、配置）一起 rmtree，默认保留；程序目录用延迟 `rmdir` 删除（exe 运行中删不掉自己）。
 
@@ -975,10 +995,37 @@ HTTP 模式无加密，只面向可信局域网。组播失效时有 /24 子网�
 - 无 linter / formatter；保持 diff 最小、与周围代码一致
 - `run.cmd` / `build.cmd` 以 GBK 保存并自带 `chcp 936`，**改完不要另存为 UTF-8**，否则双击后中文提示乱码
 
+## 本地化（i18n）强制约定
+
+PC 与 Android 都支持**简体中文 / English**。PC 端词典与运行时切换已落地；Android 端走 `AppStrings`
+（后续任务落地）。以下是硬约束，任何 UI 改动都必须遵守：
+
+1. **所有用户可见文案必须走 `from i18n import t`**（农历/节日等数据值用 `t_data`），
+   **禁止在 UI 代码里硬编码中文或英文**；主题里的文案字段存词典键
+   （`name_key` / `count_fmt_key` / `week_keys`），运行时再取。
+   日历 `data.*` 的英文值要用**短名**（格子实际只有约 56px：`Spring` / `National` / `Mth 10` / `Leap 6`）；
+   英文全名会被 `DayCell._elide_sub` 截成省略号，改词条后要重跑英文截图确认。
+2. **新增 / 修改文案时同时更新 `i18n_zh.py` 与 `i18n_en.py`**：两份 `CATALOG` 的键集合必须完全一致，
+   占位符集合也必须一致（`tests/test_i18n.py` 自动校验）。缺键时 `t()` 会静默回落中文，
+   所以不能依赖回落——漏翻译不会报错，只会出中文。
+3. **数据类中文集中到模块级常量**（异常匹配关键词、解析字符、农历/节日原始名等），
+   并加入 `tests/test_pc_localization_coverage.py` 白名单；这些值不进词典、不包 `t()`。
+4. **每次改动后跑 `python -m unittest discover -s tests -v`**：覆盖测试会扫描 UI 代码里的
+   硬编码中文，遗漏会直接挂测试。
+5. **运行期切换语言**：设置页「语言」写 `config.json` 的 `language` 后**重启生效**
+   （重启提示由设置页负责）；`Config.load` 用 `i18n.normalize_language` 归一，非法值回落默认语言。
+6. **截图自检按语言各跑一套**：`ZBOX_SHOT_LANG=zh-CN` / `en-US`（只在自检态生效、不写回配置）；
+   英文文案普遍更宽，英文截图要重点检查标题 / 按钮 / 说明段落是否被截断。
+7. Android 侧同理：所有界面文案走 `AppStrings`，中英资源键保持对齐。
+
 ## Testing Guidelines
 
-没有单元测试框架。验证 = `ZBOX_SHOT` 截图自检 + 手动检查桌面右键菜单形态切换（运行中级联 / 未运行直链）、文件夹右键项随面板启停出现/消失、开机自启。
-改布局代码时要在 125% / 150% 缩放下确认。
+- `python -m unittest discover -s tests -v` — Python/UI 回归测试（当前 81 用例，必须全过）
+- `python transfer_selftest.py` — 传输协议自检（`SELFTEST OK`；改 `transfer.py` 后必跑）
+- `set ZBOX_SHOT=... && set ZBOX_SHOT_LANG=... && python main.pyw` — 中英双语截图自检
+- 手动检查桌面右键菜单形态切换（运行中级联 / 未运行直链）、文件夹右键项随面板启停出现/消失、开机自启
+
+改布局代码时要在 125% / 150% 缩放下确认；改文案时中英文两套截图都要看。
 
 ## Commit & Pull Request Guidelines
 
@@ -988,7 +1035,8 @@ PR 需说明改了什么与为什么；视觉改动附自检截图；注明验�
 
 ## Security & Configuration Tips
 
-- 注册表只写 HKCU（免管理员）；「此计算机」安装写 HKLM 才需要 UAC 提权
+- exe 安装向导始终按所有用户安装（写 HKLM / `Program Files`，需要 UAC 提权）；源码运行与
+  运行期菜单覆盖层只写 HKCU（免管理员）。安装前清理旧 Zbox 程序目录，个人数据保留
 - 网络访问仅限三个节假日数据源（timor.tech / jiejiariapi.com / cdn.jsdelivr.net，按序回退，见 `calendar_data.SOURCES`）——timor.tech 不带 User-Agent 会回 403；
   内网用户走离线 JSON 导入，这条路径必须一直可用
 - 局域网传输监听 TCP/UDP 53327（自定义端口，与官方 LocalSend 53317 隔离不互通）；
