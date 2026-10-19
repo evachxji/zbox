@@ -2,7 +2,7 @@
   <img src="assets/icon.png" width="96" alt="Zbox">
 </p>
 
-# Zbox 桌面格子 v0.4.1
+# Zbox 桌面格子 v0.4.2.1
 
 <p align="center">
   <a href="https://github.com/evachxji/zbox/releases/latest"><img src="https://img.shields.io/github/v/release/evachxji/zbox" alt="Release"></a>
