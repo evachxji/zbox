@@ -27,9 +27,22 @@ import transfer
 from transfer import send_files
 import glow
 import sysutil
+from i18n import t
 
 RECV_CONFIRM_TIMEOUT = 170   # 接收确认等待秒数：须小于协议端 prepare-upload 的 180s
 MAX_RECORDS = 50             # 传输记录条数上限，超出丢弃最旧
+
+# 底层异常文本里的中文关键词：部分系统报错与协议层提示是中文，需要拿它们匹配原始
+# 错误串。这是数据而非界面文案——不要迁移进词典、也不要翻译；返回给用户的提示
+# 一律走 transfer.err.*。
+_NET_ERROR_HINTS = {
+    'unconfirmed': '对方未及时确认',
+    'refused': '积极拒绝',
+    'reset': '强迫关闭',
+    'timeout': '超时',
+    'offline': '不在线',
+    'unreachable': '不可达',
+}
 
 
 def _expand_paths(paths):
@@ -76,10 +89,10 @@ def _fmt_eta(seconds):
         return ''
     seconds = int(seconds)
     if seconds < 60:
-        return '%d 秒' % max(1, seconds)
+        return t('transfer.eta.seconds', n=max(1, seconds))
     if seconds < 3600:
-        return '%d 分 %d 秒' % (seconds // 60, seconds % 60)
-    return '%d 小时 %d 分' % (seconds // 3600, seconds % 3600 // 60)
+        return t('transfer.eta.minutes', m=seconds // 60, s=seconds % 60)
+    return t('transfer.eta.hours', h=seconds // 3600, m=seconds % 3600 // 60)
 
 
 _FILE_ICON_CACHE = {}
@@ -190,37 +203,37 @@ def _alias_icon(kind, theme, angle=0):
 
 def _friendly_err(err):
     '''传输失败的原始错误（协议码 / 系统异常串，中英文混杂）映射为简短友好的
-    中文提示；原始错误留在状态文字悬停提示里供排查。识别不了的一律「传输出错」。'''
+    提示；原始错误留在状态文字悬停提示里供排查。识别不了的一律「传输出错」。'''
     s = (err or '').lower()
     if not s:
         return ''
-    if '对方未及时确认' in s:
-        return '对方长时间未确认'
-    if '10061' in s or 'connection refused' in s or '积极拒绝' in s:
-        return '对方设备不在线'
-    if '10054' in s or '10053' in s or 'reset' in s or 'aborted' in s or '强迫关闭' in s:
-        return '连接被中断'
-    if '10060' in s or 'timed out' in s or 'timeout' in s or '超时' in s:
-        return '连接超时'
-    if '不在线' in s:
-        return '对方设备不在线'
-    if '10051' in s or 'unreachable' in s or '不可达' in s:
-        return '网络不可达'
+    if _NET_ERROR_HINTS['unconfirmed'] in s:
+        return t('transfer.err.unconfirmed')
+    if '10061' in s or 'connection refused' in s or _NET_ERROR_HINTS['refused'] in s:
+        return t('transfer.err.offline')
+    if '10054' in s or '10053' in s or 'reset' in s or 'aborted' in s or _NET_ERROR_HINTS['reset'] in s:
+        return t('transfer.err.reset')
+    if '10060' in s or 'timed out' in s or 'timeout' in s or _NET_ERROR_HINTS['timeout'] in s:
+        return t('transfer.err.timeout')
+    if _NET_ERROR_HINTS['offline'] in s:
+        return t('transfer.err.offline')
+    if '10051' in s or 'unreachable' in s or _NET_ERROR_HINTS['unreachable'] in s:
+        return t('transfer.err.unreachable')
     if 'getaddrinfo' in s or '11001' in s or '11004' in s:
-        return '找不到对方设备'
+        return t('transfer.err.not_found')
     if 'errno 28' in s or 'no space' in s:
-        return '磁盘空间不足'
+        return t('transfer.err.no_space')
     if 'errno 13' in s or 'permission' in s:
-        return '没有文件访问权限'
+        return t('transfer.err.permission')
     if 'errno 2]' in s or 'no such file' in s:
-        return '文件不存在或已被移动'
+        return t('transfer.err.missing')
     if 'no sessionid' in s:
-        return '对方无法接收'
+        return t('transfer.err.no_session')
     if 'http 4' in s:
-        return '对方拒绝接收'
+        return t('transfer.err.rejected')
     if 'http 5' in s or 'internal error' in s:
-        return '对方设备出错'
-    return '传输出错'
+        return t('transfer.err.peer_error')
+    return t('transfer.err.generic')
 
 
 def _reveal_in_explorer(path):
@@ -291,7 +304,7 @@ class TransferInfoDialog(QDialog):
     def __init__(self, parent=None):
         super(TransferInfoDialog, self).__init__(parent)
         self.setObjectName('settingsDlg')
-        self.setWindowTitle('关于局域网传输')
+        self.setWindowTitle(t('transfer.info.title'))
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
 
         root = QVBoxLayout(self)
@@ -305,7 +318,7 @@ class TransferInfoDialog(QDialog):
 
         tb = QHBoxLayout()
         tb.setContentsMargins(0, 0, 0, 0)
-        title = QLabel('关于「局域网传输」')
+        title = QLabel(t('transfer.info.heading'))
         title.setObjectName('setTitle')
         tb.addWidget(title)
         tb.addStretch(1)
@@ -313,7 +326,7 @@ class TransferInfoDialog(QDialog):
         close.setObjectName('closeBtn')
         close.setText('✕')
         close.setFixedSize(ui.sc(28), ui.sc(24))
-        close.setToolTip('关闭')
+        close.setToolTip(t('common.close'))
         close.clicked.connect(self.reject)
         tb.addWidget(close)
         lay.addLayout(tb)
@@ -325,26 +338,23 @@ class TransferInfoDialog(QDialog):
             lay.addWidget(lb)
             return lb
 
-        para('在局域网内与其他设备（电脑、手机）互传文件，不经过任何服务器。\n'
-             '本功能参照开源项目 LocalSend（Apache License 2.0）的协议实现，'
-             '与官方 LocalSend 应用不互通。')
-        para('开启后会发生什么', 'transferTitle')
-        para('· 本机会监听固定端口 53327，用于被同网设备发现和接收文件；\n'
-             '· 首次开启时 Windows 可能弹出防火墙授权提示，选择「允许」后同网设备才能连进来。')
-        para('安全提示', 'transferTitle')
-        para('请只在自己家、公司等可信的局域网使用，公共 Wi-Fi 下建议保持关闭。')
-        para('手机端', 'transferTitle')
-        para('移动端手机安装 Zbox 手机端，即可与电脑互传。')
+        para(t('transfer.info.desc'))
+        para(t('common.what_happens'), 'transferTitle')
+        para(t('transfer.info.what'))
+        para(t('transfer.info.security_title'), 'transferTitle')
+        para(t('transfer.info.security'))
+        para(t('transfer.info.mobile_title'), 'transferTitle')
+        para(t('transfer.info.mobile'))
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(ui.sc(8))
-        apk = QPushButton('下载移动端安装包')
+        apk = QPushButton(t('transfer.download_apk'))
         apk.setObjectName('setBtn')
         apk.setCursor(Qt.PointingHandCursor)
         apk.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self.DOWNLOAD_URL)))
         btn_row.addWidget(apk)
         btn_row.addStretch(1)
-        ok = QPushButton('我知道了')
+        ok = QPushButton(t('common.got_it'))
         ok.setObjectName('setSave')
         ok.setCursor(Qt.PointingHandCursor)
         ok.setDefault(True)
@@ -352,7 +362,7 @@ class TransferInfoDialog(QDialog):
         btn_row.addWidget(ok)
         lay.addLayout(btn_row)
 
-        para('可随时在「设置 → 传输」中关闭此功能。', 'transferHint')
+        para(t('transfer.info.footer'), 'transferHint')
 
         self.setFixedWidth(ui.sc(320))
         self.adjustSize()
@@ -365,7 +375,7 @@ class MobileGuideDialog(QDialog):
     def __init__(self, parent=None):
         super(MobileGuideDialog, self).__init__(parent)
         self.setObjectName('settingsDlg')
-        self.setWindowTitle('搜索不到设备')
+        self.setWindowTitle(t('transfer.not_found'))
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
 
         root = QVBoxLayout(self)
@@ -379,7 +389,7 @@ class MobileGuideDialog(QDialog):
 
         tb = QHBoxLayout()
         tb.setContentsMargins(0, 0, 0, 0)
-        title = QLabel('搜索不到设备')
+        title = QLabel(t('transfer.not_found'))
         title.setObjectName('setTitle')
         tb.addWidget(title)
         tb.addStretch(1)
@@ -387,27 +397,26 @@ class MobileGuideDialog(QDialog):
         close.setObjectName('closeBtn')
         close.setText('\u2715')
         close.setFixedSize(ui.sc(28), ui.sc(24))
-        close.setToolTip('关闭')
+        close.setToolTip(t('common.close'))
         close.clicked.connect(self.reject)
         tb.addWidget(close)
         lay.addLayout(tb)
 
-        para = QLabel('请确认手机与电脑连接同一 WiFi。\n'
-                      '手机上需要安装 Zbox 移动端，安装并打开后即可互相发现。')
+        para = QLabel(t('transfer.mobile_guide'))
         para.setObjectName('infoText')
         para.setWordWrap(True)
         lay.addWidget(para)
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(ui.sc(8))
-        dl = QPushButton('下载移动端安装包')
+        dl = QPushButton(t('transfer.download_apk'))
         dl.setObjectName('setBtn')
         dl.setCursor(Qt.PointingHandCursor)
         dl.clicked.connect(lambda: QDesktopServices.openUrl(
             QUrl(TransferInfoDialog.DOWNLOAD_URL)))
         btn_row.addWidget(dl)
         btn_row.addStretch(1)
-        ok = QPushButton('我知道了')
+        ok = QPushButton(t('common.got_it'))
         ok.setObjectName('setSave')
         ok.setCursor(Qt.PointingHandCursor)
         ok.setDefault(True)
@@ -475,7 +484,7 @@ class TransferWidget(QWidget):
         alias_row = QHBoxLayout()
         alias_row.setContentsMargins(ui.sc(10), 0, ui.sc(10), 0)
         alias_row.setSpacing(ui.sc(8))
-        lab = QLabel('本机别名')
+        lab = QLabel(t('transfer.alias'))
         lab.setObjectName('transferLabel')
         self.alias_edit = QLineEdit(device_info.alias if device_info else '')
         self.alias_edit.setObjectName('aliasEdit')
@@ -490,7 +499,7 @@ class TransferWidget(QWidget):
         self.alias_ok_btn.setObjectName('aliasOkBtn')
         self.alias_ok_btn.setIconSize(QSize(ui.sc(15), ui.sc(15)))
         self.alias_ok_btn.setIcon(QIcon(_alias_icon('check', self.theme_key)))
-        self.alias_ok_btn.setToolTip('更新设备名称')
+        self.alias_ok_btn.setToolTip(t('transfer.alias.tooltip'))
         self.alias_ok_btn.clicked.connect(self._alias_btn_clicked)
         alias_row.addWidget(lab)
         alias_row.addWidget(self.alias_edit, 1)
@@ -499,7 +508,7 @@ class TransferWidget(QWidget):
 
         # 更新成功浮窗：pane 子控件绝对定位（按钮正上方坐标系），
         # 不抢鼠标事件；_toast_seq 防止连续点击时旧的淡出定时器误杀新浮窗
-        self.alias_toast = QLabel('更新成功', self.pane)
+        self.alias_toast = QLabel(t('transfer.alias.updated'), self.pane)
         self.alias_toast.setObjectName('aliasToast')
         self.alias_toast.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.alias_toast.hide()
@@ -512,16 +521,16 @@ class TransferWidget(QWidget):
         # ---- 设备列表 ----
         dev_head = QHBoxLayout()
         dev_head.setContentsMargins(ui.sc(10), 0, ui.sc(10), 0)
-        t = QLabel('附近的设备')
-        t.setObjectName('transferTitle')
+        dev_title = QLabel(t('transfer.devices'))
+        dev_title.setObjectName('transferTitle')
         self.refresh_btn = QToolButton()
         self.refresh_btn.setObjectName('refreshBtn')
         self.refresh_btn.setIcon(QIcon(_refresh_icon(self.theme_key)))
         self.refresh_btn.setIconSize(QSize(ui.sc(16), ui.sc(16)))
         self.refresh_btn.setFixedSize(ui.sc(26), ui.sc(26))
-        self.refresh_btn.setToolTip('刷新')
+        self.refresh_btn.setToolTip(t('common.refresh'))
         self.refresh_btn.clicked.connect(self._refresh_clicked)
-        dev_head.addWidget(t)
+        dev_head.addWidget(dev_title)
         dev_head.addStretch(1)
         dev_head.addWidget(self.refresh_btn)
         pl.addLayout(dev_head)
@@ -547,11 +556,11 @@ class TransferWidget(QWidget):
         send_row.setSpacing(ui.sc(8))
         self.pick_btn = QToolButton()
         self.pick_btn.setObjectName('pickBtn')
-        self.pick_btn.setText('选择文件发送（可拖）')
+        self.pick_btn.setText(t('transfer.pick'))
         self.pick_btn.setFixedHeight(ui.sc(40))
         self.pick_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.pick_btn.clicked.connect(self._pick_files)
-        self.send_btn = QPushButton('发送')
+        self.send_btn = QPushButton(t('transfer.send'))
         self.send_btn.setObjectName('sendBtn')
         self.send_btn.setFixedHeight(ui.sc(40))
         self.send_btn.setEnabled(False)
@@ -563,7 +572,7 @@ class TransferWidget(QWidget):
         # ---- 传输记录 ----
         rec_head = QHBoxLayout()
         rec_head.setContentsMargins(ui.sc(10), 0, ui.sc(10), 0)
-        rt = QLabel('传输记录')
+        rt = QLabel(t('transfer.records'))
         rt.setObjectName('transferTitle')
         rec_head.addWidget(rt)
         rec_head.addStretch(1)
@@ -583,7 +592,7 @@ class TransferWidget(QWidget):
         self.rec_scroll.setWidget(self.rec_box)
         pl.addWidget(self.rec_scroll, 1)
 
-        self.rec_empty = QLabel('暂无传输记录')
+        self.rec_empty = QLabel(t('transfer.records.empty'))
         self.rec_empty.setObjectName('transferHint')
         self.rec_empty.setAlignment(Qt.AlignCenter)
         self.rec_lay.insertWidget(0, self.rec_empty)
@@ -595,7 +604,7 @@ class TransferWidget(QWidget):
         rl = QVBoxLayout(self.recv)
         rl.setContentsMargins(ui.sc(18), ui.sc(16), ui.sc(18), ui.sc(14))
         rl.setSpacing(ui.sc(10))
-        title = QLabel('收到文件')
+        title = QLabel(t('transfer.recv.title'))
         title.setObjectName('transferTitle')
         # 来源行：来自 Pixel 6 · 1 个文件 · 共 2.4 MB
         self.recv_from = QLabel()
@@ -614,16 +623,16 @@ class TransferWidget(QWidget):
         self.recv_dir.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         chg = QToolButton()
         chg.setObjectName('linkBtn')        # 无边框链接样式
-        chg.setText('更改…')
+        chg.setText(t('transfer.recv.change'))
         chg.setCursor(Qt.PointingHandCursor)
         chg.clicked.connect(self._recv_change_dir)
         dir_row.addWidget(self.recv_dir, 1)
         dir_row.addWidget(chg)
         btn_row = QHBoxLayout()
         btn_row.setSpacing(ui.sc(10))
-        no = QPushButton('拒绝')
+        no = QPushButton(t('transfer.recv.reject'))
         no.setObjectName('setBtn')          # 复用设置窗按钮样式
-        yes = QPushButton('接受')
+        yes = QPushButton(t('transfer.recv.accept'))
         yes.setObjectName('setSave')
         no.clicked.connect(self._recv_reject)
         yes.clicked.connect(self._recv_accept)
@@ -793,12 +802,9 @@ class TransferWidget(QWidget):
             return
         from video_ui import _ConfirmDialog   # 运行期导入：避开 import 期循环
         dlg = _ConfirmDialog(
-            self, title='Windows 防火墙拦截',
-            text='检测到 Windows 防火墙存在针对本程序的「阻止」规则'
-                 '（首次启用时在安全警告弹窗点了「取消」所致）。\n'
-                 '后果：其他设备能发现本机，本机却发现不了对方、也收不到文件。\n'
-                 '修复将请求管理员权限：删除阻止规则并放行端口 53327。',
-            ok_text='修复防火墙')
+            self, title=t('transfer.fw.title'),
+            text=t('transfer.fw.text'),
+            ok_text=t('transfer.fw.fix'))
         if dlg.exec() != QDialog.Accepted:
             return
         threading.Thread(target=self._fix_firewall, daemon=True).start()
@@ -814,14 +820,13 @@ class TransferWidget(QWidget):
     def _on_fw_result(self, r):
         from video_ui import _ConfirmDialog   # 运行期导入：避开 import 期循环
         if r == 'ok':
-            _ConfirmDialog(self, title='防火墙修复',
-                           text='已删除阻止规则并放行端口 53327，传输功能恢复正常。',
-                           ok_text='知道了').exec()
+            _ConfirmDialog(self, title=t('transfer.fw.ok_title'),
+                           text=t('transfer.fw.ok_text'),
+                           ok_text=t('transfer.fw.dismiss')).exec()
         else:
-            _ConfirmDialog(self, title='防火墙修复失败',
-                           text='自动修复未成功。请手动放行：设置 → 网络和 Internet → '
-                                'Windows 防火墙 → 允许应用通过防火墙，找到 Zbox 并勾选网络类型。',
-                           ok_text='知道了').exec()
+            _ConfirmDialog(self, title=t('transfer.fw.fail_title'),
+                           text=t('transfer.fw.fail_text'),
+                           ok_text=t('transfer.fw.dismiss')).exec()
 
     # ---------------- 门禁层 ----------------
 
@@ -835,11 +840,11 @@ class TransferWidget(QWidget):
         gl.setContentsMargins(ui.sc(18), ui.sc(16), ui.sc(18), ui.sc(14))
         gl.setSpacing(ui.sc(10))
         gl.addStretch(1)
-        self.gate_msg = QLabel('传输服务不可用\n（端口 53327 被占用）')
+        self.gate_msg = QLabel(t('transfer.gate.occupied'))
         self.gate_msg.setObjectName('transferHint')
         self.gate_msg.setAlignment(Qt.AlignCenter)
         gl.addWidget(self.gate_msg)
-        self.gate_ok = QPushButton('启用传输')
+        self.gate_ok = QPushButton(t('transfer.gate.enable'))
         self.gate_ok.setObjectName('setSave')           # 复用设置窗主按钮样式
         self.gate_ok.setCursor(Qt.PointingHandCursor)
         self.gate_ok.clicked.connect(self._gate_ok_clicked)
@@ -850,7 +855,7 @@ class TransferWidget(QWidget):
         self.gate_help.setText('?')
         self.gate_help.setFixedSize(ui.sc(20), ui.sc(20))
         self.gate_help.setCursor(Qt.PointingHandCursor)
-        self.gate_help.setToolTip('什么是局域网传输')
+        self.gate_help.setToolTip(t('settings.transfer.help'))
         self.gate_help.clicked.connect(lambda: TransferInfoDialog(self).exec())
         gl.addWidget(self.gate_help, 0, Qt.AlignCenter)
         gl.addStretch(1)
@@ -861,7 +866,8 @@ class TransferWidget(QWidget):
         try:
             self._gate_mode = mode
             self.gate_msg.setVisible(mode == 'occupied')
-            self.gate_ok.setText('确定' if mode == 'occupied' else '启用传输')
+            self.gate_ok.setText(t('common.ok') if mode == 'occupied'
+                                 else t('transfer.gate.enable'))
             self.gate_help.setVisible(mode != 'occupied')
             if self._blur is None:
                 self._blur = QGraphicsBlurEffect(self)
@@ -892,12 +898,12 @@ class TransferWidget(QWidget):
                 # 启动期间禁用按钮防连点并显示 loading：成功后门禁层隐藏，
                 # 失败已切「确定」形态，异常返回（未切形态）则恢复按钮文字
                 self.gate_ok.setEnabled(False)
-                self.gate_ok.setText('启用中…')
+                self.gate_ok.setText(t('transfer.gate.enabling'))
                 self.gate_ok.repaint()
                 self.set_enabled(True)
                 self.gate_ok.setEnabled(True)
                 if self._gate_mode == 'enable':
-                    self.gate_ok.setText('启用传输')
+                    self.gate_ok.setText(t('transfer.gate.enable'))
         except Exception:
             pass
 
@@ -990,14 +996,14 @@ class TransferWidget(QWidget):
         try:
             if self._toast_anim is not None:
                 self._toast_anim.stop()
-            t = self.alias_toast
-            t.adjustSize()
+            toast = self.alias_toast
+            toast.adjustSize()
             pos = self.alias_ok_btn.pos()          # 按钮父控件就是 pane
-            x = pos.x() - t.width() - ui.sc(8)
-            y = pos.y() + (self.alias_ok_btn.height() - t.height()) // 2
-            t.move(max(0, x), max(0, y))
-            t.raise_()
-            t.show()
+            x = pos.x() - toast.width() - ui.sc(8)
+            y = pos.y() + (self.alias_ok_btn.height() - toast.height()) // 2
+            toast.move(max(0, x), max(0, y))
+            toast.raise_()
+            toast.show()
             self._toast_anim = QPropertyAnimation(self._toast_opacity, b'opacity', self)
             self._toast_anim.setDuration(160)
             self._toast_anim.setStartValue(self._toast_opacity.opacity())
@@ -1066,13 +1072,14 @@ class TransferWidget(QWidget):
             if w is not None:
                 w.deleteLater()
         if not merged:
-            hint = QLabel('未发现设备——确认手机与电脑在同一 WiFi')
+            hint = QLabel(t('transfer.devices.empty'))
+            hint.setWordWrap(True)
             hint.setObjectName('transferHint')
             hint.setAlignment(Qt.AlignCenter)
             self.dev_lay.insertWidget(0, hint)
             nofind = QToolButton()
             nofind.setObjectName('linkBtn')     # 无边框链接样式
-            nofind.setText('搜索不到设备')
+            nofind.setText(t('transfer.not_found'))
             nofind.setCursor(Qt.PointingHandCursor)
             nofind.clicked.connect(self._show_mobile_guide)
             self.dev_lay.insertWidget(1, nofind, alignment=Qt.AlignCenter)
@@ -1086,12 +1093,14 @@ class TransferWidget(QWidget):
                 lay = QHBoxLayout(row)
                 lay.setContentsMargins(ui.sc(8), ui.sc(5), ui.sc(8), ui.sc(5))
                 lay.setSpacing(ui.sc(8))
-                chip = QLabel({'mobile': '手机', 'desktop': '电脑'}.get(info.device_type, '设备'))
+                chip = QLabel({'mobile': t('transfer.device.mobile'),
+                               'desktop': t('transfer.device.desktop')}
+                              .get(info.device_type, t('transfer.device.other')))
                 chip.setObjectName('deviceType')
                 name = QLabel(info.alias or ip)
                 name.setObjectName('deviceAlias')
                 name.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-                online = QLabel('在线')
+                online = QLabel(t('transfer.device.online'))
                 online.setObjectName('deviceOnline')
                 row.setToolTip(ip)
                 lay.addWidget(chip)
@@ -1167,13 +1176,13 @@ class TransferWidget(QWidget):
     def _pick_files(self):
         try:
             menu = QMenu(self)
-            act_files = menu.addAction('选择文件')
-            act_dir = menu.addAction('选择文件夹')
+            act_files = menu.addAction(t('transfer.pick_files'))
+            act_dir = menu.addAction(t('transfer.pick_folder'))
             act = menu.exec_(self.pick_btn.mapToGlobal(self.pick_btn.rect().bottomLeft()))
             if act is act_files:
-                paths, _ = QFileDialog.getOpenFileNames(self, '选择要发送的文件')
+                paths, _ = QFileDialog.getOpenFileNames(self, t('transfer.pick_files.title'))
             elif act is act_dir:
-                d = QFileDialog.getExistingDirectory(self, '选择要发送的文件夹')
+                d = QFileDialog.getExistingDirectory(self, t('transfer.pick_folder.title'))
                 paths = [d] if d else []
             else:
                 paths = []
@@ -1193,10 +1202,12 @@ class TransferWidget(QWidget):
                         total += os.path.getsize(p)
                     except OSError:
                         pass
-                self.pick_btn.setText('已选 %d 个文件（%s）' % (len(self._files), _fmt_size(total)))
+                self.pick_btn.setText(t('transfer.files.selected',
+                                        count=len(self._files),
+                                        size=_fmt_size(total)))
                 self.pick_btn.setToolTip('\n'.join(rel for _p, rel in self._files))
             else:
-                self.pick_btn.setText('选择文件发送（可拖）')
+                self.pick_btn.setText(t('transfer.pick'))
                 self.pick_btn.setToolTip('')
             self._sync_send_enabled()
         except Exception:
@@ -1315,6 +1326,7 @@ class TransferWidget(QWidget):
             rec = self._records.get(key)
             if rec is None:
                 return
+            rec.pop('err_friendly', None)   # 新一轮结果：丢弃重试前的展示文案
             if ok:
                 rec['state'] = 'done'
                 rec['done'] = rec['total']
@@ -1357,7 +1369,8 @@ class TransferWidget(QWidget):
             merged = self._devices_merged()
             if rec.get('fp') not in merged:      # 对端不在线：刷新设备列表并更新失败文案
                 self._refresh_devices()
-                rec['err'] = '对端设备不在线'
+                rec['err'] = ''
+                rec['err_friendly'] = t('transfer.err.offline')
                 self._update_record(rec)
                 return
             info, ip = merged[rec['fp']]
@@ -1378,6 +1391,7 @@ class TransferWidget(QWidget):
             rec['state'] = 'wait'
             rec['done'] = base
             rec['err'] = ''
+            rec.pop('err_friendly', None)
             rec.pop('_speed', None)
             rec.pop('_tick', None)
             rec.pop('_stat_ts', None)
@@ -1450,9 +1464,9 @@ class TransferWidget(QWidget):
                 rec['session_id'] = view['session_id']
             self._pending = (view['session_id'], key, result, event)
             self._save_dir = _default_save_dir(self.cfg)
-            self.recv_from.setText('来自 %s · %d 个文件 · 共 %s'
-                                   % (view['alias'], len(view['names']),
-                                      _fmt_size(view['total'])))
+            self.recv_from.setText(t('transfer.recv.summary',
+                                     alias=view['alias'], count=len(view['names']),
+                                     size=_fmt_size(view['total'])))
             self._fill_recv_files(view['names'])
             self.recv_dir.setText(self._recv_dir_text(self._save_dir))
             self.recv_dir.setToolTip(self._save_dir)
@@ -1473,7 +1487,9 @@ class TransferWidget(QWidget):
             anim.setStartValue(QRect(x, y + ui.sc(24), w, h))
             anim.setEndValue(QRect(x, y, w, h))
             anim.start(QPropertyAnimation.DeleteWhenStopped)
-            self.notify.emit('收到文件', '%s 想发送 %d 个文件' % (view['alias'], len(view['names'])))
+            self.notify.emit(t('transfer.recv.title'),
+                             t('transfer.recv.request', alias=view['alias'],
+                               count=len(view['names'])))
         except Exception:
             # 防僵尸 _pending：一次异常后不再把所有接收静默拒绝到重启
             self._pending = None
@@ -1486,7 +1502,8 @@ class TransferWidget(QWidget):
     def _recv_dir_text(self, d):
         '''「保存到：<路径>」按弹窗可用宽度中段省略（尾部目录名始终可见，全路径在 tooltip）。'''
         avail = ui.sc(320) - ui.sc(36) - ui.sc(56)   # 弹宽 - 左右边距 - 「更改…」按钮
-        return self.recv_dir.fontMetrics().elidedText('保存到：%s' % d, Qt.ElideMiddle, avail)
+        return self.recv_dir.fontMetrics().elidedText(
+            t('transfer.recv.save_to', path=d), Qt.ElideMiddle, avail)
 
     def _fill_recv_files(self, names):
         '''重建接收确认层的文件清单行（图标 + 文件名，最多 8 行）。'''
@@ -1515,7 +1532,7 @@ class TransferWidget(QWidget):
             hl.addWidget(lb, 1)
             self.recv_files_lay.addWidget(row)
         if len(names) > len(shown):
-            more = QLabel('…等共 %d 个文件' % len(names))
+            more = QLabel(t('transfer.recv.more', count=len(names)))
             more.setObjectName('recvFileMore')
             self.recv_files_lay.addWidget(more)
 
@@ -1576,7 +1593,7 @@ class TransferWidget(QWidget):
 
     def _recv_change_dir(self):
         try:
-            d = QFileDialog.getExistingDirectory(self.recv, '选择保存目录', self._save_dir)
+            d = QFileDialog.getExistingDirectory(self.recv, t('transfer.pick_dir'), self._save_dir)
             if d:
                 self._save_dir = d
                 self.cfg.set('transfer_dir', d)
@@ -1635,7 +1652,8 @@ class TransferWidget(QWidget):
             rec['state'] = 'done'
             rec['done'] = rec['total']
             self._update_record(rec)
-            self.notify.emit('传输完成', '%s 已保存' % rec['name'])
+            self.notify.emit(t('transfer.done_title'),
+                             t('transfer.saved', name=rec['name']))
         except Exception:
             pass
 
@@ -1664,7 +1682,7 @@ class TransferWidget(QWidget):
                 len(set(n.split('/')[0] for n in names)) == 1:
             disp_name = tip = names[0].split('/')[0]
         else:
-            disp_name = '%d 个文件' % len(names)
+            disp_name = t('transfer.n_files', count=len(names))
             tip = '\n'.join(names)
         row = _ClickRow()
         row.setObjectName('transferRow')
@@ -1684,7 +1702,8 @@ class TransferWidget(QWidget):
         icon.setPixmap(_file_icon(getattr(self, 'theme_key', 'nocturne')))
         display = disp_name
         if peer:
-            display += (' · 发送至 ' if direction == 'up' else ' · 来自 ') + peer
+            display += t('transfer.peer.to' if direction == 'up' else 'transfer.peer.from',
+                         name=peer)
         name = _ElideLabel(display)
         name.setObjectName('transferName')
         name.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
@@ -1702,15 +1721,15 @@ class TransferWidget(QWidget):
             cancel_event = threading.Event()
             cancel_btn = QToolButton()
             cancel_btn.setObjectName('cancelBtn')
-            cancel_btn.setText('取消')
+            cancel_btn.setText(t('common.cancel'))
             cancel_btn.clicked.connect(
                 lambda checked=False, k=key: self._cancel_send(k))
             top.addWidget(cancel_btn)
             # 失败重试：断点续传（文件粒度，已传完的文件跳过），仅 fail 态可见
             retry_btn = QToolButton()
             retry_btn.setObjectName('cancelBtn')
-            retry_btn.setText('重试')
-            retry_btn.setToolTip('断点续传：已传完的文件不再重发')
+            retry_btn.setText(t('common.retry'))
+            retry_btn.setToolTip(t('transfer.retry.tooltip'))
             retry_btn.clicked.connect(
                 lambda checked=False, k=key: self._retry_send(k))
             retry_btn.hide()
@@ -1756,7 +1775,9 @@ class TransferWidget(QWidget):
                 anim.start(QPropertyAnimation.DeleteWhenStopped)
         except Exception:
             row.setMaximumHeight(16777215)
-        full_display = disp_name + (((' · 发送至 ') if direction == 'up' else (' · 来自 ')) + peer if peer else '')
+        full_display = disp_name + (
+            t('transfer.peer.to' if direction == 'up' else 'transfer.peer.from', name=peer)
+            if peer else '')
         rec = {'key': key, 'direction': direction, 'name': full_display, 'total': total,
                'done': 0, 'files': {}, 'saved': [], 'state': 'wait', 'err': '',
                'session_id': None, 'row': row, 'bar': bar, 'state_lab': state,
@@ -1800,8 +1821,8 @@ class TransferWidget(QWidget):
                 return
             paths = [p for p in rec['saved'] if os.path.exists(p)]
             menu = QMenu(self)
-            act_reveal = menu.addAction('打开文件位置') if paths else None
-            act_del = menu.addAction('删除记录（不删除文件）')
+            act_reveal = menu.addAction(t('transfer.record.reveal')) if paths else None
+            act_del = menu.addAction(t('transfer.record.delete'))
             act = menu.exec(rec['row'].mapToGlobal(pos))
             if act is None:
                 return
@@ -1843,10 +1864,11 @@ class TransferWidget(QWidget):
         state = rec['state']
         total = rec['total'] or 0
         if state == 'wait':
-            text = '等待对方确认' if rec['direction'] == 'up' else '等待你确认'
+            text = t('transfer.state.waiting_peer') if rec['direction'] == 'up' \
+                else t('transfer.state.waiting_you')
         elif state == 'busy':
             pct = int(rec['done'] * 100 / total) if total else 0
-            text = '传输中 %d%%' % pct
+            text = t('transfer.state.transferring', percent=pct)
             now = time.time()
             tick = rec.get('_tick')
             if tick is None:
@@ -1868,19 +1890,22 @@ class TransferWidget(QWidget):
                     rec['speed_lab'].setText(_fmt_speed(rec['_speed']))
                     if total and rec['done'] < total:
                         rec['eta_lab'].setText(
-                            '剩 ' + _fmt_eta((total - rec['done']) / rec['_speed']))
+                            t('transfer.state.eta',
+                              time=_fmt_eta((total - rec['done']) / rec['_speed'])))
         elif state == 'done':
-            text = '完成'
+            text = t('transfer.state.done')
         elif state == 'rejected':
-            text = '被拒绝'
+            text = t('transfer.state.rejected')
         elif state == 'cancelled':
-            text = '已取消'
+            text = t('transfer.state.cancelled')
         elif state == 'cancelling':
-            text = '取消中…'
+            text = t('transfer.state.cancelling')
         else:
-            friendly = _friendly_err(rec.get('err'))
-            text = '失败：%s' % friendly if friendly else '失败'
-            rec['state_lab'].setToolTip(rec.get('err') or '')   # 原始错误留悬停排查
+            friendly = rec.get('err_friendly') or _friendly_err(rec.get('err'))
+            text = t('transfer.state.failed_detail', reason=friendly) \
+                if friendly else t('transfer.state.failed')
+            rec['state_lab'].setToolTip(
+                rec.get('err') or rec.get('err_friendly') or '')   # 原始错误留悬停排查
         rec['state_lab'].setText(text)
         # 接收完成的记录可单击打开 / 右键管理，给个手型提示（其余状态无交互）
         rec['row'].setCursor(Qt.PointingHandCursor

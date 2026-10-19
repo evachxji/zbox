@@ -22,6 +22,8 @@ import threading
 import zipfile
 from urllib.request import Request, urlopen
 
+from i18n import t
+
 UA = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) zbox'}   # 部分镜像无 UA 拒访
 
 YTDLP_RELEASE = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe'
@@ -132,18 +134,18 @@ def import_cookies(src):
         with open(src, 'rb') as f:
             head = f.read(65536)
     except OSError as e:
-        return False, '读取文件失败：%s' % e
+        return False, t('video.cookie.read_failed', error=e)
     text = head.decode('utf-8', 'replace')
     rows = [l for l in text.splitlines() if l.strip() and not l.startswith('#')]
     if not rows or not any('\t' in l for l in rows):
-        return False, '文件格式不对：需要 Netscape 格式的 cookies.txt（扩展导出时选 cookies.txt / Netscape 格式）'
+        return False, t('video.cookie.bad_format')
     try:
         os.makedirs(tools_dir(), exist_ok=True)
         shutil.copyfile(src, cookies_path())
     except OSError as e:
-        return False, '复制失败：%s' % e
+        return False, t('video.cookie.copy_failed', error=e)
     if 'douyin.com' not in text:
-        return True, '已导入，但文件里没找到 douyin.com 的 cookie——确认是在抖音页面上导出的吗？'
+        return True, t('video.cookie.no_douyin')
     return True, ''
 
 
@@ -173,20 +175,21 @@ def _fetch(url, dst, progress_cb=None):
                     progress_cb(done, total)
 
 
-def _try_sources(urls, progress_cb=None, what='组件'):
+def _try_sources(urls, progress_cb=None, what=None):
     """多个下载源依次尝试，成功返回完整字节；全部失败抛最后一个异常。"""
+    what = what or t('video.prep.component')
     err = None
     tmp = os.path.join(tools_dir(), '.dl_partial')
     try:
         for url in urls:
             try:
                 _fetch(url, tmp,
-                       lambda d, t: progress_cb and progress_cb(what, d, t))
+                       lambda d, total: progress_cb and progress_cb(what, d, total))
                 with open(tmp, 'rb') as f:
                     return f.read()
             except Exception as e:
                 err = e
-        raise err if err else RuntimeError('%s 下载失败' % what)
+        raise err if err else RuntimeError(t('video.dl.failed', name=what))
     finally:
         try:
             os.remove(tmp)
@@ -201,12 +204,12 @@ def download_ytdlp(progress_cb=None):
     for prefix in GH_MIRRORS:
         try:
             _fetch(prefix + YTDLP_RELEASE, dst + '.new',
-                   lambda d, t: progress_cb and progress_cb('yt-dlp', d, t))
+                   lambda d, total: progress_cb and progress_cb('yt-dlp', d, total))
             os.replace(dst + '.new', dst)
             return
         except Exception as e:
             err = e
-    raise err if err else RuntimeError('yt-dlp 下载失败')
+    raise err if err else RuntimeError(t('video.ytdlp.failed'))
 
 
 def _ffmpeg_from_gz(data):
@@ -218,7 +221,7 @@ def _ffmpeg_from_zip(data):
         for n in z.namelist():
             if n.endswith('/bin/ffmpeg.exe') or n.endswith('ffmpeg.exe'):
                 return z.read(n)
-    raise RuntimeError('压缩包里没有 ffmpeg.exe')
+    raise RuntimeError(t('video.zip.no_ffmpeg'))
 
 
 def download_ffmpeg(progress_cb=None, ver=None):
@@ -236,7 +239,7 @@ def download_ffmpeg(progress_cb=None, ver=None):
         except Exception:
             continue
     else:
-        raise RuntimeError('ffmpeg 解压失败')
+        raise RuntimeError(t('video.ffmpeg.extract_failed'))
     dst = ffmpeg_path()
     with open(dst + '.new', 'wb') as f:
         f.write(exe)
@@ -352,7 +355,8 @@ def parse_video(url, timeout=60):
     if r.returncode != 0:
         text = r.stderr.decode('utf-8', 'replace') + r.stdout.decode('utf-8', 'replace')
         lines = [l.replace('ERROR:', '').strip() for l in text.splitlines() if 'ERROR' in l]
-        raise RuntimeError(lines[-1][:120] if lines else '解析失败（退出码 %d）' % r.returncode)
+        raise RuntimeError(lines[-1][:120] if lines
+                           else t('video.parse.failed_rc', code=r.returncode))
     j = json.loads(r.stdout.decode('utf-8', 'replace'))
     fmts = j.get('formats', [])
     heights = sorted({f['height'] for f in fmts
@@ -379,6 +383,10 @@ _PROGRESS_RE = re.compile(
 _MERGE_RE = re.compile(r'\[Merger\] Merging formats into "(.+?)"')
 _DEST_RE = re.compile(r'\[download\] Destination: (.+)$')
 
+# done_cb 的结构化错误码：同名成品已存在（含分辨率后缀）而跳过下载。
+# 这是标记而不是文案，UI 层按它选择展示文案（中英文都稳定）。
+DUPLICATE_SKIPPED = 'duplicate-skipped'
+
 
 def download_cmd(url, height, out_dir):
     """照搬参考脚本的参数：bestvideo[height<=N]+bestaudio 合并 mp4，
@@ -399,7 +407,8 @@ def download_cmd(url, height, out_dir):
 class Download(object):
     """一次视频下载：start() 在当前线程阻塞执行，terminate() 可随时中止。
     同名成品已存在时 yt-dlp 会直接跳过（rc=0 但什么都没下），检测到跳过后
-    自动给文件名追加「-2160P」式分辨率后缀重试一次；后缀名也撞车才报「未重复下载」。"""
+    自动给文件名追加「-2160P」式分辨率后缀重试一次；后缀名也撞车才交回
+    DUPLICATE_SKIPPED 标记（文案由 UI 层决定）。"""
 
     def __init__(self, url, height, out_dir, split=True):
         self.cmd = download_cmd(url, height, out_dir)
@@ -447,7 +456,7 @@ class Download(object):
                     pct = raw * 0.95
                 detail = '%.1f%% · %s' % (raw, m.group(3))
                 if m.group(4):
-                    detail += ' · 剩 ' + m.group(4)
+                    detail += t('video.dl.eta_suffix', eta=m.group(4))
                 if stage:
                     detail = '%s · %s' % (stage, detail)
                 progress_cb(min(pct, 95.0), detail, m.group(2) or '',
@@ -457,7 +466,8 @@ class Download(object):
             if m:
                 stream_idx += 1
                 if self._split:
-                    stage = '(1/3) 下载视频' if stream_idx == 1 else '(2/3) 下载音频'
+                    stage = (t('video.dl.stage_video') if stream_idx == 1
+                             else t('video.dl.stage_audio'))
                 outfile = m.group(1)
                 dests.append(m.group(1))
             else:
@@ -466,7 +476,8 @@ class Download(object):
                     outfile = m.group(1)
                     stage = ''
                     # pct=None + 非空文案 = 阶段提示（合并只在分流时发生）
-                    progress_cb(None, '(3/3) 合并中…' if self._split else '合并中…')
+                    progress_cb(None, t('video.dl.stage_merging') if self._split
+                                else t('video.dl.merging'))
             if 'has already been downloaded' in line:
                 skipped = True
             if 'ERROR' in line:
@@ -499,7 +510,7 @@ class Download(object):
                     self.cmd = (self.cmd[:-1] +
                                 ['-o', '%%(title)s [%%(id)s]%s.%%(ext)s' % suffix,
                                  self.cmd[-1]])
-                    progress_cb(None, '检测到同名文件，以 %s 后缀重新下载' % suffix)
+                    progress_cb(None, t('video.dl.retry_suffix', suffix=suffix))
                     continue
                 break
         except Exception as e:
@@ -511,10 +522,10 @@ class Download(object):
             if outfile:
                 done_cb(True, outfile)   # 完整路径（抓不到输出名时为空串）
             else:
-                done_cb(False, '同名文件已存在（含分辨率后缀），未重复下载')
+                done_cb(False, DUPLICATE_SKIPPED)
         else:
             self._cleanup_parts(dests)
-            tail = err_lines[-1] if err_lines else 'yt-dlp 退出码 %d' % rc
+            tail = err_lines[-1] if err_lines else t('video.dl.exit_code', code=rc)
             done_cb(False, tail.replace('ERROR:', '').strip())
 
     def pause(self):

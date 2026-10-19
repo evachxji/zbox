@@ -36,6 +36,18 @@ class I18nCoreTest(unittest.TestCase):
         import i18n_zh
         self.assertEqual(set(i18n_zh.CATALOG), set(i18n_en.CATALOG))
 
+    def test_zh_and_en_placeholder_fields_match(self):
+        import string
+        import i18n_en
+        import i18n_zh
+
+        def fields(text):
+            return {name for _lit, name, _spec, _conv
+                    in string.Formatter().parse(text) if name is not None}
+
+        for key, zh_text in i18n_zh.CATALOG.items():
+            self.assertEqual(fields(zh_text), fields(i18n_en.CATALOG[key]), key)
+
     def test_missing_key_falls_back_to_key(self):
         i18n.set_language('en-US')
         self.assertEqual(i18n.t('no.such.key'), 'no.such.key')
