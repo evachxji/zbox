@@ -271,6 +271,14 @@ def context_menu_remove():
         _delete_legacy_shell_tree(root)
 
 
+def context_menu_remove_zbox():
+    """清 Zbox 自身的右键菜单树（HKCU/HKLM）。
+    _delete_shell_tree 会顺带清掉 Zbox 菜单键下历史遗留的 zviber.* 子键，
+    但不会删 zviber 自己的独立菜单键——那由 context_menu_remove / legacy_integration_remove 处理。"""
+    for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+        _delete_shell_tree(root)
+
+
 def legacy_integration_remove():
     """清掉旧名（zviber）留下的注册表残留：旧右键菜单树 + 旧卸载项。
     新名安装/卸载时都调一次，避免「设置→应用」里同时躺着两个卸载项、桌面右键多一个旧菜单。"""
@@ -390,8 +398,9 @@ def context_menu_set_icons_hidden(hidden, icon_path=None):
         context_menu_set_running(True, icon_path)
 
 
-def uninstall_reg_install(exe_path, all_users=False, size_kb=None):
-    """写入「设置→应用→安装的应用」卸载项。size_kb 不给时按 exe 自身大小估算。"""
+def uninstall_reg_install(exe_path, all_users=False, size_kb=None, language=None):
+    """写入「设置→应用→安装的应用」卸载项。size_kb 不给时按 exe 自身大小估算；
+    language 记录安装时选择的语言（空值不写），供首次启动与卸载向导选择文案。"""
     if size_kb is None:
         size_kb = os.path.getsize(exe_path) // 1024
     vals = [
@@ -405,9 +414,16 @@ def uninstall_reg_install(exe_path, all_users=False, size_kb=None):
         ('NoRepair', winreg.REG_DWORD, 1),
         ('EstimatedSize', winreg.REG_DWORD, size_kb),
     ]
+    if language:
+        vals.append(('Language', winreg.REG_SZ, language))
     with winreg.CreateKey(_root(all_users), UNINSTALL_KEY) as k:
         for name, vtype, val in vals:
             winreg.SetValueEx(k, name, 0, vtype, val)
+        if not language:
+            try:
+                winreg.DeleteValue(k, 'Language')   # 覆盖安装时清掉上一版残留的语言值
+            except OSError:
+                pass
 
 
 def uninstall_reg_get(name, all_users=False):
@@ -438,6 +454,15 @@ def uninstall_reg_remove():
                 winreg.DeleteKey(root, key)
             except OSError:
                 pass
+
+
+def uninstall_reg_remove_zbox():
+    """只清 Zbox 自身的卸载项（HKCU/HKLM）；旧名 zviber 的残留留在原处。"""
+    for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+        try:
+            winreg.DeleteKey(root, UNINSTALL_KEY)
+        except OSError:
+            pass
 
 
 # ---------------- Windows 防火墙（局域网传输） ----------------

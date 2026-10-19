@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""安装/卸载：深色主题安装向导（路径/范围/进度/完成页）+ 卸载向导（可选删除个人数据）。
+"""安装/卸载：深色主题安装向导（语言/路径/进度/完成页）+ 卸载向导（可选删除个人数据）。
 安装包形态：setup.pyw 打成 onefile exe，内嵌 onedir 程序目录为 payload（--add-data），
 向导把 payload 整体复制到安装目录（按字节回报进度）；装出来的程序本体是 onedir（一堆小文件）。
 仅冻结为 exe 时生效；源码运行（pythonw main.pyw）不受影响，仍走 install.py。
@@ -12,16 +12,21 @@ import sys
 import time
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import (QApplication, QDialog, QWidget, QVBoxLayout, QHBoxLayout, QStyle,
-                             QLabel, QFrame, QToolButton, QCheckBox, QRadioButton,
+from PySide6.QtWidgets import (QApplication, QDialog, QWidget, QVBoxLayout, QHBoxLayout,
+                             QLabel, QFrame, QToolButton, QCheckBox, QComboBox,
                              QPushButton, QLineEdit, QProgressBar, QFileDialog,
                              QStackedLayout, QMessageBox)
 
+import i18n
 import sysutil
+from i18n import t
 
 APP_EXE = 'zbox.exe'
 LEGACY_APP_EXE = 'zviber.exe'   # 旧名程序本体：覆盖重装时用来识别旧安装
-APP_TITLE = 'Zbox桌面格子'
+# 桌面快捷方式固定用品牌名，不随界面语言变化——否则英文安装会建 Zbox.lnk、
+# 中文卸载去找另一份，旧快捷方式永远删不掉
+SHORTCUT_NAME = 'Zbox'
+LEGACY_SHORTCUT_NAMES = ('Zbox桌面格子',)   # 改名前的快捷方式文件名，卸载时一并清理
 
 # 向导补充样式：沿用 NOCTURNE 深色配色（#e8a33d 强调色，#e05252 危险色），%CN%/%NUM% 运行时替换
 _EXTRA_QSS = """
@@ -67,10 +72,15 @@ def is_admin():
 
 
 def relaunch_elevated(args):
-    """以管理员身份重启自身（触发 UAC）；用户拒绝时返回 False。args 需自行加引号。"""
+    """以管理员身份重启自身（触发 UAC）；用户拒绝时返回 False。
+    参数用 subprocess.list2cmdline 统一加引号（调用方传原始值，不要再手工包引号）；
+    源码运行时 sys.executable 是 python.exe，必须先把脚本路径补到参数最前。"""
     import ctypes
-    return ctypes.windll.shell32.ShellExecuteW(None, 'runas', sys.executable,
-                                               ' '.join(args), None, 1) > 32
+    args = list(args)
+    if not getattr(sys, 'frozen', False):
+        args.insert(0, os.path.abspath(sys.argv[0]))
+    return ctypes.windll.shell32.ShellExecuteW(
+        None, 'runas', sys.executable, subprocess.list2cmdline(args), None, 1) > 32
 
 
 def _bundle_dir():
@@ -153,7 +163,8 @@ def sync_context_menu():
 
 
 def request_quit():
-    """通知运行中的实例退出（卸载前调用，避免文件占用）。"""
+    """通知运行中的实例退出（卸载前调用，避免文件占用）。
+    返回是否连上服务：全新安装时没有实例在跑，不必白等。"""
     from PySide6.QtNetwork import QLocalSocket
     s = QLocalSocket()
     s.connectToServer(sysutil.IPC_KEY)
@@ -161,6 +172,81 @@ def request_quit():
         s.write(b'quit')
         s.flush()
         s.waitForBytesWritten(500)
+        return True
+    return False
+
+
+def _process_events():
+    """安装/卸载在等待或重试期间保持界面可响应；测试里没有 QApplication 时静默跳过。"""
+    app = QApplication.instance()
+    if app is not None:
+        app.processEvents()
+
+
+def _rmtree_retry(path, timeout=15.0, on_wait=None):
+    """删除目录；被占用等 OSError 每 0.25s 重试，超时后抛出。
+    FileNotFoundError 说明已被删掉，视为成功。"""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except OSError:
+            if time.monotonic() >= deadline:
+                raise
+            if on_wait:
+                on_wait()
+            time.sleep(0.25)
+            _process_events()
+
+
+def _registered_zbox_dirs():
+    """所有可能装着 Zbox 的目录：注册表记录 + 两个默认安装位置。"""
+    candidates = {
+        sysutil.uninstall_reg_get('InstallLocation', False),
+        sysutil.uninstall_reg_get('InstallLocation', True),
+        install_dir(False),
+        install_dir(True),
+    }
+    return {os.path.normpath(p) for p in candidates if p}
+
+
+def _is_zbox_program_dir(path):
+    """只有明确含 zbox.exe 的目录才算旧安装，避免误删用户自选目录里的文件。"""
+    return os.path.isfile(os.path.join(path, APP_EXE))
+
+
+def cleanup_existing_zbox(progress=None):
+    """安装前清理旧 Zbox：请运行中的实例退出，删掉旧程序目录与系统集成。
+    只触碰 _is_zbox_program_dir 为真的目录；%APPDATA%\\zbox 个人数据一律不动。
+    旧实例退出可能要几秒（格子 shutdown 的图标位置修正），目录被占用时按 0.25s 重试、
+    最长 15s；仍删不掉则抛 RuntimeError 中止安装，不带残留继续覆盖。
+    progress(pct, text) 回报进度（等待旧实例退出时显示等待文案）。"""
+    def report(pct, text):
+        if progress:
+            progress(pct, text)
+
+    def waiting():
+        report(6, t('installer.progress.waiting_exit'))
+
+    report(4, t('installer.progress.cleaning'))
+    if request_quit():
+        waiting()
+    errors = []
+    for path in _registered_zbox_dirs():
+        if not os.path.isdir(path) or not _is_zbox_program_dir(path):
+            continue
+        try:
+            _rmtree_retry(path, on_wait=waiting)
+        except OSError as exc:
+            errors.append('%s: %s' % (path, exc))
+    if errors:
+        raise RuntimeError(t('installer.err.clean_failed', detail='\n'.join(errors)))
+    sysutil.autostart_remove()
+    sysutil.context_menu_remove_zbox()
+    sysutil.uninstall_reg_remove_zbox()
 
 
 def _gen_icon(path):
@@ -200,6 +286,7 @@ def install(path_dir, all_users=False, autostart=True, shortcut=True, progress=N
     def report(pct, text):
         if progress:
             progress(pct, text)
+    cleanup_existing_zbox(progress=progress)
     src = _payload_dir()
     _take_over_legacy()
     if os.path.normcase(src) != os.path.normcase(os.path.abspath(path_dir)):
@@ -207,25 +294,28 @@ def install(path_dir, all_users=False, autostart=True, shortcut=True, progress=N
                 os.path.isfile(os.path.join(path_dir, LEGACY_APP_EXE)):
             shutil.rmtree(path_dir)  # 覆盖重装：清掉旧版全部文件（含残留的 _internal）
         os.makedirs(path_dir, exist_ok=True)
-        _copy_tree_with_progress(src, path_dir, lambda p: report(p * 7 // 10, '正在复制程序文件…'))
+        _copy_tree_with_progress(src, path_dir,
+                                 lambda p: report(p * 7 // 10, t('installer.progress.copying')))
     dst = os.path.join(path_dir, APP_EXE)
-    report(72, '正在生成图标…')
+    report(72, t('installer.progress.icon'))
     # 此计算机安装时图标放安装目录（其他用户读不到安装者的 %APPDATA%）
     icon = os.path.join(path_dir if all_users else sysutil.appdata_dir(), 'icon.ico')
     icon_path = icon if _gen_icon(icon) else None
-    report(82, '正在注册系统集成…')
+    report(82, t('installer.progress.integration'))
     # 桌面右键菜单不设开关：安装即生效
     sysutil.context_menu_install(icon_path, exe=dst, all_users=all_users)
     if shortcut:
-        report(88, '正在创建桌面快捷方式…')
+        report(88, t('installer.progress.shortcut'))
         create_desktop_shortcut(dst)
     if autostart:
         sysutil.autostart_set(exe=dst, all_users=all_users)
     else:
         sysutil.autostart_remove()
-    report(93, '正在写入卸载信息…')
-    sysutil.uninstall_reg_install(dst, all_users=all_users, size_kb=_dir_size(path_dir) // 1024)
-    report(100, '完成')
+    report(93, t('installer.progress.uninstall_reg'))
+    sysutil.uninstall_reg_install(
+        dst, all_users=all_users, size_kb=_dir_size(path_dir) // 1024,
+        language=i18n.get_language())
+    report(100, t('installer.done'))
     return dst
 
 
@@ -236,21 +326,21 @@ def uninstall(remove_user_data=False, progress=None):
     def report(pct, text):
         if progress:
             progress(pct, text)
-    report(10, '正在移除系统集成…')
+    report(10, t('installer.progress.remove_integration'))
     sysutil.uninstall_reg_remove()
     sysutil.context_menu_remove()
     sysutil.autostart_remove()
-    report(35, '正在删除桌面快捷方式…')
+    report(35, t('installer.progress.remove_shortcut'))
     remove_desktop_shortcut()
     if remove_user_data:
-        report(60, '正在删除个人数据…')
+        report(60, t('installer.progress.remove_data'))
         shutil.rmtree(sysutil.appdata_dir(), ignore_errors=True)
     if is_installed():
-        report(85, '正在清理程序文件…')
+        report(85, t('installer.progress.remove_files'))
         # exe 运行中无法删除自身：延迟 + 六轮重试（覆盖卸载向导完成页的存活期）
         seq = ['ping 127.0.0.1 -n 4 > nul', 'rmdir /s /q "%s"' % _bundle_dir()] * 6
         subprocess.Popen('cmd /c ' + ' & '.join(seq), creationflags=subprocess.CREATE_NO_WINDOW)
-    report(100, '完成')
+    report(100, t('installer.done'))
 
 
 def _desktop_dir():
@@ -266,8 +356,9 @@ def _desktop_dir():
 
 
 def create_desktop_shortcut(exe_path):
-    """在桌面创建指向 exe 的 .lnk：借 PowerShell 的 WScript.Shell COM，免 pywin32 依赖（Win10+ 自带）。"""
-    lnk = os.path.join(_desktop_dir(), '%s.lnk' % APP_TITLE)
+    """在桌面创建指向 exe 的 .lnk：借 PowerShell 的 WScript.Shell COM，免 pywin32 依赖（Win10+ 自带）。
+    文件名固定用品牌名 Zbox，不随界面语言变化。"""
+    lnk = os.path.join(_desktop_dir(), '%s.lnk' % SHORTCUT_NAME)
     args = tuple(p.replace("'", "''") for p in (lnk, exe_path, os.path.dirname(exe_path), exe_path))
     ps = ("$w=New-Object -ComObject WScript.Shell;"
           "$s=$w.CreateShortcut('%s');$s.TargetPath='%s';$s.WorkingDirectory='%s';"
@@ -277,11 +368,13 @@ def create_desktop_shortcut(exe_path):
 
 
 def remove_desktop_shortcut():
-    """卸载时清掉桌面快捷方式（没有就跳过）。"""
-    try:
-        os.remove(os.path.join(_desktop_dir(), '%s.lnk' % APP_TITLE))
-    except OSError:
-        pass
+    """卸载时清掉桌面快捷方式（没有就跳过）；旧名快捷方式一并删除。"""
+    desktop = _desktop_dir()
+    for name in (SHORTCUT_NAME,) + LEGACY_SHORTCUT_NAMES:
+        try:
+            os.remove(os.path.join(desktop, '%s.lnk' % name))
+        except OSError:
+            pass
 
 
 def _relaunch(path):
@@ -307,8 +400,39 @@ def maybe_install():
     return False
 
 
+def language_from_args(argv=None):
+    """解析安装器语言：--lang 显式指定优先（非法值回落系统语言），否则跟随系统界面语言。
+    setup.pyw 与提权实例共用这一处解析。"""
+    argv = list(sys.argv if argv is None else argv)
+    if '--lang' in argv:
+        i = argv.index('--lang')
+        if i + 1 < len(argv):
+            return i18n.resolve_language(argv[i + 1], i18n.detect_system_language())
+    return i18n.detect_system_language()
+
+
+_qt_translator = None
+
+
+def install_qt_translator(app, language):
+    """按语言装载/卸载 Qt 自带控件翻译：中文装 qtbase_zh_CN，英文用 Qt 默认。
+    切换语言时先摘掉旧 translator，避免中英文案叠加。返回当前 translator（英文为 None）。"""
+    global _qt_translator
+    from PySide6.QtCore import QLibraryInfo, QTranslator
+    if _qt_translator is not None:
+        app.removeTranslator(_qt_translator)
+        _qt_translator = None
+    if language == i18n.ZH:
+        tr = QTranslator(app)
+        if tr.load('qtbase_zh_CN', QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)):
+            app.installTranslator(tr)
+            _qt_translator = tr
+    return _qt_translator
+
+
 def setup_main():
     """安装包入口（setup.pyw 打成的 onefile exe）：安装向导 / 提权安装实例。返回进程退出码。"""
+    i18n.set_language(language_from_args())
     if '--install-elevated' in sys.argv:
         # 提权后的安装实例：必须先 show 再装——否则安装跑完才弹窗，进度页整段被跳过
         path = sys.argv[sys.argv.index('--install-elevated') + 1]
@@ -321,8 +445,8 @@ def setup_main():
         wiz.exec()
         return 0
     if os.environ.get('ZBOX_AUTO_INSTALL'):
-        # 测试钩子：跳过向导按默认项静默安装
-        _relaunch(install(install_dir()))
+        # 测试钩子：跳过向导按默认项静默安装（安装范围固定为所有用户）
+        _relaunch(install(install_dir(True), all_users=True))
         return 0
     InstallWizard().exec()
     return 0
@@ -351,16 +475,17 @@ def _fmt_size(n):
 class _WizardBase(QDialog):
     """安装/卸载向导共用骨架：NOCTURNE 主题、无边框圆角卡片、可拖标题栏、页面栈。"""
 
-    def __init__(self, action):
+    def __init__(self):
         super().__init__()
         import app as ui
         from themes import build_qss
         self.setObjectName('settingsDlg')  # 复用主题对话框底色
-        self.setWindowTitle('%s %s' % (action, APP_TITLE))
+        self.setWindowTitle(t('app.name'))
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)  # 圆角外透明显示，避免首帧白闪
         self.setFixedWidth(_sc(480))
         self._drag = None
+        self._bindings = []   # (控件, setter 方法名, 词典键)：切换语言时统一回填
 
         cn, num = ui.pick_fonts()
         scale = ui.ui_scale()
@@ -385,8 +510,9 @@ class _WizardBase(QDialog):
         ico = QLabel()
         ico.setPixmap(ui.make_icon().pixmap(_sc(22), _sc(22)))
         tb.addWidget(ico)
-        title = QLabel('  %s' % APP_TITLE)
+        title = QLabel()
         title.setObjectName('setTitle')
+        self._bind(title, 'app.name')
         tb.addWidget(title)
         ver = QLabel('v%s' % sysutil.APP_VERSION)
         ver.setObjectName('setLabel')
@@ -396,7 +522,7 @@ class _WizardBase(QDialog):
         close.setObjectName('closeBtn')
         close.setText('✕')
         close.setFixedSize(_sc(28), _sc(24))
-        close.setToolTip('关闭')
+        self._bind(close, 'common.close', 'setToolTip')
         close.clicked.connect(self.reject)
         tb.addWidget(close)
         lay.addWidget(self.titlebar)
@@ -423,10 +549,22 @@ class _WizardBase(QDialog):
     def mouseReleaseEvent(self, e):
         self._drag = None
 
-    def _section(self, text):
-        lb = QLabel(text)
+    def _bind(self, widget, key, method='setText'):
+        """登记一条随语言变化的文案，并立即按当前语言写入。"""
+        self._bindings.append((widget, method, key))
+        getattr(widget, method)(t(key))
+        return widget
+
+    def _retranslate(self):
+        """语言切换后就地回填本窗口全部已登记文案（不重建控件、不丢输入状态）。"""
+        self.setWindowTitle(t('app.name'))
+        for widget, method, key in self._bindings:
+            getattr(widget, method)(t(key))
+
+    def _section(self, key):
+        lb = QLabel()
         lb.setObjectName('setLabel')
-        return lb
+        return self._bind(lb, key)
 
     # ---- 共用页面 ----
     def _build_progress_page(self, status_text):
@@ -452,7 +590,7 @@ class _WizardBase(QDialog):
         lay.addStretch(1)
         return page
 
-    def _build_finish_page(self, title, checkbox=None):
+    def _build_finish_page(self, title_key, checkbox=None):
         """完成页：居中 ✓ 标记 + 标题 + 副说明 +（可选）勾选框 + 完成按钮。"""
         page = QWidget()
         lay = QVBoxLayout(page)
@@ -461,9 +599,10 @@ class _WizardBase(QDialog):
         mark = QLabel('✓')
         mark.setObjectName('finishMark')
         mark.setAlignment(Qt.AlignCenter)
-        self._finish_title = QLabel(title)
+        self._finish_title = QLabel()
         self._finish_title.setObjectName('setTitle')
         self._finish_title.setAlignment(Qt.AlignCenter)
+        self._bind(self._finish_title, title_key)
         lay.addStretch(1)
         lay.addWidget(mark)
         lay.addSpacing(_sc(2))
@@ -475,10 +614,11 @@ class _WizardBase(QDialog):
         lay.addStretch(1)
         btns = QHBoxLayout()
         btns.addStretch(1)
-        done = QPushButton('完成')
+        done = QPushButton()
         done.setObjectName('setSave')
         done.setFixedWidth(_sc(84))
         done.setDefault(True)
+        self._bind(done, 'installer.done')
         done.clicked.connect(self._on_finish)
         btns.addWidget(done)
         btns.addStretch(1)
@@ -500,14 +640,14 @@ class InstallWizard(_WizardBase):
     """安装向导（深色主题，与程序一致）：选项页 → 进度页 → 完成页。"""
 
     def __init__(self):
-        super().__init__('安装')
+        super().__init__()
         self._dst = None
-        self._path_touched = False
-        self._run_now = QCheckBox('立即启动 %s' % APP_TITLE)
+        self._run_now = QCheckBox()
         self._run_now.setChecked(True)
+        self._bind(self._run_now, 'installer.run_now')
         self._stack.addWidget(self._build_options_page())
-        self._stack.addWidget(self._build_progress_page('正在安装…'))
-        self._stack.addWidget(self._build_finish_page('安装完成', checkbox=self._run_now))
+        self._stack.addWidget(self._build_progress_page(t('installer.installing')))
+        self._stack.addWidget(self._build_finish_page('installer.installed', checkbox=self._run_now))
         self._update_space_info()
         self._show_centered()
 
@@ -518,43 +658,41 @@ class InstallWizard(_WizardBase):
         lay.setContentsMargins(_sc(2), _sc(8), _sc(4), 0)
         lay.setSpacing(_sc(8))
 
-        lay.addWidget(self._section('安装范围'))
-        self._radio_user = QRadioButton('仅当前用户')
-        self._radio_user.setChecked(True)
-        self._radio_all = QRadioButton('所有用户（需要管理员权限）')
-        self._radio_all.toggled.connect(self._on_scope_changed)
-        lay.addWidget(self._radio_user)
-        row_all = QHBoxLayout()
-        row_all.setSpacing(4)
-        row_all.addWidget(self._radio_all)
-        shield = QLabel()
-        shield.setPixmap(self.style().standardIcon(QStyle.SP_VistaShield).pixmap(_sc(14), _sc(14)))
-        shield.setToolTip('需要管理员权限')
-        row_all.addWidget(shield)
-        row_all.addStretch(1)
-        lay.addLayout(row_all)
+        lay.addWidget(self._section('installer.language'))
+        self._language = QComboBox()
+        self._language.setObjectName('installLanguage')
+        for code, label in i18n.LANGUAGE_NAMES.items():
+            self._language.addItem(label, code)
+        self._language.setCurrentIndex(self._language.findData(i18n.get_language()))
+        # 先设初值再连信号：构造期不触发回填
+        self._language.currentIndexChanged.connect(self._select_language)
+        lay.addWidget(self._language)
 
-        lay.addWidget(self._section('安装位置'))
+        lay.addWidget(self._section('installer.location'))
         row = QHBoxLayout()
         row.setSpacing(8)
-        self._path = QLineEdit(install_dir())
+        self._path = QLineEdit(install_dir(True))   # 固定所有用户安装
         self._path.setObjectName('pathEdit')
         self._path.textEdited.connect(self._on_path_edited)
-        btn = QPushButton('浏览…')
+        btn = QPushButton()
         btn.setObjectName('setBtn')
+        self._bind(btn, 'installer.browse')
         btn.clicked.connect(self._browse)
         row.addWidget(self._path, 1)
         row.addWidget(btn)
         lay.addLayout(row)
         self._space = QLabel()
         self._space.setObjectName('setLabel')
+        self._space.setWordWrap(True)   # 英文空间/错误提示较长，定宽卡片里必须折行
         lay.addWidget(self._space)
 
-        lay.addWidget(self._section('附加选项'))
-        self._shortcut = QCheckBox('创建桌面快捷方式')
+        lay.addWidget(self._section('installer.options'))
+        self._shortcut = QCheckBox()
         self._shortcut.setChecked(True)
-        self._auto = QCheckBox('开机自动启动')
+        self._bind(self._shortcut, 'installer.shortcut')
+        self._auto = QCheckBox()
         self._auto.setChecked(True)
+        self._bind(self._auto, 'installer.autostart')
         lay.addWidget(self._shortcut)
         lay.addWidget(self._auto)
         lay.addStretch(1)
@@ -562,14 +700,16 @@ class InstallWizard(_WizardBase):
         btns = QHBoxLayout()
         btns.setSpacing(_sc(8))
         btns.addStretch(1)
-        cancel = QPushButton('取消')
+        cancel = QPushButton()
         cancel.setObjectName('setBtn')
         cancel.setFixedWidth(_sc(84))
+        self._bind(cancel, 'common.cancel')
         cancel.clicked.connect(self.reject)
-        self._ok = QPushButton('安装')
+        self._ok = QPushButton()
         self._ok.setObjectName('setSave')
         self._ok.setFixedWidth(_sc(84))
         self._ok.setDefault(True)
+        self._bind(self._ok, 'installer.install')
         self._ok.clicked.connect(self._on_install)
         btns.addWidget(cancel)
         btns.addWidget(self._ok)
@@ -577,19 +717,22 @@ class InstallWizard(_WizardBase):
         return page
 
     # ---- 选项页交互 ----
-    def _on_scope_changed(self):
-        if not self._path_touched:
-            self._path.setText(install_dir(self._radio_all.isChecked()))
+    def _select_language(self, _index=None):
+        """首屏语言下拉：立即切换本窗口文案，并让提权实例/卸载项继承所选语言。"""
+        code = self._language.currentData()
+        if not code:
+            return
+        i18n.set_language(code)
+        install_qt_translator(QApplication.instance(), code)
+        self._retranslate()
         self._update_space_info()
 
     def _on_path_edited(self):
-        self._path_touched = True
         self._update_space_info()
 
     def _browse(self):
-        d = QFileDialog.getExistingDirectory(self, '选择安装文件夹', self._path.text())
+        d = QFileDialog.getExistingDirectory(self, t('installer.pick_folder'), self._path.text())
         if d:
-            self._path_touched = True
             self._path.setText(d)
             self._update_space_info()
 
@@ -597,13 +740,13 @@ class InstallWizard(_WizardBase):
         """只允许空目录/新目录/覆盖重装（目录里有 zbox.exe，或旧名的 zviber.exe，
         视为旧安装），避免卸载时误删用户文件。"""
         if not path.strip():
-            return '请输入安装路径'
+            return t('installer.err.path_empty')
         if not os.path.splitdrive(path)[1].strip('\\/'):
-            return '不能安装到磁盘根目录'
+            return t('installer.err.drive_root')
         if os.path.isdir(path):
             names = [f.lower() for f in os.listdir(path)]
             if names and not ({APP_EXE.lower(), LEGACY_APP_EXE.lower()} & set(names)):
-                return '目标文件夹不为空，请选择空文件夹或新文件夹'
+                return t('installer.err.not_empty')
         return None
 
     def _update_space_info(self):
@@ -621,12 +764,14 @@ class InstallWizard(_WizardBase):
                 need = _dir_size(_payload_dir())
                 drive = os.path.splitdrive(os.path.abspath(p))[0]
                 if need > free:
-                    err = '磁盘空间不足：需要 %s，%s 盘仅剩 %s' % (_fmt_size(need), drive, _fmt_size(free))
+                    err = t('installer.err.space', need=_fmt_size(need), drive=drive,
+                            free=_fmt_size(free))
                 else:
-                    self._space.setText('所需空间 %s，%s 盘可用 %s' % (_fmt_size(need), drive, _fmt_size(free)))
+                    self._space.setText(t('installer.space_info', need=_fmt_size(need),
+                                          drive=drive, free=_fmt_size(free)))
                     self._space.setProperty('err', False)
             except OSError:
-                err = '路径无效'
+                err = t('installer.err.invalid_path')
         if err:
             self._space.setText(err)
             self._space.setProperty('err', True)
@@ -635,10 +780,11 @@ class InstallWizard(_WizardBase):
         self._ok.setEnabled(not err)
 
     def _on_install(self):
-        path = self._path.text().strip()
-        all_users = self._radio_all.isChecked()
-        if all_users and not is_admin():
-            args = ['--install-elevated', '"%s"' % path]
+        path = self._path.text().strip().rstrip('\\/') or self._path.text().strip()
+        if not is_admin():
+            # 固定所有用户安装：非管理员一律提权重启，并透传语言与选项
+            # 参数传原始值，引号交给 subprocess.list2cmdline（避免尾反斜杠吞掉后续参数）
+            args = ['--install-elevated', path, '--lang', i18n.get_language()]
             if not self._shortcut.isChecked():
                 args.append('--no-shortcut')
             if not self._auto.isChecked():
@@ -646,7 +792,7 @@ class InstallWizard(_WizardBase):
             if relaunch_elevated(args):
                 self.accept()  # 提权实例接管安装
             return  # UAC 被拒绝时留在选项页
-        self.start_install(path, all_users, self._shortcut.isChecked(), self._auto.isChecked())
+        self.start_install(path, True, self._shortcut.isChecked(), self._auto.isChecked())
 
     # ---- 安装执行 ----
     def start_install(self, path, all_users, shortcut, autostart):
@@ -656,7 +802,7 @@ class InstallWizard(_WizardBase):
         try:
             self._dst = install(path, all_users, shortcut, autostart, progress=self._report_progress)
         except Exception as e:
-            QMessageBox.critical(self, '安装失败', str(e))
+            QMessageBox.critical(self, t('installer.install_failed'), str(e))
             self._stack.setCurrentIndex(0)
             return
         self._stack.setCurrentIndex(2)
@@ -675,10 +821,10 @@ class UninstallWizard(_WizardBase):
     """卸载向导（与安装向导同风格）：确认页（可选删除个人数据）→ 进度页 → 完成页。"""
 
     def __init__(self):
-        super().__init__('卸载')
+        super().__init__()
         self._stack.addWidget(self._build_confirm_page())
-        self._stack.addWidget(self._build_progress_page('正在卸载…'))
-        self._stack.addWidget(self._build_finish_page('卸载完成'))
+        self._stack.addWidget(self._build_progress_page(t('installer.uninstalling')))
+        self._stack.addWidget(self._build_finish_page('installer.uninstalled'))
         self._show_centered()
 
     # ---- 确认页 ----
@@ -687,28 +833,33 @@ class UninstallWizard(_WizardBase):
         lay = QVBoxLayout(page)
         lay.setContentsMargins(_sc(2), _sc(8), _sc(4), 0)
         lay.setSpacing(_sc(8))
-        t = QLabel('卸载 %s' % APP_TITLE)
-        t.setObjectName('setTitle')
-        lay.addWidget(t)
-        desc = QLabel('将从电脑中移除程序、开机自启、桌面右键菜单与桌面快捷方式。')
+        heading = QLabel()
+        heading.setObjectName('setTitle')
+        self._bind(heading, 'installer.uninstall_heading')
+        lay.addWidget(heading)
+        desc = QLabel()
         desc.setObjectName('setLabel')
         desc.setWordWrap(True)
+        self._bind(desc, 'installer.uninstall_desc')
         lay.addWidget(desc)
         lay.addSpacing(_sc(8))
-        self._del_data = QCheckBox('同时删除个人数据（待办事项、格子与全部配置）')
+        self._del_data = QCheckBox()
+        self._bind(self._del_data, 'installer.uninstall_data')
         lay.addWidget(self._del_data)
         lay.addStretch(1)
         btns = QHBoxLayout()
         btns.setSpacing(_sc(8))
         btns.addStretch(1)
-        cancel = QPushButton('取消')
+        cancel = QPushButton()
         cancel.setObjectName('setBtn')
         cancel.setFixedWidth(_sc(84))
+        self._bind(cancel, 'common.cancel')
         cancel.clicked.connect(self.reject)
-        ok = QPushButton('卸载')
+        ok = QPushButton()
         ok.setObjectName('dangerBtn')
         ok.setFixedWidth(_sc(84))
         ok.setDefault(True)
+        self._bind(ok, 'installer.uninstall')
         ok.clicked.connect(self._on_uninstall)
         btns.addWidget(cancel)
         btns.addWidget(ok)
@@ -719,12 +870,12 @@ class UninstallWizard(_WizardBase):
     def _on_uninstall(self):
         self._stack.setCurrentIndex(1)
         request_quit()  # 先请运行中的面板退出，避免文件占用
-        self._report_progress(5, '正在等待面板退出…')
+        self._report_progress(5, t('installer.progress.wait_exit'))
         time.sleep(1.0)
         try:
             uninstall(remove_user_data=self._del_data.isChecked(), progress=self._report_progress)
         except Exception as e:
-            QMessageBox.critical(self, '卸载失败', str(e))
+            QMessageBox.critical(self, t('installer.uninstall_failed'), str(e))
             self._stack.setCurrentIndex(0)
             return
         self._stack.setCurrentIndex(2)

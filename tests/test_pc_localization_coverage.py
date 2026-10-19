@@ -11,7 +11,7 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 UI_FILES = ('app.py', 'main.pyw', 'transfer_ui.py', 'video_ui.py',
-            'boxes.py', 'screenshot.py', 'pinshot.py', 'sysutil.py')
+            'boxes.py', 'screenshot.py', 'pinshot.py', 'sysutil.py', 'installer.py')
 
 # 数据不是文案：解析字符与底层异常匹配关键词。
 ALLOWED = {
@@ -19,6 +19,8 @@ ALLOWED = {
     'app.py': {'：', '－', '～'},
     # _NET_ERROR_HINTS 拿底层异常原文做关键词匹配，不是界面文案。
     'transfer_ui.py': {'对方未及时确认', '积极拒绝', '强迫关闭', '超时', '不在线', '不可达'},
+    # 旧版桌面快捷方式的文件名（.lnk 基名），不是界面文案；卸载时要按原名删掉。
+    'installer.py': {'Zbox桌面格子'},
 }
 
 
