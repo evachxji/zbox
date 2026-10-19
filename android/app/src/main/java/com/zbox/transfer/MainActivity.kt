@@ -25,10 +25,14 @@ import com.zbox.transfer.ui.HomeScreen
 import com.zbox.transfer.ui.ReceiveDialogHost
 import fi.iki.elonen.NanoHTTPD
 import java.security.SecureRandom
+import java.util.Locale
 
-/** 本机设置：指纹（首次启动生成 32 位随机 hex）、别名、记住的保存目录 */
+/** 本机设置：指纹（首次启动生成 32 位随机 hex）、别名、记住的保存目录、界面语言 */
 object Settings {
     private lateinit var prefs: SharedPreferences
+
+    // Compose 可观察：语言切换后 AppStrings.current 的读取方会重组
+    private var languageState by mutableStateOf(AppLanguage.ZH)
 
     fun init(context: Context) {
         prefs = context.getSharedPreferences("zbox_transfer", Context.MODE_PRIVATE)
@@ -37,6 +41,10 @@ object Settings {
             SecureRandom().nextBytes(bytes)
             prefs.edit().putString("fingerprint", bytes.joinToString("") { "%02x".format(it) }).apply()
         }
+        // 首次启动按系统语言定默认值并写回；已存的值沿用
+        val stored = prefs.getString("language", null)
+        languageState = AppLanguage.detect(stored ?: Locale.getDefault().toLanguageTag())
+        if (stored == null) prefs.edit().putString("language", languageState.code).apply()
     }
 
     val fingerprint: String
@@ -49,6 +57,14 @@ object Settings {
     var saveTreeUri: String?
         get() = prefs.getString("save_tree_uri", null)
         set(value) = prefs.edit().putString("save_tree_uri", value).apply()
+
+    /** 界面语言：切换后即时生效并落盘 */
+    var language: AppLanguage
+        get() = languageState
+        set(value) {
+            languageState = value
+            prefs.edit().putString("language", value.code).apply()
+        }
 
     /** 本机 DeviceInfo（协议字段与 PC 端一致） */
     fun localInfo(): DeviceInfo = DeviceInfo(

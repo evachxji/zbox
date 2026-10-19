@@ -140,7 +140,7 @@ class Receiver(private val context: Context) {
         }
         if (!inserted) {
             record.status = TransferStatus.FAILED
-            record.error = "会话冲突"
+            record.error = AppError.SESSION_CONFLICT
             return TransferServer.error(Status.CONFLICT, "another session is waiting for confirmation")
         }
 
@@ -220,7 +220,7 @@ class Receiver(private val context: Context) {
         val fileName = if (relParts.isNotEmpty()) relParts.last() else sanitizeName(meta.fileName)
         val dirParts = if (relParts.size > 1) relParts.dropLast(1) else emptyList()
         val target = openSaveTarget(session.dirUri, fileName, meta.fileType, dirParts)
-            ?: return fail(record, "cannot create file")
+            ?: return fail(record, AppError.UNKNOWN, "cannot create file")
         session.currentTarget = target
 
         // 对端提供 sha256 时边写边算摘要
@@ -244,14 +244,14 @@ class Receiver(private val context: Context) {
                     record.progress = session.bytesDone + received
                     record.sampleSpeed()
                 }
-            } ?: return fail(record, "cannot open output stream")
+            } ?: return fail(record, AppError.UNKNOWN, "cannot open output stream")
         } catch (_: CancelledException) {
             target.deleter()
             record.status = TransferStatus.CANCELED
             return TransferServer.error(Status.BAD_REQUEST, "cancelled")
         } catch (e: Exception) {
             target.deleter()
-            return fail(record, friendlyNetError(e, "写入文件失败"))
+            return fail(record, friendlyNetError(e), "写入文件失败")
         } finally {
             session.currentTarget = null
         }
@@ -260,7 +260,7 @@ class Receiver(private val context: Context) {
         if (contentLength >= 0 && received != contentLength) {
             target.deleter()
             record.status = TransferStatus.FAILED
-            record.error = "字节数不足：" + received + "/" + contentLength
+            record.error = AppError.INCOMPLETE_BODY
             return TransferServer.error(Status.INTERNAL_ERROR, "incomplete body")
         }
 
@@ -270,7 +270,7 @@ class Receiver(private val context: Context) {
             if (!actual.equals(meta.sha256, ignoreCase = true)) {
                 target.deleter()
                 record.status = TransferStatus.FAILED
-                record.error = "sha256 校验失败"
+                record.error = AppError.HASH_MISMATCH
                 return TransferServer.error(TransferServer.STATUS_422, "sha256 mismatch")
             }
         }
@@ -378,9 +378,9 @@ class Receiver(private val context: Context) {
             }
     }
 
-    private fun fail(record: TransferRecord, message: String): NanoHTTPD.Response {
+    private fun fail(record: TransferRecord, error: AppError, message: String): NanoHTTPD.Response {
         record.status = TransferStatus.FAILED
-        record.error = message
+        record.error = error
         return TransferServer.error(Status.INTERNAL_ERROR, message)
     }
 

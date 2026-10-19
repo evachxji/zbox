@@ -55,6 +55,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.zbox.transfer.AppStrings
 import com.zbox.transfer.Receiver
 import com.zbox.transfer.Sender
 import com.zbox.transfer.TransferRecord
@@ -134,7 +135,7 @@ fun ColumnScope.RecordsSection() {
                         }
                         // 状态切换淡入淡出 + 微滑动，不硬跳
                         AnimatedContent(
-                            targetState = record.status.label to statusColor,
+                            targetState = AppStrings.current.status(record.status) to statusColor,
                             transitionSpec = {
                                 (fadeIn(tween(160)) + slideInVertically(tween(160)) { it / 4 }) togetherWith
                                     (fadeOut(tween(120)) + slideOutVertically(tween(120)) { -it / 4 })
@@ -221,7 +222,7 @@ fun ColumnScope.RecordsSection() {
                     }
                     record.error?.let {
                         Text(
-                            text = it,
+                            text = AppStrings.current.error(it),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
                         )

@@ -91,14 +91,14 @@ object DeviceStore {
     }
 }
 
-/** 传输状态 */
-enum class TransferStatus(val label: String) {
-    WAITING("等待确认"),
-    TRANSFERRING("传输中"),
-    DONE("完成"),
-    FAILED("失败"),
-    REJECTED("被拒绝"),
-    CANCELED("已取消"),
+/** 传输状态（文案按当前语言由 AppStrings.status 给出） */
+enum class TransferStatus {
+    WAITING,
+    TRANSFERRING,
+    DONE,
+    FAILED,
+    REJECTED,
+    CANCELED,
 }
 
 /** 一条传输记录 */
@@ -111,7 +111,7 @@ class TransferRecord(
 ) {
     var progress by mutableStateOf(0L)
     var status by mutableStateOf(TransferStatus.WAITING)
-    var error by mutableStateOf<String?>(null)
+    var error by mutableStateOf<AppError?>(null)
     var speedBps by mutableStateOf(0L)   // EMA 平滑后的传输速度（字节/秒）
     var fileUri: String? = null          // 接收=落盘文件，发送=源文件（点击行跳所在目录用）
     var savedTreeUri: String? = null     // 接收时选定的 SAF 目录；null 表示默认系统 Download
@@ -148,20 +148,20 @@ object TransferStore {
     }
 }
 
-/** 把底层英文异常信息翻译成用户可读的中文提示（记录页展示用） */
-fun friendlyNetError(e: Throwable, fallback: String): String = when (e) {
-    is java.net.ConnectException -> "无法连接对方设备（对方可能已退出或换了网络）"
-    is java.net.SocketTimeoutException -> "连接或传输超时，请重试"
-    is java.net.SocketException -> "连接被中断"
-    is java.net.UnknownHostException -> "找不到对方设备"
+/** 把底层异常归一成错误码（记录只存错误码，展示时按当前语言取文案） */
+fun friendlyNetError(e: Throwable, fallback: AppError = AppError.UNKNOWN): AppError = when (e) {
+    is java.net.ConnectException -> AppError.CONNECT_FAILED
+    is java.net.SocketTimeoutException -> AppError.TIMEOUT
+    is java.net.SocketException -> AppError.CONNECTION_INTERRUPTED
+    is java.net.UnknownHostException -> AppError.HOST_NOT_FOUND
     // 声明长度与实际流字节数不符（相册 SIZE 列过期等）
-    is java.net.ProtocolException -> "文件内容与声明大小不符，请在相册里重新保存该图片后重试"
+    is java.net.ProtocolException -> AppError.PROTOCOL_MISMATCH
     else -> {
         val msg = e.message ?: ""
         when {
-            msg.contains("ENOSPC") || msg.contains("No space left", true) -> "存储空间不足"
-            msg.contains("EACCES") || msg.contains("Permission denied", true) -> "没有存储权限"
-            msg == "cannot open input stream" -> "无法读取源文件"
+            msg.contains("ENOSPC") || msg.contains("No space left", true) -> AppError.NO_SPACE
+            msg.contains("EACCES") || msg.contains("Permission denied", true) -> AppError.NO_PERMISSION
+            msg == "cannot open input stream" -> AppError.SOURCE_UNREADABLE
             else -> fallback
         }
     }
