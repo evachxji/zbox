@@ -17,6 +17,7 @@ CATALOG = {
     'common.refresh': '刷新',
     'common.got_it': '我知道了',
     'common.what_happens': '开启后会发生什么',
+    'common.later': '稍后',
 
     # 应用
     'app.name': 'Zbox桌面格子',
@@ -69,6 +70,11 @@ CATALOG = {
     'settings.transfer.help': '什么是局域网传输',
     'settings.video': '开启视频解析',
     'settings.video.help': '什么是视频解析',
+    'settings.language': '语言',
+    'settings.restart_title': '语言已更改',
+    'settings.restart_required': '重启 Zbox 后新语言才会完全生效。',
+    'settings.restart_now': '立即重启',
+    'settings.restart_failed': '重启失败，请手动退出后重新打开 Zbox。',
 
     # 节假日导入
     'holiday.title': '导入节假日数据',

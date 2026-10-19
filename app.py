@@ -10,7 +10,8 @@ import time
 from datetime import date, datetime, timedelta
 
 from PySide6.QtCore import (Qt, QTimer, QSize, QPoint, QPointF, QRect, QRectF, QDate, QTime,
-                          Signal, QEvent, QPropertyAnimation, QVariantAnimation, QEasingCurve)
+                          Signal, QEvent, QPropertyAnimation, QVariantAnimation, QEasingCurve,
+                          QProcess)
 from PySide6.QtGui import (QFont, QFontDatabase, QPainter, QColor, QPixmap, QIcon, QPainterPath,
                          QRegion, QPen, QLinearGradient, QCursor, QKeySequence, QTextCursor)
 from PySide6.QtWidgets import (QWidget, QFrame, QLabel, QToolButton, QVBoxLayout, QHBoxLayout,
@@ -18,9 +19,10 @@ from PySide6.QtWidgets import (QWidget, QFrame, QLabel, QToolButton, QVBoxLayout
                              QListWidgetItem, QLineEdit, QMenu, QApplication, QDialog,
                              QFormLayout, QCheckBox, QRadioButton, QPushButton, QCalendarWidget,
                              QLayout, QGraphicsOpacityEffect, QSizePolicy, QTableView,
-                             QPlainTextEdit, QWidgetAction)
+                             QPlainTextEdit, QWidgetAction, QComboBox)
 
 import calendar_data as cd
+import i18n
 import sysutil
 import transfer_ui
 import updater
@@ -121,6 +123,22 @@ def _indicator_icons():
             p.drawEllipse(QPointF(box / 2.0, box / 2.0), box * 0.26, box * 0.26)
         p.end()
         pm.save(os.path.join(d, name + '.png'))
+    # 下拉框箭头：QSS 一旦接管 QComboBox 就不再画原生箭头，这里补一枚 V 形
+    for name, color in (('chevron_dark', '#8d8a82'), ('chevron_light', '#8a8a90')):
+        size = sc(10)
+        pm = QPixmap(size, size)
+        pm.setDevicePixelRatio(scale)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing)
+        pen = QPen(QColor(color))
+        pen.setWidthF(1.4)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        p.setPen(pen)
+        p.drawPolyline([QPointF(2.0, 3.5), QPointF(5.0, 6.5), QPointF(8.0, 3.5)])
+        p.end()
+        pm.save(os.path.join(d, name + '.png'))
     return d.replace('\\', '/')
 
 
@@ -193,7 +211,8 @@ class Config(object):
         self.data = {'theme': THEME_ORDER[0], 'tab': 0, 'pos': None,
                      'off_noon': '12:00-13:00', 'off_evening': '18:00',
                      'transfer_enabled': False, 'shot_hotkey': '',
-                     'video_enabled': False, 'video_dir': '', 'video_quality': '1080P'}
+                     'video_enabled': False, 'video_dir': '', 'video_quality': '1080P',
+                     'language': ''}
         self.load()
 
     def load(self):
@@ -204,6 +223,9 @@ class Config(object):
             pass
         if self.data.get('theme') not in THEME_CHOICES:
             self.data['theme'] = THEME_ORDER[0]
+        if self.data.get('language') not in i18n.LANGUAGES:
+            # 兼容 en_US / 大小写 / 首尾空白；无法识别仍存空（启动时按安装/系统语言回退）
+            self.data['language'] = i18n.normalize_language(self.data.get('language')) or ''
 
     def save(self):
         try:
@@ -2034,6 +2056,37 @@ class HolidayImportDialog(QDialog):
         super(HolidayImportDialog, self).mouseReleaseEvent(e)
 
 
+def restart_application():
+    """立即重启本程序（切换语言后），成功返回 True。
+
+    单实例 IPC server 由 main.pyw 挂在 ``QApplication._zbox_ipc_server``；这里先关掉它，
+    否则新进程会连上仍在退出的旧实例、只转发一次 toggle 就退出，重启后面板反而消失。
+    启动失败时重新监听、保留旧实例运行，交由调用方提示。
+    成功才 quit()，aboutToQuit 里的清理（格子/停服务/右键菜单）照常执行。"""
+    app = QApplication.instance()
+    server = getattr(app, '_zbox_ipc_server', None)
+    if server is not None:
+        try:
+            server.close()
+        except RuntimeError:
+            pass   # 已随进程销毁
+    if getattr(sys, 'frozen', False):
+        program, args = sys.executable, []
+    else:
+        program = sys.executable
+        args = [os.path.abspath(sys.argv[0])]
+    started, _pid = QProcess.startDetached(program, args)
+    if not started:
+        if server is not None:   # 重启失败：恢复单实例通道，旧实例继续可用
+            try:
+                server.listen(sysutil.IPC_KEY)
+            except RuntimeError:
+                pass
+        return False
+    app.quit()
+    return True
+
+
 class SettingsDialog(QDialog):
     """齿轮按钮弹出的无边框设置窗口，样式跟随当前主题（themes.py #settingsPanel 区段）。
     on_fetch/on_import 为节假日数据回调（由入口提供）。
@@ -2326,6 +2379,27 @@ class SettingsDialog(QDialog):
         self.sig_upd.connect(self._on_upd)
         lay.addLayout(ver_row)
 
+        # 语言：放最底部（版本行之后）。切换后需重启才能整体换语言，故弹确认框；
+        # 用户选择已即时落盘，稍后重启也能生效。
+        lang_form = QFormLayout()
+        lang_form.setContentsMargins(sc(2), sc(6), sc(6), 0)
+        lang_form.setHorizontalSpacing(sc(14))
+        lang_form.setVerticalSpacing(sc(12))
+        sep_lang = QFrame()
+        sep_lang.setObjectName('setSep')
+        sep_lang.setFixedHeight(1)
+        lang_form.addRow(sep_lang)
+        self.lang_combo = QComboBox()
+        self.lang_combo.setObjectName('languageCombo')
+        self.lang_combo.setFixedHeight(sc(30))   # 对齐设置窗其他输入行的 30px
+        for code, name in i18n.LANGUAGE_NAMES.items():
+            self.lang_combo.addItem(name, code)
+        self.lang_combo.setCurrentIndex(
+            max(0, self.lang_combo.findData(cfg.data.get('language') or i18n.get_language())))
+        self.lang_combo.currentIndexChanged.connect(self._language_changed)
+        lang_form.addRow(row_label(t('settings.language')), self.lang_combo)
+        lay.addLayout(lang_form)
+
         # 默认居中在屏幕可用区（不贴着面板：面板常停右下角，跟着它会被挤到屏幕边上）
         # 面板在哪个屏幕就居中到哪个屏幕，多显示器下对话框跟人待的那块屏一致
         self.adjustSize()
@@ -2448,6 +2522,27 @@ class SettingsDialog(QDialog):
     def _clear_hotkey(self):
         self.key_edit.clear()
         self._commit_hotkey()
+
+    def _language_changed(self, _index):
+        """语言选择落盘与重启提示分开判断：配置不同才写盘（系统语言回退时也能固定选择），
+        与当前生效语言不同才问重启（取消后再选回原语言不会再弹）。"""
+        code = self.lang_combo.currentData()
+        if not code:
+            return
+        if code != self._cfg.data.get('language'):
+            self._cfg.set('language', code)
+        if code != i18n.get_language() and self._confirm_language_restart():
+            if not restart_application():
+                show_toast_on(self, t('settings.restart_failed'), ok=False, hold_ms=2600)
+
+    def _confirm_language_restart(self):
+        """复用危险操作确认弹窗的深色样式（QMessageBox 在深色主题下是原生浅色框）。"""
+        box = video_ui._ConfirmDialog(
+            self, title=t('settings.restart_title'),
+            text=t('settings.restart_required'),
+            ok_text=t('settings.restart_now'),
+            cancel_text=t('common.later'))
+        return box.exec() == QDialog.Accepted
 
     def _sync_transfer_chk(self):
         """传输页门禁层改动开关后，同步这里的勾选状态。"""

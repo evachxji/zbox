@@ -414,6 +414,17 @@ def uninstall_reg_get(name, all_users=False):
     return _get(_root(all_users), UNINSTALL_KEY, name)
 
 
+def installed_language(all_users=None):
+    """安装时记录的机器语言（卸载项 Language 值）；未安装或未记录时返回 None。
+    all_users=None 时先查 HKCU、再查 HKLM。"""
+    roots = (all_users,) if all_users is not None else (False, True)
+    for root_all_users in roots:
+        value = uninstall_reg_get('Language', root_all_users)
+        if value:
+            return value
+    return None
+
+
 def legacy_uninstall_reg_get(name, all_users=False):
     """旧名（zviber）卸载项里的值，供安装向导识别旧版本并接管。"""
     return _get(_root(all_users), LEGACY_UNINSTALL_KEY, name)

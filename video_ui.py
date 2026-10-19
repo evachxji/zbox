@@ -715,7 +715,7 @@ class VideoInfoDialog(QDialog):
 class _ConfirmDialog(QDialog):
     """危险操作二次确认弹窗：样式复用设置窗。"""
 
-    def __init__(self, parent=None, title=None, text=None, ok_text=None):
+    def __init__(self, parent=None, title=None, text=None, ok_text=None, cancel_text=None):
         super(_ConfirmDialog, self).__init__(parent)
         # 默认文案在构造时取词典（不能写成默认参数：import 期就会固定语言）
         if title is None:
@@ -724,6 +724,8 @@ class _ConfirmDialog(QDialog):
             text = t('video.uninstall.text')
         if ok_text is None:
             ok_text = t('video.uninstall.ok')
+        if cancel_text is None:
+            cancel_text = t('common.cancel')
         self.setObjectName('settingsDlg')
         self.setWindowTitle(title)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
@@ -759,7 +761,7 @@ class _ConfirmDialog(QDialog):
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(ui.sc(8))
-        cancel = QPushButton(t('common.cancel'))
+        cancel = QPushButton(cancel_text)
         cancel.setObjectName('setBtn')
         cancel.setCursor(Qt.PointingHandCursor)
         cancel.clicked.connect(self.reject)

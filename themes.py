@@ -155,6 +155,25 @@ QLineEdit#srcEdit {
     color: #cfccc4; font: 11px "%NUM%"; padding: 5px 8px; selection-background-color: rgba(232,163,61,90);
 }
 QLineEdit#srcEdit:focus { border-color: #e8a33d; color: #f0ede6; background: rgba(232,163,61,16); }
+QWidget#settingsPanel QComboBox {
+    background: rgba(255,255,255,10); border: 1px solid rgba(255,255,255,30); border-radius: 7px;
+    color: #e8e6e1; font: 12.5px "%CN%"; padding: 4px 8px;
+}
+QWidget#settingsPanel QComboBox:hover { border-color: rgba(232,163,61,120); }
+QWidget#settingsPanel QComboBox:focus { border-color: #e8a33d; background: rgba(232,163,61,16); }
+QWidget#settingsPanel QComboBox::drop-down { border: none; width: 18px; }
+QWidget#settingsPanel QComboBox::down-arrow {
+    image: url("%ICON_DIR%/chevron_dark.png"); width: 10px; height: 10px;
+}
+QWidget#settingsPanel QComboBox QAbstractItemView {
+    background: #23252d; border: 1px solid rgba(255,255,255,30); border-radius: 8px;
+    color: #e8e6e1; outline: none; padding: 3px;
+}
+QWidget#settingsPanel QComboBox QAbstractItemView::item { min-height: 24px; padding: 2px 8px; }
+QWidget#settingsPanel QComboBox QAbstractItemView::item:hover { background: rgba(255,255,255,14); }
+QWidget#settingsPanel QComboBox QAbstractItemView::item:selected {
+    background: rgba(232,163,61,55); color: #f2b45a;
+}
 QToolButton#timeBtn { background: transparent; border: none; border-radius: 5px; }
 QToolButton#timeBtn:hover { background: rgba(255,255,255,16); }
 QFrame#timePopup { background: #23252d; border: 1px solid rgba(255,255,255,30); border-radius: 10px; }
@@ -483,6 +502,25 @@ QLineEdit#srcEdit {
     color: #4a4a50; font: 11px "%NUM%"; padding: 5px 8px; selection-background-color: rgba(0,103,192,60);
 }
 QLineEdit#srcEdit:focus { border-color: #0067c0; color: #1b1b1f; background: rgba(0,103,192,10); }
+QWidget#settingsPanel QComboBox {
+    background: #ffffff; border: 1px solid rgba(0,0,0,26); border-radius: 7px;
+    color: #1b1b1f; font: 12.5px "%CN%"; padding: 4px 8px;
+}
+QWidget#settingsPanel QComboBox:hover { border-color: rgba(0,103,192,140); }
+QWidget#settingsPanel QComboBox:focus { border-color: #0067c0; background: rgba(0,103,192,10); }
+QWidget#settingsPanel QComboBox::drop-down { border: none; width: 18px; }
+QWidget#settingsPanel QComboBox::down-arrow {
+    image: url("%ICON_DIR%/chevron_light.png"); width: 10px; height: 10px;
+}
+QWidget#settingsPanel QComboBox QAbstractItemView {
+    background: #ffffff; border: 1px solid rgba(0,0,0,30); border-radius: 8px;
+    color: #1b1b1f; outline: none; padding: 3px;
+}
+QWidget#settingsPanel QComboBox QAbstractItemView::item { min-height: 24px; padding: 2px 8px; }
+QWidget#settingsPanel QComboBox QAbstractItemView::item:hover { background: rgba(0,0,0,10); }
+QWidget#settingsPanel QComboBox QAbstractItemView::item:selected {
+    background: rgba(0,103,192,40); color: #0067c0;
+}
 QToolButton#timeBtn { background: transparent; border: none; border-radius: 5px; }
 QToolButton#timeBtn:hover { background: rgba(0,0,0,12); }
 QFrame#timePopup { background: #ffffff; border: 1px solid rgba(0,0,0,30); border-radius: 10px; }

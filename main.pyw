@@ -31,6 +31,7 @@ from PySide6.QtWidgets import QApplication, QFileDialog
 import app as ui
 import boxes as bx
 import calendar_data as cd
+import i18n
 import installer
 import screenshot as shotmod
 import sysutil
@@ -233,17 +234,32 @@ def main():
     QApplication.setQuitOnLastWindowClosed(False)
     qapp = QApplication(sys.argv)
     qapp.setApplicationName(sysutil.APP_NAME)
-    # Qt 自带控件文案中文化：QLineEdit 右键菜单（Undo/Redo/Cut/Copy...）来自 qtbase 翻译，
-    # Qt 不会自动加载，需手动装；源码与打包后路径都由 QLibraryInfo 给出（PyInstaller 会收进 qt/qtbase 全系 .qm）
-    _tr = QTranslator(qapp)
-    if _tr.load('qtbase_zh_CN', QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)):
-        qapp.installTranslator(_tr)
     # 通知归属独立应用身份：Windows 按进程/AUMID 缓存气泡图标，
     # 旧版「黄底日期」图标就是这么残留在通知里的；独立 AUMID 绕开旧缓存
     try:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('Zbox')
     except Exception:
         pass
+
+    # 语言必须在 maybe_install（frozen --uninstall 会直接 return）与 --pick-folder
+    # 弹目录框之前解析：卸载向导与目录框标题都要用目标语言。cfg 只读取不写盘，
+    # 后面建面板复用同一个对象；ZBOX_SHOT_LANG 只在截图自检态生效，且不写回配置。
+    # 优先级：截图自检语言 → 用户设置 → 安装时记录的机器语言 → 系统界面语言。
+    data_dir = sysutil.appdata_dir()
+    cfg = ui.Config(os.path.join(data_dir, 'config.json'))
+    language = i18n.resolve_language(
+        os.environ.get('ZBOX_SHOT_LANG') if shot_dir else None,
+        cfg.data.get('language'),
+        sysutil.installed_language(),
+        i18n.detect_system_language(),
+    )
+    i18n.set_language(language)
+    # Qt 自带控件文案（QLineEdit 右键菜单等）：英文用 Qt 默认文案，中文需手动装 qtbase 翻译；
+    # 源码与打包后路径都由 QLibraryInfo 给出（PyInstaller 会收进 qt/qtbase 全系 .qm）
+    _tr = QTranslator(qapp)
+    if language == i18n.ZH and _tr.load(
+            'qtbase_zh_CN', QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)):
+        qapp.installTranslator(_tr)
 
     if installer.maybe_install():
         return 0  # --uninstall 卸载向导结束后退出（安装包是独立的 setup exe）
@@ -283,8 +299,6 @@ def main():
     # 转发进程跑这里会把运行中面板刚注入的级联菜单当残留删掉（真实 bug）
     installer.sync_context_menu()
 
-    data_dir = sysutil.appdata_dir()
-    cfg = ui.Config(os.path.join(data_dir, 'config.json'))
     hstore = cd.HolidayStore(os.path.join(data_dir, 'holidays.json'))
     tstore = ui.TodoStore(os.path.join(data_dir, 'todos.json'))
 
@@ -316,6 +330,9 @@ def main():
     server = QLocalServer(qapp)
     QLocalServer.removeServer(IPC_KEY)
     server.listen(IPC_KEY)
+    # 切换语言后 restart_application() 要在启动新进程前先关掉它，
+    # 否则新进程会连上尚未退出的旧实例、转发一次 toggle 就退出
+    qapp._zbox_ipc_server = server
 
     # 无系统托盘图标：显隐/设置/退出等入口全在桌面右键菜单（运行中注入级联菜单）
     def _quit_cleanup():

@@ -17,6 +17,7 @@ CATALOG = {
     'common.refresh': 'Refresh',
     'common.got_it': 'Got it',
     'common.what_happens': 'What happens when enabled',
+    'common.later': 'Later',
 
     # 应用
     'app.name': 'Zbox Desktop Boxes',
@@ -69,6 +70,11 @@ CATALOG = {
     'settings.transfer.help': 'About LAN transfer',
     'settings.video': 'Enable video downloader',
     'settings.video.help': 'About video downloader',
+    'settings.language': 'Language',
+    'settings.restart_title': 'Language changed',
+    'settings.restart_required': 'Restart Zbox for the new language to take full effect.',
+    'settings.restart_now': 'Restart now',
+    'settings.restart_failed': 'Could not restart. Please quit and reopen Zbox manually.',
 
     # 节假日导入
     'holiday.title': 'Import holiday data',
