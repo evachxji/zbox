@@ -48,7 +48,8 @@ from PySide6.QtWidgets import (QWidget, QDialog, QListWidget, QListWidgetItem, Q
                              QHBoxLayout, QGridLayout, QLabel, QToolButton,
                              QPushButton, QStackedLayout, QMenu,
                              QFileDialog, QLineEdit,
-                             QAbstractItemView, QApplication, QStyle)
+                             QAbstractItemView, QApplication, QStyle,
+                             QGraphicsOpacityEffect)
 
 import app as ui   # sc / _PROG_FAMILY / _class_name / _is_desktop_surface
 from snapping import (SNAP_ENGAGE, SNAP_RELEASE, SnapGuideOverlay,
@@ -1083,19 +1084,41 @@ class BoxWindow(QWidget):
         self.edit.editingFinished.connect(self._finish_rename)
         tb.addWidget(self.edit, 1)
         self._edit_cancel = False
+        self.title_actions = QWidget()
+        ta = QHBoxLayout(self.title_actions)
+        ta.setContentsMargins(0, 0, 0, 0)
+        ta.setSpacing(ui.sc(4))
         self.btn_collapse = QToolButton()
         self.btn_collapse.setFixedSize(ui.sc(22), ui.sc(20))
         self.btn_collapse.clicked.connect(lambda: self.set_collapsed(not self.rec['collapsed']))
-        tb.addWidget(self.btn_collapse)
+        ta.addWidget(self.btn_collapse)
         self.btn_lock = QToolButton()
         self.btn_lock.setFixedSize(ui.sc(22), ui.sc(20))
         self.btn_lock.clicked.connect(lambda: self.set_locked(not self.rec['locked']))
-        tb.addWidget(self.btn_lock)
+        ta.addWidget(self.btn_lock)
         self.btn_menu = QToolButton()
         self.btn_menu.setText('≡')
         self.btn_menu.setFixedSize(ui.sc(22), ui.sc(20))
         self.btn_menu.clicked.connect(self._show_menu)
-        tb.addWidget(self.btn_menu)
+        ta.addWidget(self.btn_menu)
+        tb.addWidget(self.title_actions)
+        self._title_actions_effect = QGraphicsOpacityEffect(self.title_actions)
+        self._title_actions_effect.setOpacity(0.0)
+        self.title_actions.setGraphicsEffect(self._title_actions_effect)
+        self.title_actions.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self._title_actions_target = 0.0
+        self._title_actions_hold = False
+        self._title_actions_timer = QTimer(self)
+        self._title_actions_timer.setSingleShot(True)
+        self._title_actions_timer.setInterval(30)
+        self._title_actions_timer.timeout.connect(self._title_actions_tick)
+        self._title_actions_anim = QVariantAnimation(self)
+        self._title_actions_anim.setEasingCurve(QEasingCurve.InOutQuad)
+        self._title_actions_anim.valueChanged.connect(self._set_title_actions_opacity)
+        self._title_actions_anim.finished.connect(self._finish_title_actions_fade)
+        self._title_hover_widgets = (
+            self.title, self.title_actions, self.btn_collapse,
+            self.btn_lock, self.btn_menu)
         root.addWidget(self.title)
 
         # 内容：文件列表页 / 路径失效页
@@ -1896,7 +1919,66 @@ class BoxWindow(QWidget):
         return menu
 
     def _show_menu(self):
-        self._build_menu().exec(QCursor.pos())
+        self._title_actions_hold = True
+        try:
+            self._build_menu().exec(QCursor.pos())
+        finally:
+            self._title_actions_hold = False
+            self._schedule_title_actions_hide()
+
+    def _set_title_actions_opacity(self, value):
+        self._title_actions_effect.setOpacity(max(0.0, min(1.0, float(value))))
+
+    def _finish_title_actions_fade(self):
+        value = 0.0 if self._title_actions_target <= 0 else 1.0
+        self._set_title_actions_opacity(value)
+        self.title_actions.setAttribute(Qt.WA_TransparentForMouseEvents, value <= 0)
+
+    def _show_title_actions(self):
+        self._title_actions_timer.stop()
+        if self._title_actions_target == 1.0 and \
+                (self._title_actions_anim.state() == QVariantAnimation.Running
+                 or self._title_actions_effect.opacity() >= 1.0):
+            return
+        self._fade_title_actions(1.0)
+
+    def _hide_title_actions(self, immediate=False):
+        if self._title_actions_hold and not immediate:
+            return
+        self._title_actions_timer.stop()
+        if immediate:
+            self._title_actions_anim.stop()
+            self._title_actions_target = 0.0
+            self._finish_title_actions_fade()
+            return
+        if self._title_actions_target == 0.0 and \
+                (self._title_actions_anim.state() == QVariantAnimation.Running
+                 or self._title_actions_effect.opacity() <= 0.0):
+            return
+        self._fade_title_actions(0.0)
+
+    def _fade_title_actions(self, target):
+        self._title_actions_anim.stop()
+        self._title_actions_target = target
+        self.title_actions.setAttribute(Qt.WA_TransparentForMouseEvents, target <= 0)
+        self._title_actions_anim.setDuration(140 if target > 0 else 180)
+        self._title_actions_anim.setStartValue(self._title_actions_effect.opacity())
+        self._title_actions_anim.setEndValue(target)
+        self._title_actions_anim.start()
+
+    def _schedule_title_actions_hide(self):
+        if not self._title_actions_hold and \
+                self._title_actions_effect.opacity() > 0.0:
+            self._title_actions_timer.start()
+
+    def _title_actions_tick(self):
+        if self._title_actions_hold or \
+                QApplication.activePopupWidget() is not None or \
+                QApplication.activeModalWidget() is not None:
+            return
+        if self.title.rect().contains(self.title.mapFromGlobal(QCursor.pos())):
+            return
+        self._hide_title_actions()
 
     def _set_view(self, key):
         self.rec['view'] = key
@@ -1985,6 +2067,11 @@ class BoxWindow(QWidget):
             self.setCursor(cur)
 
     def eventFilter(self, obj, e):
+        if obj in self._title_hover_widgets:
+            if e.type() == QEvent.Enter:
+                self._show_title_actions()
+            elif e.type() == QEvent.Leave:
+                self._schedule_title_actions_hide()
         # 映射格子的文件夹图标：左键按下打开所在文件夹。
         # 三类鼠标事件都吃掉——按下不放给父窗口（否则进拖动）、双击不收起、
         # 双击的第二次松开也不再开一次
@@ -2044,6 +2131,7 @@ class BoxWindow(QWidget):
     def hideEvent(self, e):
         # 双击桌面全隐藏等整体隐藏路径：预览态直接收回，恢复显示时保持收起形态
         self._peek_collapse()
+        self._hide_title_actions(immediate=True)
         if self._snap_guide is not None:
             self._snap_guide.hide()
         super(BoxWindow, self).hideEvent(e)
