@@ -167,6 +167,27 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 }
 @media (hover: hover) { .nav-gh:hover { color: var(--fg); background: rgba(255, 255, 255, .06); } }
 
+/* 语言切换：GitHub 图标左侧，地球图标 + 目标语言 */
+.nav-lang {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 12px;
+  margin-right: -14px;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: var(--r-chip);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: .06em;
+  transition: color .2s ease, background .2s ease, border-color .2s ease;
+}
+.nav-lang svg { width: 16px; height: 16px; display: block; }
+.nav-lang-label { line-height: 1; white-space: nowrap; }
+@media (hover: hover) { .nav-lang:hover { color: var(--fg); background: rgba(255, 255, 255, .06); border-color: rgba(255, 255, 255, .22); } }
+html:not(.js) .nav-lang { display: none; }
+
 /* ---------- Hero ---------- */
 .hero {
   position: relative;
@@ -1086,7 +1107,9 @@ body.rm .reveal, html:not(.js) .reveal { opacity: 1; }
 }
 
 @media (max-width: 860px) {
+  .nav-inner { gap: 12px; }
   .nav-links { display: none; }
+  .nav-lang { margin-right: -4px; padding: 0 10px; }
   .sec { padding: 110px 20px; }
 
   .grid { width: 46.5%; height: 33%; }
@@ -1159,6 +1182,12 @@ body.rm .reveal, html:not(.js) .reveal { opacity: 1; }
   #phone-tr { right: 4%; }
   #panel-clean { display: none; }
 }
+
+/* ---------- 英文版排版适配 ---------- */
+html[lang="en"] .nav-links { gap: 16px; }
+html[lang="en"] .nav-links a { white-space: nowrap; }
+html[lang="en"] .panel-tabs { gap: 10px; font-size: 12px; }
+html[lang="en"] .cap h2 { font-size: clamp(30px, 4.6vw, 56px); }
 
 /* ---------- reduced-motion ---------- */
 @media (prefers-reduced-motion: reduce) {

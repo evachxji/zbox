@@ -375,7 +375,7 @@ def parse_video(url, timeout=60):
 # ---------------- 视频下载 ----------------
 
 _PROGRESS_RE = re.compile(
-    r'\[download\]\s+([\d.]+)%(?:\s+of\s+~?(\S+))?.*?at\s+(\S+)(?:\s+ETA\s+(\S+))?')
+    r'\[download\]\s+([\d.]+)%(?:\s+of\s+~?\s*(\S+))?.*?at\s+(\S+)(?:\s+ETA\s+(\S+))?')
 _MERGE_RE = re.compile(r'\[Merger\] Merging formats into "(.+?)"')
 _DEST_RE = re.compile(r'\[download\] Destination: (.+)$')
 

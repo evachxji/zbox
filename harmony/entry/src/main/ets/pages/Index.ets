@@ -149,7 +149,16 @@ struct Index {
         return
       }
       const dstDir = new fileUri.FileUri(result[0]).path
-      copyFile(record.savedPath, `${dstDir}/${record.fileName}`)
+      if (record.savedPaths.length > 0) {
+        // 聚合记录（文件夹/多文件）：按相对路径逐个导出，还原目录结构
+        for (let i = 0; i < record.savedPaths.length; i++) {
+          const dst = `${dstDir}/${record.savedRels[i]}`
+          ensureParentDir(dst)
+          copyFile(record.savedPaths[i], dst)
+        }
+      } else {
+        copyFile(record.savedPath, `${dstDir}/${record.fileName}`)
+      }
       ToastUtil.showToast('已导出到「下载」目录')
     } catch (e) {
       LogUtil.error(`export failed: ${JSON.stringify(e)}`)
@@ -550,6 +559,17 @@ function fmtEta(record: TransferRecord): string {
 }
 
 /** 沙箱文件复制到系统保存面板返回的 uri（记录「导出」用） */
+/** 确保目标文件的父目录存在（导出嵌套目录结构用） */
+function ensureParentDir(path: string): void {
+  const idx = path.lastIndexOf('/')
+  if (idx > 0) {
+    const dir = path.substring(0, idx)
+    if (!fs.accessSync(dir)) {
+      fs.mkdirSync(dir, true)
+    }
+  }
+}
+
 function copyFile(srcPath: string, dstUri: string): void {
   const src = fs.openSync(srcPath, fs.OpenMode.READ_ONLY)
   const dst = fs.openSync(dstUri, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC)

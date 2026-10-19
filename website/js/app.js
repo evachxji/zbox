@@ -41,6 +41,14 @@
   var q = function (s) { return document.querySelector(s); };
   var qa = function (s) { return Array.prototype.slice.call(document.querySelectorAll(s)); };
 
+  function uiLang() {
+    return window.ZboxI18N && window.ZboxI18N.lang === "en" ? "en" : "zh";
+  }
+  var WEEKDAY_ZH = ["日", "一", "二", "三", "四", "五", "六"];
+  var WEEKDAY_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  var DOW_ZH = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+  var DOW_EN = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
   /* ---------- 真实时钟与当月日历（DOM 面板用真实数据） ---------- */
   function pad(n) { return (n < 10 ? "0" : "") + n; }
   function tickClock() {
@@ -49,7 +57,11 @@
     var d = new Date();
     el.textContent = pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
     var wd = q("#weekday-clean");
-    if (wd) wd.textContent = "今天周" + "日一二三四五六"[d.getDay()];
+    if (wd) {
+      wd.textContent = uiLang() === "en"
+        ? "Today · " + WEEKDAY_EN[d.getDay()]
+        : "今天周" + WEEKDAY_ZH[d.getDay()];
+    }
   }
   function buildMonth() {
     var host = q("#month-clean");
@@ -61,8 +73,8 @@
     var days = new Date(y, m + 1, 0).getDate();
     var prevDays = new Date(y, m, 0).getDate();
     var html = "";
-    var dows = ["一", "二", "三", "四", "五", "六", "日"];
-    for (var i = 0; i < 7; i++) html += '<span class="dow">周' + dows[i] + "</span>";
+    var dows = uiLang() === "en" ? DOW_EN : DOW_ZH;
+    for (var i = 0; i < 7; i++) html += '<span class="dow">' + dows[i] + "</span>";
     for (var p = offset - 1; p >= 0; p--) html += '<span class="d off">' + (prevDays - p) + "</span>";
     for (var d = 1; d <= days; d++) html += '<span class="d' + (d === today ? " today" : "") + '">' + d + "</span>";
     var total = offset + days;
@@ -73,6 +85,11 @@
   buildMonth();
   tickClock();
   setInterval(tickClock, 1000);
+
+  window.addEventListener("zbox:langchange", function () {
+    tickClock();
+    buildMonth();
+  });
 
   /* ---------- 导航选中态（scrollspy）：当前分镜对应的 tab 高亮 ----------
      独立于 GSAP，reduced-motion / 无 JS 库时照常工作；判定线 = 视口 35% 高度 */
@@ -233,16 +250,29 @@
     return Math.max(1, Math.min(1.6, s));
   }
 
-  /* 「改个名字」：逐字键入（scrub 驱动 —— 往回滚即逐字回删） */
-  var RENAME_TEXT = "我的项目";
-  var renameProxy = { n: 0 };
+  /* 「改个名字」：逐字键入（scrub 驱动 —— 往回滚即逐字回删）
+     按进度取值，中英文切换后按当前语言重新截取 */
+  var RENAME_TEXT = { zh: "我的项目", en: "My Projects" };
+  var RENAME_BASE = { zh: "项目", en: "Projects" };
+  var renameProxy = { p: 0 };
   function paintRename() {
     var t = q("#g3 .grid-title");
     if (!t) return;
-    var n = Math.round(renameProxy.n);
-    t.textContent = RENAME_TEXT.slice(0, n);
-    t.classList.toggle("typing", n > 0 && n < RENAME_TEXT.length);
+    var text = RENAME_TEXT[uiLang()];
+    if (renameProxy.p <= 0) {
+      t.textContent = RENAME_BASE[uiLang()];
+      t.classList.remove("typing");
+      return;
+    }
+    var n = Math.round(renameProxy.p * text.length);
+    t.textContent = text.slice(0, n);
+    t.classList.toggle("typing", n > 0 && n < text.length);
   }
+
+  window.addEventListener("zbox:langchange", function () {
+    paintRename();
+    if (typeof ScrollTrigger !== "undefined") ScrollTrigger.refresh();
+  });
 
   var tl = gsap.timeline({
     defaults: { ease: "power2.out" },
@@ -317,10 +347,10 @@
 
   capIn(tl, "#cap-rename", 8.75);
   tl.to(renameProxy, {
-    n: RENAME_TEXT.length, duration: .45, ease: "none", onUpdate: paintRename,
+    p: 1, duration: .45, ease: "none", onUpdate: paintRename,
     onReverseComplete: function () {
       var t = q("#g3 .grid-title");
-      if (t) { t.textContent = "项目"; t.classList.remove("typing"); }
+      if (t) { t.textContent = RENAME_BASE[uiLang()]; t.classList.remove("typing"); }
     }
   }, 8.82);
   capOut(tl, "#cap-rename", 9.3);

@@ -23,9 +23,11 @@ from datetime import datetime
 from PySide6.QtCore import (Qt, QRect, QRectF, QPoint, QPointF, QSize, QTimer, QEvent,
                           Signal, QAbstractNativeEventFilter, QPropertyAnimation, QEasingCurve, Property)
 from PySide6.QtGui import (QPainter, QColor, QPen, QPixmap, QImage, QFont, QFontMetrics,
-                         QKeySequence, QPainterPath, QCursor, QGuiApplication, QIcon, QRegion)
+                         QKeySequence, QPainterPath, QCursor, QGuiApplication, QIcon,
+                         QRegion, QPolygonF)
 from PySide6.QtWidgets import (QWidget, QApplication, QFrame, QHBoxLayout, QToolButton,
-                             QLabel, QPlainTextEdit, QPushButton, QFileDialog, QSlider)
+                             QLabel, QPlainTextEdit, QPushButton,
+                             QFileDialog, QSlider)
 
 import app as ui          # sc / ui_scale / pick_fonts / resolve_theme
 import pinshot
@@ -64,6 +66,11 @@ MASK_COLOR = QColor(0, 0, 0, 120)          # 灰罩
 DOT_COLORS = ['#ff4d4f', '#ff9f1a', '#ffd54a', '#35c759', '#2f9bff', '#ffffff']
 STROKE_RANGE = (1, 10)     # 矩形/椭圆线宽滑动条量程（逻辑 px）
 TEXT_RANGE = (10, 32)        # 文字字号滑动条量程（逻辑 px）
+MARKER_DOT_SIZE = 20         # 序号数字圆点固定尺寸（逻辑 px）
+MARKER_TEXT_MIN_W = 64
+MARKER_TEXT_MAX_W = 220
+TOOL_SIZE_DEFAULTS = {'rect': 4, 'ellipse': 4, 'arrow': 4, 'text': 16, 'marker': 16}
+ANNOTATION_TOOLS = ('rect', 'ellipse', 'arrow', 'text', 'marker')
 HANDLES = ('nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w')
 MIN_SEL = 4                                # 小于这个尺寸视为误点，不成选区
 LONG_MAX_H = 30000                         # 长图物理像素上限，超出自动完成
@@ -74,6 +81,7 @@ PALETTES = {
         'accent': '#e8a33d', 'accent_text': '#1a1610', 'accent_soft': 'rgba(232,163,61,40)',
         'accent_border': 'rgba(232,163,61,128)',
         'bar_bg': 'rgba(27,29,36,242)', 'bar_border': 'rgba(255,255,255,18)',
+        'bar_fill': (27, 29, 36, 242), 'bar_edge': (255, 255, 255, 18),
         'icon': '#7d7a72', 'icon_hov_bg': 'rgba(255,255,255,20)',
         'sep': 'rgba(255,255,255,26)',
         'dot_ring': 'rgba(255,255,255,30)', 'dot_ring_on': '#e8a33d',
@@ -84,6 +92,7 @@ PALETTES = {
         'accent': '#0067c0', 'accent_text': '#ffffff', 'accent_soft': 'rgba(0,103,192,30)',
         'accent_border': 'rgba(0,103,192,115)',
         'bar_bg': 'rgba(247,248,250,245)', 'bar_border': 'rgba(0,0,0,23)',
+        'bar_fill': (247, 248, 250, 245), 'bar_edge': (0, 0, 0, 23),
         'icon': '#8a8a90', 'icon_hov_bg': 'rgba(0,0,0,15)',
         'sep': 'rgba(0,0,0,30)',
         'dot_ring': 'rgba(0,0,0,26)', 'dot_ring_on': '#0067c0',
@@ -91,6 +100,16 @@ PALETTES = {
         'sel': '#0067c0', 'handle_bg': '#ffffff',
     },
 }
+
+# 截图主工具条的唯一按钮清单：钉图从同一份数据生成，只排除截图专属动作。
+SHOT_TOOLBAR_GROUPS = (
+    (('rect', '矩形'), ('ellipse', '椭圆'), ('arrow', '箭头'),
+     ('text', '文字'), ('marker', '序号笔')),
+    (('long', '截长图'), ('pin', '钉在桌面'), ('save', '保存')),
+    (('close', '取消 (Esc)'), ('confirm', '复制到剪贴板并关闭 (Enter)')),
+)
+SHOT_TOOLBAR_KINDS = tuple(kind for group in SHOT_TOOLBAR_GROUPS for kind, _tip in group)
+PIN_TOOLBAR_EXCLUDED = frozenset(('pin', 'long'))
 
 
 def _icon(kind, color):
@@ -112,6 +131,18 @@ def _icon(kind, color):
         p.drawLine(QPointF(5, 6.5), QPointF(19, 6.5))
         p.drawLine(QPointF(12, 6.5), QPointF(12, 18))
         p.drawLine(QPointF(9, 18), QPointF(15, 18))
+    elif kind == 'arrow':
+        p.drawLine(QPointF(5, 18), QPointF(18, 6))
+        p.setBrush(QColor(color))
+        p.drawPolygon(QPolygonF([QPointF(19, 5), QPointF(14.5, 6.5),
+                                 QPointF(17.5, 9.5)]))
+    elif kind == 'marker':
+        p.drawRoundedRect(QRectF(6, 5, 12, 14), 2, 2)
+        f = QFont('Segoe UI')
+        f.setPixelSize(10)
+        f.setBold(True)
+        p.setFont(f)
+        p.drawText(QRectF(6, 5, 12, 14), Qt.AlignCenter, '1')
     elif kind == 'long':
         p.drawRoundedRect(QRectF(8, 3.5, 8, 6), 1, 1)
         p.drawRoundedRect(QRectF(8, 14.5, 8, 6), 1, 1)
@@ -187,6 +218,92 @@ QLabel#shotSize {
     border-radius: 4px; font: 12px "%(num)s"; padding: 4px 10px;
 }
 """ % dict({'cn': cn, 'num': num}, **pal)
+
+
+class _ShotBar(QFrame):
+    """工具条托盘：顶层浮窗不依赖 QSS 根控件背景，显式绘制圆角底板。"""
+
+    def __init__(self, parent, pal):
+        super(_ShotBar, self).__init__(parent)
+        self._fill = QColor(*pal['bar_fill'])
+        self._edge = QColor(*pal['bar_edge'])
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        p.setPen(QPen(self._edge, 1))
+        p.setBrush(self._fill)
+        p.drawRoundedRect(r, 10, 10)
+        p.end()
+
+
+def build_shot_toolbar(parent, pal, callbacks, exclude=()):
+    """按共享清单构建截图工具条，返回 (bar, {action_kind: widget})。"""
+    bar = _ShotBar(parent, pal)
+    bar.setObjectName('shotBar')
+    lay = QHBoxLayout(bar)
+    lay.setContentsMargins(ui.sc(6), ui.sc(6), ui.sc(6), ui.sc(6))
+    lay.setSpacing(2)
+    buttons = {}
+    previous_group = False
+    for group in SHOT_TOOLBAR_GROUPS:
+        visible = [(kind, tip) for kind, tip in group if kind not in exclude]
+        if not visible:
+            continue
+        if previous_group:
+            sep = QFrame()
+            sep.setObjectName('shotSep')
+            sep.setFixedSize(1, ui.sc(16))
+            lay.addWidget(sep)
+        previous_group = True
+        for kind, tip in visible:
+            if kind == 'confirm':
+                b = QPushButton('完成')
+                b.setObjectName('shotConfirm')
+                b.setFixedHeight(ui.sc(30))
+            else:
+                b = QToolButton()
+                b.setObjectName('shotClose' if kind == 'close' else 'shotBtn')
+                b.setFixedSize(ui.sc(30), ui.sc(30))
+                b._icon_kind = kind
+                b.setIcon(QIcon(_icon(kind, pal['icon'])))
+                b.setIconSize(QSize(ui.sc(16), ui.sc(16)))
+            b._action_kind = kind
+            b.setCursor(Qt.PointingHandCursor)
+            b.setFocusPolicy(Qt.NoFocus)
+            b.setToolTip(tip)
+            fn = callbacks.get(kind)
+            if fn is not None:
+                b.clicked.connect(lambda _checked=False, fn=fn: fn())
+            lay.addWidget(b)
+            buttons[kind] = b
+    bar.hide()
+    return bar, buttons
+
+
+def make_shot_toolbar(parent, cfg, callbacks, exclude=()):
+    """给截图主窗之外（如钉图）创建同一套样式的工具条。"""
+    theme = cfg.data.get('theme', 'auto') if cfg is not None else 'auto'
+    pal = PALETTES.get(ui.resolve_theme(theme), PALETTES['nocturne'])
+    cn, num = ui.pick_fonts()
+    bar, buttons = build_shot_toolbar(parent, pal, callbacks, exclude)
+    bar.setStyleSheet(_qss(pal, cn, num))
+    return bar, buttons
+
+
+def place_shot_toolbar(toolbar, anchor):
+    """把主工具条贴到图片底边；空间不足时翻到顶边，并限制在工作区内。"""
+    toolbar.adjustSize()
+    scr = QGuiApplication.screenAt(anchor.center()) or QGuiApplication.primaryScreen()
+    area = scr.availableGeometry()
+    x = anchor.right() - toolbar.width() + 1
+    y = anchor.bottom() + ui.sc(8)
+    if y + toolbar.height() > area.bottom() + 1:
+        y = anchor.top() - toolbar.height() - ui.sc(8)
+    x = min(max(x, area.left()), area.right() - toolbar.width() + 1)
+    y = min(max(y, area.top()), area.bottom() - toolbar.height() + 1)
+    toolbar.move(x, y)
 
 
 def _contrast(color):
@@ -663,8 +780,9 @@ class ShotOverlay(QWidget):
     """全屏灰罩 + 框选 + 标注 + 工具条。构造时先抓屏再显示，遮罩不会入镜。"""
 
     finished = Signal()   # 会话结束（无论结果），入口用来清引用
+    pin_result = Signal(QImage)   # 钉图编辑完成：把带标注的图交回贴图窗
 
-    def __init__(self, cfg):
+    def __init__(self, cfg, pin_image=None, pin_pos=None, initial_tool=None):
         super(ShotOverlay, self).__init__(None, Qt.FramelessWindowHint | Qt.Tool
                                           | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_DeleteOnClose)
@@ -672,20 +790,33 @@ class ShotOverlay(QWidget):
         self.setAttribute(Qt.WA_AlwaysShowToolTips)   # 热键唤起时窗口常非活动，默认不弹 tooltip
         self.setCursor(Qt.CrossCursor)
         self._cfg = cfg
-        self.pal = PALETTES.get(ui.resolve_theme(cfg.data.get('theme')), PALETTES['nocturne'])
+        self._pin_mode = pin_image is not None
+        theme = cfg.data.get('theme') if cfg is not None else 'auto'
+        self.pal = PALETTES.get(ui.resolve_theme(theme), PALETTES['nocturne'])
         self._cn, self._num = ui.pick_fonts()
 
-        vg = QRect()
-        for s in QGuiApplication.screens():
-            vg = vg.united(s.geometry())
-        self._tl = vg.topLeft()
-        # 先抓底图（遮罩还没 show，抓到的就是真实桌面）
-        self._screens = []
-        for s in QGuiApplication.screens():
-            pm = s.grabWindow(0)
-            self._screens.append((QRect(s.geometry().topLeft() - self._tl, s.geometry().size()),
-                                  pm, pm.devicePixelRatio()))
-        self.setGeometry(vg)
+        if self._pin_mode:
+            dpr = pin_image.devicePixelRatio() or 1.0
+            w = max(1, int(round(pin_image.width() / dpr)))
+            h = max(1, int(round(pin_image.height() / dpr)))
+            pm = QPixmap.fromImage(pin_image)
+            pm.setDevicePixelRatio(dpr)
+            self._tl = QPoint(0, 0)
+            self._screens = [(QRect(0, 0, w, h), pm, dpr)]
+            self.setGeometry(QRect(pin_pos or QPoint(0, 0), QSize(w, h)))
+        else:
+            vg = QRect()
+            for s in QGuiApplication.screens():
+                vg = vg.united(s.geometry())
+            self._tl = vg.topLeft()
+            # 先抓底图（遮罩还没 show，抓到的就是真实桌面）
+            self._screens = []
+            for s in QGuiApplication.screens():
+                pm = s.grabWindow(0)
+                self._screens.append((QRect(s.geometry().topLeft() - self._tl,
+                                            s.geometry().size()),
+                                      pm, pm.devicePixelRatio()))
+            self.setGeometry(vg)
 
         self._mode = 'idle'        # idle / creating / ready
         self._drag = None          # (种类, 附加数据)
@@ -695,12 +826,27 @@ class ShotOverlay(QWidget):
         self._cur = None           # 绘制中的矩形/椭圆
         self._tool = None          # None / rect / ellipse / text
         self._color = DOT_COLORS[0]
-        self._stroke = 4        # 矩形/椭圆线宽（滑动条）
-        self._text_size = 16    # 文字字号（滑动条）
+        saved_sizes = (cfg.data.get('shot_sizes', {})
+                       if cfg is not None and hasattr(cfg, 'data') else {})
+        self._tool_sizes = {}
+        for tool, default in TOOL_SIZE_DEFAULTS.items():
+            try:
+                value = int(saved_sizes.get(tool, default))
+            except (TypeError, ValueError):
+                value = default
+            lo, hi = TEXT_RANGE if tool in ('text', 'marker') else STROKE_RANGE
+            self._tool_sizes[tool] = min(max(value, lo), hi)
+        self._stroke = self._tool_sizes['rect']
+        self._text_size = self._tool_sizes['text']
+        self._marker_text_size = self._tool_sizes['marker']
+        self._marker_edit = None
         self._invert = False
         self._editor = None        # (QPlainTextEdit, QPointF 落点)
         self._eat_press = False      # 点击别处关输入框的那一按只保存、不触发新动作
         self._long = None          # 长图模式状态 dict
+        if self._pin_mode:
+            self._sel = self.rect()
+            self._mode = 'ready'
 
         self._idle_timer = QTimer(self)   # 无框选兜底：灰罩晾着 IDLE_TIMEOUT_MS 自动退出
         self._idle_timer.setSingleShot(True)
@@ -709,6 +855,15 @@ class ShotOverlay(QWidget):
         self._build_chrome()
         self._refresh_icons()
         self.setStyleSheet(_qss(self.pal, self._cn, self._num))
+        if self._pin_mode:
+            for w in (self.bar, self.sub):
+                w.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint
+                                 | Qt.WindowStaysOnTopHint)
+                w.setAttribute(Qt.WA_ShowWithoutActivating)
+                w.setAttribute(Qt.WA_TranslucentBackground)
+        self._update_chrome()
+        if self._pin_mode and initial_tool in ANNOTATION_TOOLS:
+            self._set_tool(initial_tool)
 
     IDLE_TIMEOUT_MS = 20000
 
@@ -727,38 +882,25 @@ class ShotOverlay(QWidget):
         self.size_label.setObjectName('shotSize')
         self.size_label.hide()
 
-        self.bar = QFrame(self)
-        self.bar.setObjectName('shotBar')
-        lay = QHBoxLayout(self.bar)
-        lay.setContentsMargins(ui.sc(6), ui.sc(6), ui.sc(6), ui.sc(6))
-        lay.setSpacing(2)
-        self._tool_btns = {}
-        for kind, tip in (('rect', '矩形'), ('ellipse', '椭圆'), ('text', '文字')):
-            b = self._mk_btn(kind, tip, lay)
-            self._tool_btns[kind] = b
-            b.clicked.connect(lambda _=False, k=kind: self._set_tool(k))
-        lay.addWidget(self._sep())
-        for kind, tip, fn in (('long', '截长图', self._start_long),
-                              ('pin', '钉在桌面', self._finish_pin),
-                              ('save', '保存', self._finish_save)):
-            b = self._mk_btn(kind, tip, lay)
-            b.clicked.connect(fn)
-        lay.addWidget(self._sep())
-        close = self._mk_btn('close', '取消 (Esc)', lay, obj='shotClose')
-        close.clicked.connect(self._cancel)
-        ok = QPushButton('完成')
-        ok.setObjectName('shotConfirm')
-        ok.setFixedHeight(ui.sc(30))
-        ok.setCursor(Qt.PointingHandCursor)
-        ok.setFocusPolicy(Qt.NoFocus)
-        ok.setToolTip('复制到剪贴板并关闭 (Enter)')
-        ok.clicked.connect(self._finish_copy)
-        lay.addWidget(ok)
-        self.bar.hide()
+        callbacks = {
+            'rect': lambda: self._set_tool('rect'),
+            'ellipse': lambda: self._set_tool('ellipse'),
+            'arrow': lambda: self._set_tool('arrow'),
+            'text': lambda: self._set_tool('text'),
+            'marker': lambda: self._set_tool('marker'),
+            'long': self._start_long,
+            'pin': self._finish_pin,
+            'save': self._finish_save,
+            'close': self._cancel,
+            'confirm': self._finish_copy,
+        }
+        self.bar, self._toolbar_btns = build_shot_toolbar(
+            self, self.pal, callbacks,
+            exclude=PIN_TOOLBAR_EXCLUDED if self._pin_mode else ())
+        self._tool_btns = {k: self._toolbar_btns[k] for k in ANNOTATION_TOOLS}
 
         # 二级条：颜色 / 粗细(字号) / 反色（激活绘图工具时出现）
-        self.sub = QFrame(self)
-        self.sub.setObjectName('shotBar')
+        self.sub = _ShotBar(self, self.pal)
         sl = QHBoxLayout(self.sub)
         sl.setContentsMargins(ui.sc(10), ui.sc(7), ui.sc(10), ui.sc(7))
         sl.setSpacing(ui.sc(7))
@@ -805,17 +947,6 @@ class ShotOverlay(QWidget):
         s.setFixedSize(1, ui.sc(16))
         return s
 
-    def _mk_btn(self, kind, tip, lay, obj='shotBtn'):
-        b = QToolButton()
-        b.setObjectName(obj)
-        b.setFixedSize(ui.sc(30), ui.sc(30))
-        b.setCursor(Qt.PointingHandCursor)
-        b.setFocusPolicy(Qt.NoFocus)
-        b.setToolTip(tip)
-        lay.addWidget(b)
-        b._icon_kind = kind
-        return b
-
     def _refresh_icons(self):
         """图标颜色随状态变化（on 用主题色）：重新生成各按钮图标。"""
         p = self.pal
@@ -833,6 +964,9 @@ class ShotOverlay(QWidget):
     def _set_tool(self, t):
         if self._editor:
             self._commit_editor()
+        if self._marker_edit:
+            self._commit_marker_editor()
+        self._eat_press = False
         self._edit_shape = None
         self._tool = None if self._tool == t else t
         for k, b in self._tool_btns.items():
@@ -840,14 +974,20 @@ class ShotOverlay(QWidget):
             b.style().unpolish(b)
             b.style().polish(b)
         is_text = self._tool == 'text'
+        is_marker = self._tool == 'marker'
         self._invert_btn.setVisible(is_text)   # 反色只有文字工具才有
         self._sep2.setVisible(is_text)
         self._size_slider.blockSignals(True)   # 滑动条随工具换量程：图形 = 线宽，文字 = 字号
         if is_text:
             self._size_slider.setRange(*TEXT_RANGE)
             self._size_slider.setValue(self._text_size)
+        elif is_marker:
+            self._size_slider.setRange(*TEXT_RANGE)
+            self._size_slider.setValue(self._marker_text_size)
         else:
             self._size_slider.setRange(*STROKE_RANGE)
+            if self._tool in ('rect', 'ellipse', 'arrow'):
+                self._stroke = self._tool_sizes[self._tool]
             self._size_slider.setValue(self._stroke)
         self._size_slider.blockSignals(False)
         self._refresh_icons()
@@ -859,6 +999,8 @@ class ShotOverlay(QWidget):
         self._edit_shape = sh
         self._set_color(sh['color'])
         self._stroke = int(round(sh['w']))
+        if self._tool in ('rect', 'ellipse', 'arrow'):
+            self._tool_sizes[self._tool] = self._stroke
         self._size_slider.blockSignals(True)
         self._size_slider.setValue(self._stroke)
         self._size_slider.blockSignals(False)
@@ -878,14 +1020,27 @@ class ShotOverlay(QWidget):
     def _slider_changed(self, v):
         if self._tool == 'text':
             self._text_size = v
+            self._tool_sizes['text'] = v
             if self._editor:   # 编辑中拖字号同样立刻生效（同换颜色/反色），不等提交
                 ed = self._editor[0]
                 f = ed.font()
                 f.setPixelSize(v)
                 ed.setFont(f)
                 self._fit_editor(ed, ed.pos())
+        elif self._tool == 'marker':
+            self._marker_text_size = v
+            self._tool_sizes['marker'] = v
+            if self._marker_edit:
+                ed, sh = self._marker_edit
+                sh['text_size'] = v
+                f = ed.font()
+                f.setPixelSize(v)
+                ed.setFont(f)
+                ed.setGeometry(self._marker_text_rect(sh).toRect())
         else:
             self._stroke = v
+            if self._tool in ('rect', 'ellipse', 'arrow'):
+                self._tool_sizes[self._tool] = v
             if self._edit_shape is not None:
                 self._edit_shape['w'] = float(v)
                 self.update()
@@ -900,10 +1055,159 @@ class ShotOverlay(QWidget):
             self._fit_editor(self._editor[0], self._editor[0].pos())
 
     def _undo(self):
+        if self._marker_edit:
+            self._commit_marker_editor()
         if self._shapes:
             self._edit_shape = None
             self._shapes.pop()
+            self._renumber_markers()
             self.update()
+
+    def _renumber_markers(self):
+        no = 1
+        for sh in self._shapes:
+            if sh['kind'] == 'marker':
+                sh['no'] = no
+                no += 1
+
+    def _persist_tool_sizes(self):
+        if self._cfg is None or not hasattr(self._cfg, 'data'):
+            return
+        self._cfg.data['shot_sizes'] = dict(self._tool_sizes)
+        try:
+            self._cfg.save()
+        except Exception:
+            pass
+
+    def _arrow_metrics(self, sh):
+        """QQ 风格箭头：杆比线宽工具明显加粗，箭头三角放大。"""
+        shaft = max(6.0, float(sh['w']) * 1.75)
+        head_len = max(24.0, shaft * 3.6)
+        head_half = max(13.0, head_len * 0.48)
+        return shaft, head_len, head_half
+
+    def _marker_badge_rect(self, sh):
+        size = sh.get('dot_size', MARKER_DOT_SIZE)
+        return QRectF(sh['pos'].x() - size / 2, sh['pos'].y() - size / 2,
+                      size, size)
+
+    def _marker_text_font(self, sh):
+        f = QFont(self._cn)
+        f.setPixelSize(sh.get('text_size', self._marker_text_size))
+        return f
+
+    def _marker_text_rect(self, sh):
+        badge = self._marker_badge_rect(sh)
+        f = self._marker_text_font(sh)
+        fm = QFontMetrics(f)
+        pad_x, pad_y = ui.sc(7), ui.sc(4)
+        text = sh.get('text', '')
+        lines = text.split('\n') if text else ['']
+        natural = max(fm.horizontalAdvance(ln) for ln in lines)
+        w = min(max(natural + pad_x * 2, ui.sc(MARKER_TEXT_MIN_W)),
+                ui.sc(MARKER_TEXT_MAX_W))
+        inner_w = max(1, int(w - pad_x * 2))
+        bounds = fm.boundingRect(QRect(0, 0, inner_w, 100000),
+                                 int(Qt.TextWordWrap), text)
+        h = max(fm.height(), bounds.height()) + pad_y * 2
+        x = badge.right() + ui.sc(5)
+        y = badge.center().y() - h / 2
+        if self._sel.isValid():
+            x = min(max(x, self._sel.left()), self._sel.right() - w)
+            y = min(max(y, self._sel.top()), self._sel.bottom() - h)
+        return QRectF(x, y, w, h)
+
+    def _marker_bounds(self, sh):
+        bounds = self._marker_badge_rect(sh)
+        if sh.get('text'):
+            bounds = bounds.united(self._marker_text_rect(sh))
+        return bounds
+
+    def _clamp_marker(self, sh):
+        if not self._sel.isValid():
+            return
+        bounds = self._marker_bounds(sh)
+        dx = dy = 0
+        if bounds.left() < self._sel.left():
+            dx = self._sel.left() - bounds.left()
+        elif bounds.right() > self._sel.right():
+            dx = self._sel.right() - bounds.right()
+        if bounds.top() < self._sel.top():
+            dy = self._sel.top() - bounds.top()
+        elif bounds.bottom() > self._sel.bottom():
+            dy = self._sel.bottom() - bounds.bottom()
+        sh['pos'] += QPointF(dx, dy)
+
+    def _place_marker(self, pos):
+        size = MARKER_DOT_SIZE
+        half = size / 2.0
+        x = min(max(float(pos.x()), self._sel.left() + half),
+                self._sel.right() - half)
+        y = min(max(float(pos.y()), self._sel.top() + half),
+                self._sel.bottom() - half)
+        sh = {
+            'kind': 'marker', 'pos': QPointF(x, y), 'dot_size': size,
+            'text_size': self._marker_text_size, 'color': self._color, 'text': '',
+        }
+        self._shapes.append(sh)
+        self._renumber_markers()
+        self.update()
+        self._open_marker_editor(sh)
+
+    def _open_marker_editor(self, sh):
+        if self._marker_edit is not None:
+            self._commit_marker_editor()
+        ed = QPlainTextEdit(self)
+        ed.setPlainText(sh.get('text', ''))
+        ed.setPlaceholderText('输入说明')
+        ed.setFrameShape(QFrame.NoFrame)
+        ed.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+        ed.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        ed.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        ed.document().setDocumentMargin(0)
+        ed.setStyleSheet(
+            'QPlainTextEdit { background: rgba(0,0,0,190); color: #ffffff;'
+            ' border: 1px solid #000000; border-radius: 4px;'
+            ' padding: 2px 6px; }')
+        ed.setFont(self._marker_text_font(sh))
+        r = self._marker_text_rect(sh)
+        ed.setGeometry(r.toRect())
+        ed.installEventFilter(self)
+        ed.textChanged.connect(lambda ed=ed, sh=sh: self._grow_marker_editor(ed, sh))
+        self._marker_edit = (ed, sh)
+        ed.show()
+        ed.setFocus()
+        self.releaseKeyboard()
+
+    def _grow_marker_editor(self, ed, sh):
+        if not self._marker_edit or ed is not self._marker_edit[0]:
+            return
+        sh['text'] = ed.toPlainText()
+        ed.setGeometry(self._marker_text_rect(sh).toRect())
+        self.update()
+
+    def _commit_marker_editor(self):
+        if self._marker_edit is None:
+            return
+        ed, sh = self._marker_edit
+        self._marker_edit = None
+        sh['text'] = ed.toPlainText().strip()
+        ed.removeEventFilter(self)
+        ed.close()
+        ed.deleteLater()
+        self.grabKeyboard()
+        self.update()
+
+    def _hit_marker(self, pos):
+        p = QPointF(pos)
+        for sh in reversed(self._shapes):
+            if sh['kind'] != 'marker':
+                continue
+            if self._marker_badge_rect(sh).contains(p):
+                return sh
+            if sh.get('text') and self._marker_text_rect(sh).contains(p):
+                return sh
+        return None
 
     # ---------- 绘制 ----------
 
@@ -911,6 +1215,14 @@ class ShotOverlay(QWidget):
         p = QPainter(self)
         for rect, pm, _d in self._screens:
             p.drawPixmap(rect, pm)
+        if self._pin_mode:
+            p.setRenderHint(QPainter.Antialiasing)
+            for sh in self._shapes:
+                self._draw_shape(p, sh)
+            if self._cur:
+                self._draw_shape(p, self._cur)
+            p.end()
+            return
         p.fillRect(self.rect(), MASK_COLOR)
         if self._sel.isValid() and not self._sel.isNull():
             # 选区镂空：把底图在选区内再画一遍（盖住灰罩），再画标注
@@ -944,7 +1256,50 @@ class ShotOverlay(QWidget):
 
     def _draw_shape(self, p, sh):
         col = QColor(sh['color'])
-        if sh['kind'] in ('rect', 'ellipse'):
+        if sh['kind'] == 'arrow':
+            start, end = sh['start'], sh['end']
+            dx, dy = end.x() - start.x(), end.y() - start.y()
+            length = (dx * dx + dy * dy) ** 0.5
+            if length < 0.5:
+                return
+            ux, uy = dx / length, dy / length
+            shaft, head_len, head_half = self._arrow_metrics(sh)
+            base = QPointF(end.x() - ux * head_len, end.y() - uy * head_len)
+            px, py = -uy * head_half, ux * head_half
+            p.setPen(QPen(col, shaft, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            p.drawLine(start, base)
+            p.setPen(Qt.NoPen)
+            p.setBrush(col)
+            p.drawPolygon(QPolygonF([
+                end, QPointF(base.x() + px, base.y() + py),
+                QPointF(base.x() - px, base.y() - py),
+            ]))
+        elif sh['kind'] == 'marker':
+            label = str(sh.get('no', ''))
+            f = QFont(self._cn)
+            f.setPixelSize(max(10, int(sh.get('dot_size', MARKER_DOT_SIZE) * 0.55)))
+            f.setBold(True)
+            r = self._marker_badge_rect(sh)
+            sh['rect'] = r
+            p.setPen(Qt.NoPen)
+            p.setBrush(col)
+            p.drawEllipse(r)
+            p.setPen(QColor(_contrast(sh['color'])))
+            p.setFont(f)
+            p.drawText(r, Qt.AlignCenter, label)
+            text = sh.get('text', '')
+            if text:
+                tr = self._marker_text_rect(sh)
+                sh['text_rect'] = tr
+                p.setPen(QPen(QColor('#000000'), 1))
+                p.setBrush(QColor(0, 0, 0, 190))
+                p.drawRoundedRect(tr, 4, 4)
+                tf = self._marker_text_font(sh)
+                p.setFont(tf)
+                p.setPen(QColor('#ffffff'))
+                p.drawText(tr.adjusted(ui.sc(7), ui.sc(4), -ui.sc(7), -ui.sc(4)),
+                           Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap, text)
+        elif sh['kind'] in ('rect', 'ellipse'):
             p.setPen(QPen(col, sh['w'], Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
             p.setBrush(Qt.NoBrush)
             if sh['kind'] == 'rect':
@@ -1058,7 +1413,7 @@ class ShotOverlay(QWidget):
         return None
 
     def _hit_handle(self, pos):
-        if self._mode != 'ready':
+        if self._mode != 'ready' or self._pin_mode:
             return None
         grow = ui.sc(5)
         for h in HANDLES:
@@ -1071,10 +1426,33 @@ class ShotOverlay(QWidget):
     def mousePressEvent(self, e):
         if self._long is not None:
             return
-        pos = e.pos()
         if self._eat_press:
             self._eat_press = False
+            if self._editor:
+                self._commit_editor()
+            if self._marker_edit:
+                self._commit_marker_editor()
             return
+        if self._editor:
+            self._commit_editor()
+            return
+        if self._marker_edit:
+            self._commit_marker_editor()
+            return
+        if self._pin_mode:
+            if e.button() == Qt.RightButton:
+                if self._editor:
+                    self._cancel_editor()
+                else:
+                    self._shapes = []
+                    self._edit_shape = None
+                    self.update()
+                return
+            if e.button() == Qt.LeftButton and self._tool is None:
+                self._drag = ('window', e.globalPosition().toPoint()
+                              - self.frameGeometry().topLeft())
+                return
+        pos = e.pos()
         if e.button() == Qt.RightButton:
             if self._editor:
                 self._cancel_editor()
@@ -1085,8 +1463,6 @@ class ShotOverlay(QWidget):
             return
         if e.button() != Qt.LeftButton:
             return
-        if self._editor:
-            self._commit_editor()
         if self._mode == 'ready':
             h = self._hit_handle(pos)
             if h:
@@ -1100,6 +1476,21 @@ class ShotOverlay(QWidget):
                         self._drag = ('text_move', (hit, QPointF(pos) - hit['pos'], QPointF(pos)))
                     else:
                         self._open_editor(pos)
+                elif self._tool == 'marker':
+                    hit = self._hit_marker(pos)
+                    if hit is not None:
+                        self._drag = ('marker_move',
+                                      (hit, QPointF(pos) - hit['pos'], QPointF(pos)))
+                    else:
+                        self._place_marker(pos)
+                    return
+                elif self._tool == 'arrow':
+                    self._edit_shape = None
+                    self._cur = {
+                        'kind': 'arrow', 'start': QPointF(pos), 'end': QPointF(pos),
+                        'color': self._color, 'w': float(self._stroke),
+                    }
+                    self._drag = ('draw', QPointF(pos))
                 else:
                     h = self._hit_shape_handle(pos)
                     if h:
@@ -1138,7 +1529,10 @@ class ShotOverlay(QWidget):
             self._update_cursor(QCursor.pos())
             return
         kind, data = self._drag
-        if kind == 'create':
+        if kind == 'window':
+            self.move(e.globalPosition().toPoint() - data)
+            self._update_chrome()
+        elif kind == 'create':
             self._sel = QRect(data, pos).normalized()
         elif kind == 'move':
             tl = pos - data
@@ -1149,12 +1543,19 @@ class ShotOverlay(QWidget):
             h, fixed = data
             self._sel = self._resized(h, fixed, pos)
         elif kind == 'draw':
-            self._cur['rect'] = QRectF(data, QPointF(pos)).normalized()
+            if self._cur['kind'] == 'arrow':
+                self._cur['end'] = QPointF(pos)
+            else:
+                self._cur['rect'] = QRectF(data, QPointF(pos)).normalized()
         elif kind == 'text_move':
             sh, off, _start = data
             np = QPointF(pos) - off   # 钳在选区内
             sh['pos'] = QPointF(min(max(np.x(), float(self._sel.left())), float(self._sel.right())),
                                 min(max(np.y(), float(self._sel.top())), float(self._sel.bottom())))
+        elif kind == 'marker_move':
+            sh, off, _start = data
+            sh['pos'] = QPointF(pos) - off
+            self._clamp_marker(sh)
         elif kind == 'shape_resize':
             h, fixed = data
             r = QRectF(self._edit_shape['rect'])
@@ -1187,15 +1588,22 @@ class ShotOverlay(QWidget):
             return
         kind, _d = self._drag
         self._drag = None
-        if kind == 'create':
+        if kind == 'window':
+            pass
+        elif kind == 'create':
             if self._sel.width() < MIN_SEL or self._sel.height() < MIN_SEL:
                 self._sel = QRect()
                 self._mode = 'idle'
             else:
                 self._mode = 'ready'
         elif kind == 'draw' and self._cur:
-            r = self._cur['rect']
-            if r.width() >= 3 and r.height() >= 3:
+            if self._cur['kind'] == 'arrow':
+                start, end = self._cur['start'], self._cur['end']
+                keep = (end.x() - start.x()) ** 2 + (end.y() - start.y()) ** 2 >= 16
+            else:
+                r = self._cur['rect']
+                keep = r.width() >= 3 and r.height() >= 3
+            if keep:
                 self._shapes.append(self._cur)
             self._cur = None
         elif kind == 'text_move':
@@ -1203,6 +1611,10 @@ class ShotOverlay(QWidget):
             if (QPointF(e.pos()) - start).manhattanLength() < 4:
                 self._shapes.remove(sh)   # 先摘下来，提交时按工具条状态重建（清空 = 删除）
                 self._open_editor(sh['pos'].toPoint(), edit=sh)
+        elif kind == 'marker_move':
+            sh, _off, start = _d
+            if (QPointF(e.pos()) - start).manhattanLength() < 4:
+                self._open_marker_editor(sh)
         elif kind == 'shape_move':
             self._select_shape(_d[0])   # 点击/拖动后都选中：调色板、滑动条接着改
         self._arm_idle_timer()
@@ -1210,7 +1622,7 @@ class ShotOverlay(QWidget):
         self.update()
 
     def mouseDoubleClickEvent(self, e):
-        if (e.button() == Qt.LeftButton and self._long is None
+        if (not self._pin_mode and e.button() == Qt.LeftButton and self._long is None
                 and self._mode == 'ready' and self._sel.contains(e.pos())):
             self._finish_copy()
 
@@ -1236,6 +1648,9 @@ class ShotOverlay(QWidget):
 
     def _update_cursor(self, gpos):
         pos = self.mapFromGlobal(gpos)
+        if self._pin_mode and self._tool is None:
+            self.setCursor(Qt.ArrowCursor)
+            return
         h = self._hit_handle(pos)
         if h is None and self._edit_shape is not None:
             h = self._hit_shape_handle(pos)
@@ -1251,6 +1666,9 @@ class ShotOverlay(QWidget):
             cur = Qt.ArrowCursor if self._hit_text(pos) else Qt.IBeamCursor
         elif self._tool in ('rect', 'ellipse') and self._mode == 'ready' and self._sel.contains(pos):
             cur = Qt.ArrowCursor if self._hit_shape(pos, self._tool) else Qt.CrossCursor
+        elif self._tool == 'marker' and self._mode == 'ready' \
+                and self._hit_marker(pos) is not None:
+            cur = Qt.SizeAllCursor
         elif self._mode == 'ready' and self._sel.contains(pos) and not self._tool:
             cur = Qt.SizeAllCursor
         else:
@@ -1279,10 +1697,22 @@ class ShotOverlay(QWidget):
         self.raise_()
         self.grabKeyboard()   # 全屏 Tool 窗不一定有焦点，Esc/Enter/Ctrl+Z 靠抢键盘保证
         self._arm_idle_timer()
+        if self._pin_mode:
+            self._update_chrome()
 
     def closeEvent(self, e):
         self.releaseKeyboard()
+        self._persist_tool_sizes()
+        if self._pin_mode:
+            self.bar.close()
+            self.sub.close()
         super(ShotOverlay, self).closeEvent(e)
+
+    def hideEvent(self, e):
+        if self._pin_mode:
+            self.bar.hide()
+            self.sub.hide()
+        super(ShotOverlay, self).hideEvent(e)
 
     # ---------- 文字工具 ----------
 
@@ -1386,6 +1816,20 @@ class ShotOverlay(QWidget):
         self.grabKeyboard()   # 同 _commit_editor
 
     def eventFilter(self, obj, ev):
+        if self._marker_edit and obj is self._marker_edit[0]:
+            if (ev.type() == QEvent.KeyPress
+                    and ev.key() in (Qt.Key_Return, Qt.Key_Enter)
+                    and ev.modifiers() & Qt.ControlModifier):
+                self._commit_marker_editor()
+                return True
+            if ev.type() == QEvent.KeyPress and ev.key() == Qt.Key_Escape:
+                self._commit_marker_editor()
+                return True
+            if ev.type() == QEvent.FocusOut:
+                self._commit_marker_editor()
+                self._eat_press = True
+                QTimer.singleShot(80, self._clear_eat_press)
+                return True
         if self._editor and obj is self._editor[0]:
             if ev.type() == QEvent.KeyPress and ev.key() == Qt.Key_Escape:
                 self._cancel_editor()
@@ -1395,7 +1839,7 @@ class ShotOverlay(QWidget):
                 # 这次失焦多半是"点击别处"引起的：随即送达遮罩的那一按只负责保存，
                 # 不能再在落点新开输入框/画图形（singleShot 兜底：切窗口失焦没有后续点击）
                 self._eat_press = True
-                QTimer.singleShot(0, self._clear_eat_press)
+                QTimer.singleShot(80, self._clear_eat_press)
                 return True
         return super(ShotOverlay, self).eventFilter(obj, ev)
 
@@ -1410,6 +1854,29 @@ class ShotOverlay(QWidget):
             self.sub.hide()
             self.size_label.hide()
             return
+        if self._pin_mode:
+            self.size_label.hide()
+            if not self.isVisible():
+                self.bar.hide()
+                self.sub.hide()
+                return
+            show_sub = self._tool in ANNOTATION_TOOLS
+            self.bar.adjustSize()
+            place_shot_toolbar(self.bar, self.frameGeometry())
+            self.bar.show()
+            if show_sub:
+                self.sub.adjustSize()
+                scr = (QGuiApplication.screenAt(self.frameGeometry().center())
+                       or QGuiApplication.primaryScreen())
+                area = scr.availableGeometry()
+                sy = self.bar.y() + self.bar.height() + ui.sc(6)
+                sx = min(max(self.bar.x(), area.left()),
+                         area.right() - self.sub.width() + 1)
+                self.sub.move(sx, sy)
+                self.sub.show()
+            else:
+                self.sub.hide()
+            return
         r = self._sel
         self.size_label.setText('%d × %d' % (r.width(), r.height()))
         self.size_label.adjustSize()
@@ -1420,7 +1887,7 @@ class ShotOverlay(QWidget):
         self.size_label.move(max(0, lx), ly)
         self.size_label.show()
 
-        show_sub = self._tool in ('rect', 'ellipse', 'text')
+        show_sub = self._tool in ANNOTATION_TOOLS
         self.bar.adjustSize()
         self.sub.adjustSize()
         bw, bh = self.bar.width(), self.bar.height()
@@ -1472,14 +1939,21 @@ class ShotOverlay(QWidget):
     def _finish_copy(self):
         if self._editor:
             self._commit_editor()
+        if self._marker_edit:
+            self._commit_marker_editor()
         if not (self._mode == 'ready' and self._sel.isValid()):
             return
-        QApplication.clipboard().setImage(self._result_image())
+        img = self._result_image()
+        QApplication.clipboard().setImage(img)
+        if self._pin_mode:
+            self.pin_result.emit(img)
         self._close()
 
     def _finish_save(self):
         if self._editor:
             self._commit_editor()
+        if self._marker_edit:
+            self._commit_marker_editor()
         if not (self._mode == 'ready' and self._sel.isValid()):
             return
         img = self._result_image()
@@ -1488,6 +1962,8 @@ class ShotOverlay(QWidget):
                                                'PNG 图片 (*.png)')
         if path:
             img.save(path)
+            if self._pin_mode:
+                self.pin_result.emit(img)
         self._close()
 
     def _finish_pin(self):
@@ -1495,7 +1971,8 @@ class ShotOverlay(QWidget):
             self._commit_editor()
         if not (self._mode == 'ready' and self._sel.isValid()):
             return
-        pinshot.pin(self._result_image(), self._global_sel().topLeft(), '#999999')
+        pinshot.pin(self._result_image(), self._global_sel().topLeft(), '#999999',
+                    self._cfg)
         self._close()
 
     def _default_name(self):
@@ -1514,6 +1991,8 @@ class ShotOverlay(QWidget):
         self._close()
 
     def _close(self):
+        if self._marker_edit:
+            self._commit_marker_editor()
         if self._long is not None:
             self._stop_long(save=False)
         self.finished.emit()
@@ -1772,6 +2251,13 @@ class HotkeyManager(object):
 # ---------------- 入口 ----------------
 
 _active = []   # 进行中的会话：防止热键连按叠第二个遮罩
+
+
+def start_pin_edit(cfg, image, pos, tool=None):
+    """在钉图原位打开复用截图标注能力的编辑窗。"""
+    o = ShotOverlay(cfg, pin_image=image, pin_pos=pos, initial_tool=tool)
+    o.show()
+    return o
 
 
 def start_session(cfg):

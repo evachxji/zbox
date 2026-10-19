@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 '''transfer.py 的自动化协议自检。
 
 不依赖 Qt、不依赖组播（单机组播不可靠，用直连 register 代替发现）。
@@ -515,6 +515,121 @@ def case_send_cancel(ctx):
         shutil.rmtree(root, ignore_errors=True)
 
 
+def case_folder_transfer(ctx):
+    # 用例 14：文件夹往返——嵌套子目录 + 中文目录名，send_files 传 (path, rel) 条目，
+    # 接收端还原目录树，逐文件 sha256 一致
+    root = tempfile.mkdtemp(prefix='zbox_case14_')
+    try:
+        src = os.path.join(root, 'src')
+        recv = os.path.join(root, 'recv')
+        top = os.path.join(src, '照片 2026')
+        sub = os.path.join(top, '子目录')
+        os.makedirs(sub)
+        os.makedirs(recv)
+        payload = {
+            os.path.join(top, 'a.jpg'): b'a' * 100,
+            os.path.join(sub, 'b.jpg'): os.urandom(1024),
+            os.path.join(sub, '中文.txt'): '内容'.encode('utf-8'),
+        }
+        for p, data in payload.items():
+            with open(p, 'wb') as fp:
+                fp.write(data)
+        entries = []
+        for dirpath, _dirs, fnames in os.walk(top):
+            for name in fnames:
+                full = os.path.join(dirpath, name)
+                rel = os.path.relpath(full, src).replace(os.sep, '/')
+                entries.append((full, rel))
+        ctx.box_b['dir'] = recv
+        results = []
+        transfer.send_files('127.0.0.1', ctx.srv_b.port, entries,
+                            on_done=lambda ok, msg: results.append((ok, msg)))
+        check(results == [(True, '')], '文件夹传输应成功，实际 %r' % (results,))
+        for src_path, rel in entries:
+            saved = os.path.join(recv, *rel.split('/'))
+            check(os.path.isfile(saved), '落盘文件缺失: %s' % rel)
+            check(sha256_of(saved) == sha256_of(src_path),
+                  '落盘 sha256 与源不一致: %s' % rel)
+    finally:
+        ctx.box_b['dir'] = None
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def case_path_traversal(ctx):
+    # 用例 15：path 字段目录穿越防御——'..' 段 / 清洗后为空段 / 反斜杠段，
+    # 所有产物必须落在保存目录之内
+    root = tempfile.mkdtemp(prefix='zbox_case15_')
+    try:
+        recv = os.path.join(root, 'recv')
+        os.makedirs(recv)
+        ctx.box_b['dir'] = recv
+        meta = {
+            'f1': {'id': 'f1', 'fileName': 'x.txt', 'size': 3,
+                   'fileType': 'text/plain', 'path': '../../evil/x.txt'},
+            'f2': {'id': 'f2', 'fileName': 'z.txt', 'size': 3,
+                   'fileType': 'text/plain', 'path': '.../z.txt'},
+            'f3': {'id': 'f3', 'fileName': 'w.txt', 'size': 3,
+                   'fileType': 'text/plain', 'path': 'a\\b\\w.txt'},
+        }
+        status, body = post_json(ctx.url_b('prepare-upload'),
+                                 {'info': ctx.info_a.to_dict(), 'files': meta})
+        check(status == 200, 'prepare 应回 200，实际 %d' % status)
+        sid = body['sessionId']
+        for fid in ('f1', 'f2', 'f3'):
+            status = post_raw(ctx.url_b('upload?' + urllib.parse.urlencode(
+                {'sessionId': sid, 'fileId': fid,
+                 'token': body['files'][fid]})), b'abc')
+            check(status == 200, 'upload %s 应回 200，实际 %d' % (fid, status))
+        # realpath 校验：所有产物都在保存目录之内
+        recv_real = os.path.realpath(recv)
+        found = []
+        for dirpath, _dirs, fnames in os.walk(recv):
+            for name in fnames:
+                full = os.path.realpath(os.path.join(dirpath, name))
+                check(full.startswith(recv_real + os.sep),
+                      '产物越出保存目录: %s' % full)
+                found.append(os.path.relpath(full, recv_real))
+        check(not os.path.exists(os.path.join(root, 'evil')),
+              '不应在保存目录之外落盘')
+        check(sorted(found) == sorted([
+            os.path.join('evil', 'x.txt'),       # '..' 段剔除后合并进 evil/
+            os.path.join('_', 'z.txt'),          # '...' 清洗为空 -> '_' 兜底
+            'a_b_w.txt',                         # 反斜杠段消毒成扁平文件名
+        ]), '落盘位置不符: %r' % (found,))
+    finally:
+        ctx.box_b['dir'] = None
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def case_mixed_path(ctx):
+    # 用例 16：兼容性回归——带 path 与不带 path 的文件同会话混传，各自落对位置
+    root = tempfile.mkdtemp(prefix='zbox_case16_')
+    try:
+        src = os.path.join(root, 'src')
+        recv = os.path.join(root, 'recv')
+        os.makedirs(src)
+        os.makedirs(recv)
+        flat = os.path.join(src, 'flat.txt')
+        with open(flat, 'wb') as fp:
+            fp.write(b'flat')
+        nested = os.path.join(src, 'nested.txt')
+        with open(nested, 'wb') as fp:
+            fp.write(b'nested')
+        ctx.box_b['dir'] = recv
+        results = []
+        transfer.send_files('127.0.0.1', ctx.srv_b.port,
+                            [flat, (nested, 'docs/nested.txt')],
+                            on_done=lambda ok, msg: results.append((ok, msg)))
+        check(results == [(True, '')], '混传应成功，实际 %r' % (results,))
+        check(os.path.isfile(os.path.join(recv, 'flat.txt')),
+              '不带 path 的文件应扁平落盘')
+        check(os.path.isfile(os.path.join(recv, 'docs', 'nested.txt')),
+              '带 path 的文件应还原目录')
+    finally:
+        ctx.box_b['dir'] = None
+        shutil.rmtree(root, ignore_errors=True)
+
+
 CASES = [
     ('register 互见设备', case_register),
     ('GET /info 字段完整', case_info),
@@ -529,6 +644,9 @@ CASES = [
     ('来源 IP 不符回 403', case_ip_mismatch),
     ('坏 size 元数据 prepare 回 400', case_bad_size_meta),
     ('发送方 cancel_event 中断上传', case_send_cancel),
+    ('文件夹往返还原目录树', case_folder_transfer),
+    ('path 字段目录穿越防御', case_path_traversal),
+    ('带/不带 path 混传兼容', case_mixed_path),
 ]
 
 

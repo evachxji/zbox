@@ -192,6 +192,7 @@ class Config(object):
         self.data = {'theme': THEME_ORDER[0], 'tab': 0, 'pos': None,
                      'off_noon': '12:00-13:00', 'off_evening': '18:00',
                      'transfer_enabled': False, 'shot_hotkey': '',
+                     'shot_sizes': {},
                      'video_enabled': False, 'video_dir': '', 'video_quality': '1080P'}
         self.load()
 

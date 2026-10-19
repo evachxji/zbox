@@ -35,22 +35,23 @@ class Session {
   remoteIp: string
   files: FileMeta[]
   tokens: Map<string, string>
-  records: Map<string, TransferRecord>
+  record: TransferRecord           // 整会话一条记录（对齐 PC 端）：总大小 + 聚合进度
   createdAt: number = Date.now()
   state: SessionState = 'pending'
   cancelled: boolean = false
   currentPath: string = ''         // 正在写入的半成品路径（cancel 时删除）
   saved: Set<string> = new Set()   // 已完整落盘的 fileId
+  bytesDone: number = 0            // 已完整落盘的累计字节（当前文件进度 = bytesDone + 本文件已收）
   decisionResolve: (accepted: boolean) => void = () => {}
 
   constructor(sessionId: string, remoteAlias: string, remoteIp: string,
-    files: FileMeta[], tokens: Map<string, string>, records: Map<string, TransferRecord>) {
+    files: FileMeta[], tokens: Map<string, string>, record: TransferRecord) {
     this.sessionId = sessionId
     this.remoteAlias = remoteAlias
     this.remoteIp = remoteIp
     this.files = files
     this.tokens = tokens
-    this.records = records
+    this.record = record
   }
 }
 
@@ -160,13 +161,18 @@ export class Receiver {
         sendError(res, 400, 'invalid file size')
         return
       }
-      metas.push({
+      const meta: FileMeta = {
         id: id,
         fileName: typeof m['fileName'] === 'string' ? m['fileName'] as string : id,
         size: size,
         fileType: typeof m['fileType'] === 'string' ? m['fileType'] as string : 'application/octet-stream',
         sha256: typeof m['sha256'] === 'string' ? m['sha256'] as string : '',
-      })
+      }
+      const p = m['path']
+      if (typeof p === 'string') {
+        meta.path = p as string
+      }
+      metas.push(meta)
     }
 
     const remoteIp = req.getRemoteIpAddress() ?? ''
@@ -184,14 +190,14 @@ export class Receiver {
 
     const sessionId = util.generateRandomUUID(false)
     const tokens = new Map<string, string>()
-    const records = new Map<string, TransferRecord>()
+    let totalSize = 0
     metas.forEach((meta) => {
       tokens.set(meta.id, util.generateRandomUUID(false).replace(/-/g, ''))
-      const record = new TransferRecord(`${sessionId}:${meta.id}`, false, info.alias, meta.fileName, meta.size)
-      TransferStore.add(record)
-      records.set(meta.id, record)
+      totalSize += meta.size
     })
-    const session = new Session(sessionId, info.alias, remoteIp, metas, tokens, records)
+    const record = new TransferRecord(sessionId, false, info.alias, sessionDisplayName(metas), totalSize)
+    TransferStore.add(record)
+    const session = new Session(sessionId, info.alias, remoteIp, metas, tokens, record)
     this.sessions.set(sessionId, session)
 
     const decision = new Promise<boolean>((resolve) => {
@@ -212,9 +218,7 @@ export class Receiver {
     }
     if (!accepted) {
       session.state = 'rejected'
-      session.records.forEach((r) => {
-        r.status = TransferStatus.REJECTED
-      })
+      session.record.status = TransferStatus.REJECTED
       TransferStore.notify()
       this.sessions.delete(sessionId)
       sendError(res, 403, 'rejected')
@@ -280,11 +284,7 @@ export class Receiver {
       sendError(res, 403, 'ip mismatch')
       return
     }
-    const record = session.records.get(fileId)
-    if (record === undefined) {
-      sendError(res, 400, 'unknown fileId')
-      return
-    }
+    const record = session.record
 
     const buf = bodyBuffer(req)
     if (buf === null || buf.byteLength !== meta.size) {
@@ -292,8 +292,12 @@ export class Receiver {
       return
     }
 
+    // 文件夹传输：path 分段消毒后还原目录树（目录冲突=合并）；无有效段退回扁平逻辑
+    const relParts = safeRelParts(meta.path ?? '')
+    const dirParts = relParts.length > 1 ? relParts.slice(0, relParts.length - 1) : []
+    const fileName = relParts.length > 0 ? relParts[relParts.length - 1] : sanitizeName(meta.fileName)
     // 防目录穿越：只取文件名部分；重名加 " (2)" 后缀
-    const target = this.createUniqueTarget(sanitizeName(meta.fileName))
+    const target = this.createUniqueTarget(fileName, dirParts)
     session.state = 'transferring'
     session.createdAt = Date.now()
     session.currentPath = target
@@ -332,15 +336,21 @@ export class Receiver {
 
     session.currentPath = ''
     session.saved.add(fileId)
-    record.progress = meta.size
-    record.status = TransferStatus.DONE
-    record.savedPath = target
-    TransferStore.notify()
-
+    session.bytesDone += meta.size
+    record.progress = session.bytesDone
+    if (record.savedPath.length === 0) {
+      record.savedPath = target
+    }
+    // 聚合导出清单：相对路径从落盘目标反推（含 " (2)" 重命名后缀）
+    const rel = target.startsWith(`${this.saveDir}/`) ? target.substring(this.saveDir.length + 1) : fileName
+    record.savedPaths.push(target)
+    record.savedRels.push(rel)
     if (session.saved.size === session.files.length) {
+      record.status = TransferStatus.DONE
       session.state = 'done'
       this.sessions.delete(sessionId)
     }
+    TransferStore.notify()
     sendJson(res, 200, { 'message': 'ok' })
   }
 
@@ -357,7 +367,7 @@ export class Receiver {
         // WriteOptions.offset 是文件位置（buffer 永远从头写），按块切片后顺序写
         fs.writeSync(file.fd, buf.slice(offset, offset + n))
         offset += n
-        record.progress = offset
+        record.progress = session.bytesDone + offset
         record.sampleSpeed()
         TransferStore.notify()
       }
@@ -385,11 +395,9 @@ export class Receiver {
         deleteQuietly(session.currentPath)
         session.currentPath = ''
       }
-      session.records.forEach((r) => {
-        if (r.status !== TransferStatus.DONE) {
-          r.status = TransferStatus.CANCELED
-        }
-      })
+      if (session.record.status !== TransferStatus.DONE) {
+        session.record.status = TransferStatus.CANCELED
+      }
       TransferStore.notify()
       IncomingState.clear(sessionId)
       session.decisionResolve(false)  // 若还在等确认，唤醒 prepare 应答
@@ -413,20 +421,21 @@ export class Receiver {
     })
   }
 
-  private createUniqueTarget(fileName: string): string {
-    if (!fs.accessSync(this.saveDir)) {
-      fs.mkdirSync(this.saveDir, true)
+  private createUniqueTarget(fileName: string, dirParts: string[] = []): string {
+    const dir = dirParts.length > 0 ? `${this.saveDir}/${dirParts.join('/')}` : this.saveDir
+    if (!fs.accessSync(dir)) {
+      fs.mkdirSync(dir, true)   // 递归建目录；已存在则合并（对齐 PC 端 makedirs(exist_ok) 语义）
     }
     let candidate = fileName
     let index = 2
-    while (fs.accessSync(`${this.saveDir}/${candidate}`)) {
+    while (fs.accessSync(`${dir}/${candidate}`)) {
       const dot = fileName.lastIndexOf('.')
       candidate = dot > 0
         ? `${fileName.substring(0, dot)} (${index})${fileName.substring(dot)}`
         : `${fileName} (${index})`
       index++
     }
-    return `${this.saveDir}/${candidate}`
+    return `${dir}/${candidate}`
   }
 }
 
@@ -476,6 +485,40 @@ function sendJson(res: ServerResponse, code: number, obj: Record<string, Object>
 function sendError(res: ServerResponse, code: number, message: string): void {
   const body: Record<string, Object> = { 'message': message }
   sendJson(res, code, body)
+}
+
+/** 会话记录显示名：整会话一个文件夹时显示顶层文件夹名；单文件显示文件名；多文件显示「x 等 N 个文件」 */
+function sessionDisplayName(files: FileMeta[]): string {
+  const first = files[0]
+  const top = first.path !== undefined ? first.path.split('/')[0] : ''
+  if (top.length > 0 && files.every((f) => f.path !== undefined && f.path.split('/')[0] === top)) {
+    return top
+  }
+  if (files.length === 1) {
+    return first.path !== undefined && first.path.length > 0 ? first.path : first.fileName
+  }
+  return `${first.fileName} 等 ${files.length} 个文件`
+}
+
+/** 把发送方声明的 path 相对路径清洗成安全分段（与 PC 端 _safe_rel_parts 同语义） */
+function safeRelParts(path: string): string[] {
+  const parts: string[] = []
+  if (path.length === 0) {
+    return parts
+  }
+  path.split('/').forEach((seg: string) => {
+    if (seg === '' || seg === '.' || seg === '..') {
+      return
+    }
+    let cleaned = ''
+    for (let i = 0; i < seg.length; i++) {
+      const ch = seg.charAt(i)
+      cleaned += ('<>:"\\|?*'.indexOf(ch) >= 0 || seg.charCodeAt(i) < 32) ? '_' : ch
+    }
+    cleaned = cleaned.replace(/[ .]+$/, '')
+    parts.push(cleaned.length > 0 ? cleaned : '_')
+  })
+  return parts
 }
 
 /** 文件名消毒：剥掉路径分隔，防目录穿越 */

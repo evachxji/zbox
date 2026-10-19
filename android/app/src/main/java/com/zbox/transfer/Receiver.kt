@@ -61,12 +61,18 @@ class Receiver(private val context: Context) {
         val files: List<FileMeta>,
         val tokens: Map<String, String>,
         val decision: CompletableDeferred<Uri?>,
-        val records: Map<String, TransferRecord>,
+        val record: TransferRecord,   // 整会话一条记录（对齐 PC 端）：总大小 + 聚合进度
         val remoteIp: String,
         val createdAt: Long = System.currentTimeMillis(),
     ) {
         @Volatile
         var state = SessionState.PENDING
+
+        @Volatile
+        var bytesDone = 0L        // 已完整落盘的累计字节（当前文件进度 = bytesDone + received）
+
+        @Volatile
+        var savedCount = 0        // 已完整落盘的文件数，== files.size 时记录转 DONE
 
         @Volatile
         var dirUri: Uri? = null
@@ -79,6 +85,17 @@ class Receiver(private val context: Context) {
     }
 
     private val sessions = ConcurrentHashMap<String, Session>()
+
+    init {
+        active = this
+    }
+
+    companion object {
+        /** 运行中的接收实例（记录页长按取消接收用） */
+        @Volatile
+        var active: Receiver? = null
+            private set
+    }
 
     /** 是否有正在传输中的接收会话（供 MainActivity 判断退后台是否保持服务） */
     fun hasActive(): Boolean = sessions.values.any { it.state == SessionState.ACTIVE }
@@ -102,17 +119,16 @@ class Receiver(private val context: Context) {
 
         val sessionId = UUID.randomUUID().toString()
         val tokens = request.files.keys.associateWith { randomToken() }
-        val records = request.files.mapValues { (_, meta) ->
-            TransferRecord(
-                id = sessionId + ":" + meta.id,
-                outgoing = false,
-                peerAlias = request.info.alias,
-                fileName = meta.fileName,
-                size = meta.size,
-            ).also { TransferStore.add(it) }
-        }
+        val files = request.files.values.toList()
+        val record = TransferRecord(
+            id = sessionId,
+            outgoing = false,
+            peerAlias = request.info.alias,
+            fileName = sessionDisplayName(files),
+            size = files.sumOf { it.size },
+        ).also { TransferStore.add(it) }
         val decision = CompletableDeferred<Uri?>()
-        val session = Session(sessionId, request.info, request.files.values.toList(), tokens, decision, records, ip)
+        val session = Session(sessionId, request.info, files, tokens, decision, record, ip)
         // PENDING 检查 + 插入必须原子，并发 prepare 不能双通过
         val inserted = synchronized(sessions) {
             if (sessions.values.any { it.state == SessionState.PENDING }) {
@@ -123,10 +139,8 @@ class Receiver(private val context: Context) {
             }
         }
         if (!inserted) {
-            records.values.forEach {
-                it.status = TransferStatus.FAILED
-                it.error = "会话冲突"
-            }
+            record.status = TransferStatus.FAILED
+            record.error = "会话冲突"
             return TransferServer.error(Status.CONFLICT, "another session is waiting for confirmation")
         }
 
@@ -151,7 +165,7 @@ class Receiver(private val context: Context) {
 
         if (dir == null) {
             sessions.remove(sessionId)
-            records.values.forEach { it.status = TransferStatus.REJECTED }
+            record.status = TransferStatus.REJECTED
             return TransferServer.error(Status.FORBIDDEN, "rejected")
         }
 
@@ -197,11 +211,15 @@ class Receiver(private val context: Context) {
             return TransferServer.error(Status.BAD_REQUEST, "missing content-length")
         }
 
-        val record = session.records.getValue(fileId)
+        val record = session.record
         record.status = TransferStatus.TRANSFERRING
 
         // 保存目标：用户选定目录（SAF）；未选则默认系统 Download（MediaStore）
-        val target = openSaveTarget(session.dirUri, sanitizeName(meta.fileName), meta.fileType)
+        // 文件夹传输：path 分段消毒后还原目录树（目录冲突=合并）；无有效段退回扁平逻辑
+        val relParts = safeRelParts(meta.path)
+        val fileName = if (relParts.isNotEmpty()) relParts.last() else sanitizeName(meta.fileName)
+        val dirParts = if (relParts.size > 1) relParts.dropLast(1) else emptyList()
+        val target = openSaveTarget(session.dirUri, fileName, meta.fileType, dirParts)
             ?: return fail(record, "cannot create file")
         session.currentTarget = target
 
@@ -223,7 +241,7 @@ class Receiver(private val context: Context) {
                     digest?.update(buffer, 0, n)
                     if (remaining > 0) remaining -= n
                     received += n
-                    record.progress = received
+                    record.progress = session.bytesDone + received
                     record.sampleSpeed()
                 }
             } ?: return fail(record, "cannot open output stream")
@@ -258,10 +276,16 @@ class Receiver(private val context: Context) {
         }
 
         target.finish()   // MediaStore 路径清 IS_PENDING，文件对其它应用可见
-        record.fileUri = target.uri.toString()
-        record.savedTreeUri = session.dirUri?.toString()
-        record.progress = meta.size
-        record.status = TransferStatus.DONE
+        session.bytesDone += meta.size
+        session.savedCount += 1
+        if (record.fileUri == null) {
+            record.fileUri = target.uri.toString()
+            record.savedTreeUri = session.dirUri?.toString()
+        }
+        record.progress = session.bytesDone
+        if (session.savedCount == session.files.size) {
+            record.status = TransferStatus.DONE
+        }
         return TransferServer.jsonResponse(Status.OK, "")
     }
 
@@ -278,10 +302,24 @@ class Receiver(private val context: Context) {
         sessions.remove(sessionId)
         session.cancelled = true
         try { session.currentTarget?.deleter?.invoke() } catch (_: Exception) {}
-        session.records.values.forEach {
-            if (it.status != TransferStatus.DONE) it.status = TransferStatus.CANCELED
+        if (session.record.status != TransferStatus.DONE) {
+            session.record.status = TransferStatus.CANCELED
         }
         return TransferServer.jsonResponse(Status.OK, "")
+    }
+
+    /** 本机主动取消传输中的接收会话（记录页长按「取消」）：
+     * 置位 cancelled，读流循环下一次检查抛 CancelledException 清理半成品并回错；
+     * 等待确认期的会话走弹窗拒绝按钮，不在这里处理。 */
+    fun cancelIncoming(recordId: String) {
+        val session = sessions[recordId] ?: return
+        if (session.state != SessionState.ACTIVE) return
+        sessions.remove(recordId)
+        session.cancelled = true
+        try { session.currentTarget?.deleter?.invoke() } catch (_: Exception) {}
+        if (session.record.status != TransferStatus.DONE) {
+            session.record.status = TransferStatus.CANCELED
+        }
     }
 
     // ---------- 内部工具 ----------
@@ -318,6 +356,28 @@ class Receiver(private val context: Context) {
     private fun sanitizeName(name: String): String =
         name.substringAfterLast('/').substringAfterLast('\\').ifEmpty { "file" }
 
+    /** 会话记录显示名：整会话一个文件夹时显示顶层文件夹名；单文件显示文件名；多文件显示「x 等 N 个文件」 */
+    private fun sessionDisplayName(files: List<FileMeta>): String {
+        val first = files.first()
+        val top = first.path?.split('/')?.firstOrNull()
+        if (!top.isNullOrEmpty() && files.all { it.path?.split('/')?.firstOrNull() == top }) {
+            return top
+        }
+        if (files.size == 1) return first.path?.takeIf { it.isNotBlank() } ?: first.fileName
+        return first.fileName + " 等 " + files.size + " 个文件"
+    }
+
+    /** 把发送方声明的 path 相对路径清洗成安全分段（与 PC 端 _safe_rel_parts 同语义） */
+    private fun safeRelParts(path: String?): List<String> {
+        if (path.isNullOrEmpty()) return emptyList()
+        return path.split('/')
+            .filter { it.isNotEmpty() && it != "." && it != ".." }
+            .map { seg ->
+                seg.map { c -> if (c in "<>:\"\\|?*" || c.code < 32) '_' else c }
+                    .joinToString("").trimEnd(' ', '.').ifEmpty { "_" }
+            }
+    }
+
     private fun fail(record: TransferRecord, message: String): NanoHTTPD.Response {
         record.status = TransferStatus.FAILED
         record.error = message
@@ -325,22 +385,35 @@ class Receiver(private val context: Context) {
     }
 
     /** 打开保存目标：用户选定的 SAF 目录；未选（null）时默认系统 Download/Zbox（MediaStore，API 29+ 免权限） */
-    private fun openSaveTarget(dirUri: Uri?, fileName: String, mime: String?): SaveTarget? {
+    private fun openSaveTarget(dirUri: Uri?, fileName: String, mime: String?,
+                               dirParts: List<String> = emptyList()): SaveTarget? {
         if (dirUri != null) {
-            val dir = DocumentFile.fromTreeUri(context, dirUri) ?: return null
+            var dir = DocumentFile.fromTreeUri(context, dirUri) ?: return null
+            for (seg in dirParts) {
+                dir = ensureSubdir(dir, seg) ?: return null
+            }
             val doc = createUniqueFile(dir, fileName) ?: return null
             return SaveTarget(doc.uri, { doc.delete() })
         }
-        return createDownloadFile(fileName, mime)
+        return createDownloadFile(fileName, mime, dirParts)
+    }
+
+    /** 在 SAF 目录下找或建子目录（同名目录合并复用，对齐 PC 端 makedirs(exist_ok) 语义） */
+    private fun ensureSubdir(dir: DocumentFile, name: String): DocumentFile? {
+        dir.listFiles().firstOrNull { it.isDirectory && it.name == name }?.let { return it }
+        return dir.createDirectory(name)
     }
 
     /** 默认保存到系统 Download/Zbox（RELATIVE_PATH 子目录插入时自动创建）；API 26-28 无 MediaStore.Downloads 免权限写入，返回 null 走失败提示 */
-    private fun createDownloadFile(fileName: String, mime: String?): SaveTarget? {
+    private fun createDownloadFile(fileName: String, mime: String?,
+                                   dirParts: List<String> = emptyList()): SaveTarget? {
         if (Build.VERSION.SDK_INT < 29) return null
         val resolver = context.contentResolver
+        val relPath = Environment.DIRECTORY_DOWNLOADS + "/Zbox" +
+            (if (dirParts.isEmpty()) "" else "/" + dirParts.joinToString("/"))
         var candidate = fileName
         var index = 2
-        while (downloadExists(candidate)) {
+        while (downloadExists(candidate, relPath)) {
             val dot = fileName.lastIndexOf('.')
             candidate = if (dot > 0) {
                 fileName.substring(0, dot) + " (" + index + ")" + fileName.substring(dot)
@@ -352,7 +425,7 @@ class Receiver(private val context: Context) {
         val values = ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, candidate)
             put(MediaStore.Downloads.MIME_TYPE, mime ?: "application/octet-stream")
-            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Zbox")
+            put(MediaStore.Downloads.RELATIVE_PATH, relPath)
             put(MediaStore.Downloads.IS_PENDING, 1)
         }
         val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
@@ -363,13 +436,13 @@ class Receiver(private val context: Context) {
         })
     }
 
-    /** Download 根目录下是否已有同名文件（重名加 " (2)" 后缀用） */
-    private fun downloadExists(name: String): Boolean {
+    /** Download 目标子目录下是否已有同名文件（重名加 " (2)" 后缀用） */
+    private fun downloadExists(name: String, relPath: String): Boolean {
         val cursor = context.contentResolver.query(
             MediaStore.Downloads.EXTERNAL_CONTENT_URI,
             arrayOf(MediaStore.Downloads._ID),
             MediaStore.Downloads.DISPLAY_NAME + "=? AND " + MediaStore.Downloads.RELATIVE_PATH + "=?",
-            arrayOf(name, Environment.DIRECTORY_DOWNLOADS + "/Zbox/"),
+            arrayOf(name, relPath + "/"),
             null,
         ) ?: return false
         cursor.use { return it.count > 0 }
