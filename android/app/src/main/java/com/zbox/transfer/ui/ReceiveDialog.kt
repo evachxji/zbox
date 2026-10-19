@@ -89,7 +89,8 @@ fun ReceiveDialogHost() {
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     val label = pending.dirUri?.let { strings.saveTo(dirName(it)) } ?: strings.saveToDefault
-                    Text(text = label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    // 英文（及窄屏）文案更长，允许折成两行，避免截成「(defa…」
+                    Text(text = label, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
         },

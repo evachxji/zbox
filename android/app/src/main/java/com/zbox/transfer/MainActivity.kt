@@ -35,7 +35,6 @@ import com.zbox.transfer.ui.ReceiveDialogHost
 import com.zbox.transfer.ui.SettingsScreen
 import fi.iki.elonen.NanoHTTPD
 import java.security.SecureRandom
-import java.util.Locale
 
 /** 本机设置：指纹（首次启动生成 32 位随机 hex）、别名、记住的保存目录、界面语言 */
 object Settings {
@@ -51,9 +50,12 @@ object Settings {
             SecureRandom().nextBytes(bytes)
             prefs.edit().putString("fingerprint", bytes.joinToString("") { "%02x".format(it) }).apply()
         }
-        // 首次启动按系统语言定默认值并写回；已存的值沿用
+        // 首次启动按系统语言定默认值并写回；已存的值沿用。
+        // 用资源配置里的 locale 而不是 Locale.getDefault()：Android 13+ 的「应用语言」
+        // 只改 Configuration.locales，不会改 Locale.getDefault()。
+        val systemTag = context.resources.configuration.locales[0].toLanguageTag()
         val stored = prefs.getString("language", null)
-        languageState = AppLanguage.detect(stored ?: Locale.getDefault().toLanguageTag())
+        languageState = AppLanguage.detect(stored ?: systemTag)
         if (stored == null) prefs.edit().putString("language", languageState.code).apply()
     }
 
