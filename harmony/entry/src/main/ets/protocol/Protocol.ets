@@ -27,6 +27,7 @@ export interface FileMeta {
   size: number
   fileType: string
   sha256: string
+  path?: string   // 文件夹传输：posix 分隔相对路径（含顶层文件夹名）；旧版端无此字段，退化为扁平收文件
 }
 
 /** 序列化本机 DeviceInfo：announce=false 时省略该字段（对齐 Android 端 null 省略语义） */
@@ -160,7 +161,9 @@ export class TransferRecord {
   status: TransferStatus = TransferStatus.WAITING
   error: string = ''
   speedBps: number = 0      // EMA 平滑后的传输速度（字节/秒）
-  savedPath: string = ''    // 接收=沙箱落盘路径，发送=源文件 uri（导出/定位用）
+  savedPath: string = ''    // 接收=沙箱落盘路径（聚合记录=首个文件），发送=源文件 uri（导出/定位用）
+  savedPaths: string[] = []   // 接收会话全部落盘文件的绝对路径（聚合导出用，与 savedRels 平行）
+  savedRels: string[] = []    // 对应的相对路径（含目录结构，导出时还原）
 
   private lastTickAt: number = 0
   private lastTickProgress: number = 0

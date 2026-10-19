@@ -49,6 +49,8 @@ data class FileMeta(
     val size: Long,
     val fileType: String = "application/octet-stream",
     val sha256: String? = null,
+    // 文件夹传输：posix 分隔相对路径（含顶层文件夹名）；旧版端无此字段，退化为扁平收文件
+    val path: String? = null,
 )
 
 /** POST /prepare-upload 请求体 */

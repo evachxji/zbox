@@ -32,6 +32,26 @@ RECV_CONFIRM_TIMEOUT = 170   # 接收确认等待秒数：须小于协议端 pre
 MAX_RECORDS = 50             # 传输记录条数上限，超出丢弃最旧
 
 
+def _expand_paths(paths):
+    '''把文件/文件夹列表展开成 [(本地路径, 相对路径)]。
+
+    文件 -> (p, basename)；文件夹 -> os.walk 递归展开（不跟随符号链接，
+    不可读项由 os.walk 默认忽略），相对路径含顶层文件夹名、posix 分隔。
+    空文件夹展开为 0 项，自然被忽略。'''
+    out = []
+    for p in paths:
+        if os.path.isfile(p):
+            out.append((p, os.path.basename(p)))
+        elif os.path.isdir(p):
+            base = os.path.dirname(os.path.normpath(p))
+            for root, _dirs, names in os.walk(p):
+                for name in names:
+                    full = os.path.join(root, name)
+                    rel = os.path.relpath(full, base).replace(os.sep, '/')
+                    out.append((full, rel))
+    return out
+
+
 def _fmt_size(n):
     '''字节数转可读大小（1024 进制）。'''
     try:
@@ -182,6 +202,8 @@ def _friendly_err(err):
         return '连接被中断'
     if '10060' in s or 'timed out' in s or 'timeout' in s or '超时' in s:
         return '连接超时'
+    if '不在线' in s:
+        return '对方设备不在线'
     if '10051' in s or 'unreachable' in s or '不可达' in s:
         return '网络不可达'
     if 'getaddrinfo' in s or '11001' in s or '11004' in s:
@@ -230,6 +252,23 @@ class _RecvDialog(QDialog):
             self._on_reject()
         except Exception:
             self.hide()
+
+
+class _ElideLabel(QLabel):
+    '''记录行名称标签：按实际宽度尾部省略（「…」），
+    宽度变化时重新截断；完整文本攻e tooltip。'''
+    def __init__(self, full):
+        super(_ElideLabel, self).__init__()
+        self._full = full
+        self._relide()
+
+    def resizeEvent(self, e):
+        super(_ElideLabel, self).resizeEvent(e)
+        self._relide()
+
+    def _relide(self):
+        self.setText(self.fontMetrics().elidedText(self._full, Qt.ElideRight,
+                                                    max(self.width(), ui.sc(8))))
 
 
 class _ClickRow(glow.GlowCard):
@@ -896,7 +935,7 @@ class TransferWidget(QWidget):
         self._set_drop_highlight(False)
         try:
             paths = [u.toLocalFile() for u in e.mimeData().urls() if u.isLocalFile()]
-            self._set_files(self._files + [p for p in paths if p and os.path.isfile(p)])
+            self._set_files(self._files + _expand_paths([p for p in paths if p]))
         except Exception:
             pass
 
@@ -1127,25 +1166,35 @@ class TransferWidget(QWidget):
 
     def _pick_files(self):
         try:
-            paths, _ = QFileDialog.getOpenFileNames(self, '选择要发送的文件')
+            menu = QMenu(self)
+            act_files = menu.addAction('选择文件')
+            act_dir = menu.addAction('选择文件夹')
+            act = menu.exec_(self.pick_btn.mapToGlobal(self.pick_btn.rect().bottomLeft()))
+            if act is act_files:
+                paths, _ = QFileDialog.getOpenFileNames(self, '选择要发送的文件')
+            elif act is act_dir:
+                d = QFileDialog.getExistingDirectory(self, '选择要发送的文件夹')
+                paths = [d] if d else []
+            else:
+                paths = []
             if paths:
-                self._set_files(self._files + [p for p in paths if os.path.isfile(p)])
+                self._set_files(self._files + _expand_paths(paths))
         except Exception:
             pass
 
     def _set_files(self, files):
         try:
             seen = set()
-            self._files = [p for p in files if not (p in seen or seen.add(p))]
+            self._files = [t for t in files if not (t[0] in seen or seen.add(t[0]))]
             if self._files:
                 total = 0
-                for p in self._files:
+                for p, _rel in self._files:
                     try:
                         total += os.path.getsize(p)
                     except OSError:
                         pass
                 self.pick_btn.setText('已选 %d 个文件（%s）' % (len(self._files), _fmt_size(total)))
-                self.pick_btn.setToolTip('\n'.join(self._files))
+                self.pick_btn.setToolTip('\n'.join(rel for _p, rel in self._files))
             else:
                 self.pick_btn.setText('选择文件发送（可拖）')
                 self.pick_btn.setToolTip('')
@@ -1170,14 +1219,15 @@ class TransferWidget(QWidget):
                 return
             info, ip = merged[fp]
             files = list(self._files)
-            names = [os.path.basename(p) for p in files]
+            names = [rel for _p, rel in files]
             total = 0
-            for p in files:
+            for p, _rel in files:
                 try:
                     total += os.path.getsize(p)
                 except OSError:
                     pass
-            key = self._add_record('up', names, total, info.alias or ip)
+            key = self._add_record('up', names, total, info.alias or ip,
+                                   fp=fp, files=files)
             cancel_event = self._records[key]['cancel_event']
             self._set_files([])
             threading.Thread(target=self._send_worker,
@@ -1198,27 +1248,46 @@ class TransferWidget(QWidget):
                 merged[fp] = (info, ip)
         return merged
 
-    def _send_worker(self, key, ip, port, files, cancel_event):
-        '''工作线程：send_files 阻塞调用，进度/结果经信号回主线程。'''
+    def _send_worker(self, key, ip, port, files, cancel_event, base=0, idx_map=None):
+        '''工作线程：send_files 阻塞调用，进度/结果经信号回主线程。
+        base/idx_map 供断点续传的重试：base = 前几轮已传完的字节数（进度从这里继续，
+        总大小保持原值），idx_map = 本轮子清单在原始清单中的下标（completed_idx 记账换算用）。'''
         sizes = []
-        for p in files:
+        for p, _rel in files:
             try:
                 sizes.append(os.path.getsize(p))
             except OSError:
                 sizes.append(0)
-        total_all = sum(sizes)
+        total_all = base + sum(sizes)
 
         last_emit = [0.0]
+        last_idx = [-1]      # 上传顺序进行：当前下标之前的文件都已传完
+        finished = [set()]
 
         def on_progress(index, done, _total):
             # 100ms 节流；当前文件的完成帧必发（否则进度会卡在 99%）
+            if index > last_idx[0]:
+                last_idx[0] = index
+            if sizes[index] and done >= sizes[index]:
+                finished[0].add(index)
             now = time.time()
             if done < sizes[index] and now - last_emit[0] < 0.1:
                 return
             last_emit[0] = now
-            self.sig_send_progress.emit(key, sum(sizes[:index]) + done, total_all)
+            self.sig_send_progress.emit(key, base + sum(sizes[:index]) + done,
+                                        total_all)
 
         def on_done(ok, err):
+            if not ok:
+                # 记录已传完的文件（换算回原始清单下标并与前几轮合并），
+                # 供「重试」断点续传跳过
+                done_local = set(range(max(last_idx[0], 0))) | finished[0]
+                if idx_map is not None:
+                    done_local = set(idx_map[i] for i in done_local)
+                rec = self._records.get(key)
+                if rec is not None:
+                    rec['completed_idx'] = sorted(
+                        set(rec.get('completed_idx') or []) | done_local)
             self.sig_send_done.emit(key, bool(ok), '%s' % (err or ''))
 
         try:
@@ -1275,6 +1344,52 @@ class TransferWidget(QWidget):
         except Exception:
             pass
 
+    def _retry_send(self, key):
+        '''失败记录重试：断点续传（文件粒度）——上一轮已传完的文件跳过不重发；
+        中断的文件接收端已清理半成品，从头重传。复传原记录行。'''
+        try:
+            rec = self._records.get(key)
+            if not rec or rec['direction'] != 'up' or rec['state'] != 'fail':
+                return
+            files = rec.get('files') or []
+            if not files:
+                return
+            merged = self._devices_merged()
+            if rec.get('fp') not in merged:      # 对端不在线：刷新设备列表并更新失败文案
+                self._refresh_devices()
+                rec['err'] = '对端设备不在线'
+                self._update_record(rec)
+                return
+            info, ip = merged[rec['fp']]
+            done_idx = set(rec.get('completed_idx') or [])
+            idx_map = [i for i in range(len(files)) if i not in done_idx]
+            if not idx_map:      # 全部传完还失败（收尾阶段出错）：整批重传
+                idx_map = list(range(len(files)))
+                done_idx = set()
+            remain = [files[i] for i in idx_map]
+            # 进度不从 0 开始：已传完文件的字节数作为基数，总大小保持原值
+            base = 0
+            for i in done_idx:
+                try:
+                    base += os.path.getsize(files[i][0])
+                except OSError:
+                    pass
+            rec['cancel_event'] = threading.Event()
+            rec['state'] = 'wait'
+            rec['done'] = base
+            rec['err'] = ''
+            rec.pop('_speed', None)
+            rec.pop('_tick', None)
+            rec.pop('_stat_ts', None)
+            rec['state_lab'].setToolTip('')
+            self._update_record(rec)
+            threading.Thread(target=self._send_worker,
+                             args=(key, ip, info.port, remain, rec['cancel_event']),
+                             kwargs={'base': base, 'idx_map': idx_map},
+                             name='transfer-send', daemon=True).start()
+        except Exception:
+            pass
+
     # ---------------- 接收 ----------------
 
     def _cb_receive_request(self, session):
@@ -1288,7 +1403,11 @@ class TransferWidget(QWidget):
             total = 0
             for fid, meta in files.items():
                 meta = meta if isinstance(meta, dict) else {}
-                names.append(os.path.basename(str(meta.get('fileName') or '')) or fid)
+                path = meta.get('path')
+                if isinstance(path, str) and path.strip():
+                    names.append(path)   # 文件夹传输：显示目录结构
+                else:
+                    names.append(os.path.basename(str(meta.get('fileName') or '')) or fid)
                 try:
                     total += int(meta.get('size') or 0)
                 except (TypeError, ValueError):
@@ -1533,13 +1652,20 @@ class TransferWidget(QWidget):
 
     # ---------------- 传输记录 ----------------
 
-    def _add_record(self, direction, names, total, peer=''):
+    def _add_record(self, direction, names, total, peer='', fp='', files=None):
         '''新建一条记录并插到记录区顶部，返回 key。direction: 'up' 发 / 'down' 收。
-        peer 为对端别名：记录文字形如「Vacation.jpg · 发送至 Pixel 6」。'''
+        peer 为对端别名：记录文字形如「Vacation.jpg · 发送至 Pixel 6」。
+        fp/files 仅发送记录需要（失败重试用）：fp 是对端指纹，files 是 (本地路径, 相对路径) 清单。'''
         key = uuid.uuid4().hex
-        display = names[0] if len(names) == 1 else '%d 个文件' % len(names)
-        if peer:
-            display += (' · 发送至 ' if direction == 'up' else ' · 来自 ') + peer
+        # 文件夹传输（多个文件同属一个顶层目录）显示文件夹名而不是「N 个文件」
+        if len(names) == 1:
+            disp_name, tip = names[0], names[0]
+        elif all('/' in n for n in names) and \
+                len(set(n.split('/')[0] for n in names)) == 1:
+            disp_name = tip = names[0].split('/')[0]
+        else:
+            disp_name = '%d 个文件' % len(names)
+            tip = '\n'.join(names)
         row = _ClickRow()
         row.setObjectName('transferRow')
         # 接收完成的记录才有交互（单击打开 / 右键菜单，见 _record_clicked/_record_menu）
@@ -1556,16 +1682,20 @@ class TransferWidget(QWidget):
         icon.setObjectName('transferIcon')
         icon.setFixedSize(ui.sc(22), ui.sc(22))
         icon.setPixmap(_file_icon(getattr(self, 'theme_key', 'nocturne')))
-        name = QLabel(display)
+        display = disp_name
+        if peer:
+            display += (' · 发送至 ' if direction == 'up' else ' · 来自 ') + peer
+        name = _ElideLabel(display)
         name.setObjectName('transferName')
         name.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        name.setToolTip('\n'.join(names))
+        name.setToolTip(tip)      # 悬停显示完整名称
         state = QLabel()
         state.setObjectName('transferState')
         top.addWidget(icon)
         top.addWidget(name, 1)
         top.addWidget(state)
         cancel_btn = None
+        retry_btn = None
         cancel_event = None
         if direction == 'up':
             # 发送方取消入口：仅「等待确认 / 传输中」可见（见 _update_record）
@@ -1576,13 +1706,40 @@ class TransferWidget(QWidget):
             cancel_btn.clicked.connect(
                 lambda checked=False, k=key: self._cancel_send(k))
             top.addWidget(cancel_btn)
+            # 失败重试：断点续传（文件粒度，已传完的文件跳过），仅 fail 态可见
+            retry_btn = QToolButton()
+            retry_btn.setObjectName('cancelBtn')
+            retry_btn.setText('重试')
+            retry_btn.setToolTip('断点续传：已传完的文件不再重发')
+            retry_btn.clicked.connect(
+                lambda checked=False, k=key: self._retry_send(k))
+            retry_btn.hide()
+            top.addWidget(retry_btn)
         bar = QProgressBar()
         bar.setRange(0, 1000)
         bar.setValue(0)
         bar.setTextVisible(False)
         bar.setFixedHeight(ui.sc(5))
+        # 传输中三栏状态行（对照视频卡 dl_state_row）：已传输/总大小 · 剩余时间 · 速度，仅 busy/cancelling 可见
+        stat_box = QWidget()
+        stat_row = QHBoxLayout(stat_box)
+        stat_row.setContentsMargins(0, 0, 0, 0)
+        stat_row.setSpacing(ui.sc(6))
+        size_lab = QLabel()
+        eta_lab = QLabel()
+        speed_lab = QLabel()
+        for lab in (size_lab, eta_lab, speed_lab):
+            lab.setObjectName('transferState')
+            lab.setProperty('state', 'busy')
+        stat_row.addWidget(size_lab)
+        stat_row.addStretch(1)
+        stat_row.addWidget(eta_lab)
+        stat_row.addStretch(1)
+        stat_row.addWidget(speed_lab)
+        stat_box.hide()
         lay.addLayout(top)
         lay.addWidget(bar)
+        lay.addWidget(stat_box)
         self.rec_empty.hide()
         self.rec_lay.insertWidget(0, row)
         # 新记录滑入：高度从 0 展开（不用透明度特效，避免破坏文字 ClearType）
@@ -1599,11 +1756,15 @@ class TransferWidget(QWidget):
                 anim.start(QPropertyAnimation.DeleteWhenStopped)
         except Exception:
             row.setMaximumHeight(16777215)
-        rec = {'key': key, 'direction': direction, 'name': display, 'total': total,
+        full_display = disp_name + (((' · 发送至 ') if direction == 'up' else (' · 来自 ')) + peer if peer else '')
+        rec = {'key': key, 'direction': direction, 'name': full_display, 'total': total,
                'done': 0, 'files': {}, 'saved': [], 'state': 'wait', 'err': '',
                'session_id': None, 'row': row, 'bar': bar, 'state_lab': state,
-               'icon_lab': icon,
-               'cancel_btn': cancel_btn, 'cancel_event': cancel_event}
+               'icon_lab': icon, 'stat_box': stat_box, 'size_lab': size_lab,
+               'eta_lab': eta_lab, 'speed_lab': speed_lab,
+               'cancel_btn': cancel_btn, 'cancel_event': cancel_event,
+               'retry_btn': retry_btn, 'fp': fp, 'files': list(files or []),
+               'completed_idx': []}
         self._records[key] = rec
         self._rec_keys.insert(0, key)
         self._update_record(rec)
@@ -1697,9 +1858,17 @@ class TransferWidget(QWidget):
                     prev = rec.get('_speed') or 0.0
                     rec['_speed'] = speed if not prev else prev * 0.5 + speed * 0.5
                     rec['_tick'] = (now, rec['done'])
-            if rec.get('_speed') and total and rec['done'] < total:
-                eta = (total - rec['done']) / rec['_speed']
-                text += ' · %s · 剩 %s' % (_fmt_speed(rec['_speed']), _fmt_eta(eta))
+            # 三栏数字 2s 节流刷新（进度条不在此列，保持平滑）；进入 busy 立即刷一帧
+            if now - rec.get('_stat_ts', 0.0) >= 2.0:
+                rec['_stat_ts'] = now
+                if total:
+                    rec['size_lab'].setText('%s / %s' % (_fmt_size(rec['done']),
+                                                         _fmt_size(total)))
+                if rec.get('_speed'):
+                    rec['speed_lab'].setText(_fmt_speed(rec['_speed']))
+                    if total and rec['done'] < total:
+                        rec['eta_lab'].setText(
+                            '剩 ' + _fmt_eta((total - rec['done']) / rec['_speed']))
         elif state == 'done':
             text = '完成'
         elif state == 'rejected':
@@ -1723,8 +1892,12 @@ class TransferWidget(QWidget):
             rec['state_lab'].style().polish(rec['state_lab'])
         rec['row'].set_glow('run' if state == 'busy' else '')
         rec['bar'].setVisible(state in ('busy', 'cancelling'))
+        rec['stat_box'].setVisible(state in ('busy', 'cancelling'))
         target = 1000 if state == 'done' else (int(rec['done'] * 1000 / total) if total else 0)
         self._animate_bar(rec, target)
         btn = rec.get('cancel_btn')
         if btn is not None:
             btn.setVisible(state in ('wait', 'busy'))
+        rbtn = rec.get('retry_btn')
+        if rbtn is not None:
+            rbtn.setVisible(state == 'fail')

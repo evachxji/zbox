@@ -85,20 +85,21 @@ Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyS
 平铺布局，一个模块一个职责：
 
 - `main.pyw` — 入口：单实例 IPC（`QLocalServer`）、节假日后台更新、局域网传输服务启动、（frozen 时）`--uninstall` 卸载向导入口
-- `app.py` — 面板 UI（日历 / 待办 / 传输 / 顶部栏滑出与拖动）、`SettingsDialog`（右下角「检查更新」：后台查 GitHub 最新 release，有新版本确认后经 updater 下载安装包、再确认即启动安装向导并退出本程序）与节假日导入引导窗
-- `boxes.py` — 桌面格子：空白格子（桌面文件的收纳视图，不搬文件、只隐藏桌面图标）与文件夹映射格子、双击桌面显隐；桌面图标位置记忆（`boxes.json['desktop_icons']`：退出时与每 60s 快照可见图标坐标——格子里的已隐藏、ListView 枚举不到，正好是「没进格子的文件」——启动时 `_DesktopIconLayout.restore_positions` 按显示名摆回并 3s 后补一次，自动排列桌面不插手）；
+- `app.py` — 面板 UI（日历 / 待办 / 传输 / 顶部栏滑出与拖动）、`SettingsDialog`（右下角「检查更新」：后台查 GitHub 最新 release，有新版本确认后经 updater 下载安装包、再确认即启动安装向导并退出本程序）与节假日导入引导窗；面板移动复用 `snapping.py` 的同边吸附，原生边框缩放不吸附
+- `boxes.py` — 桌面格子：空白格子（桌面文件的收纳视图，不搬文件、只隐藏桌面图标）与文件夹映射格子、双击桌面显隐；格子移动与缩放复用 `snapping.py` 的同边吸附；桌面图标位置记忆（`boxes.json['desktop_icons']`：退出时与每 60s 快照可见图标坐标——格子里的已隐藏、ListView 枚举不到，正好是「没进格子的文件」——启动时 `_DesktopIconLayout.restore_positions` 按显示名摆回并 3s 后补一次，自动排列桌面不插手）；
+- `snapping.py` — 桌面卡片共享吸附层：横纵轴分别只匹配同边（左对左 / 右对右 / 上对上 / 下对下），8px 进入、12px 释放；`snap_move` / `snap_resize` 提供纯几何结果，`SnapGuideOverlay` 在吸附期间用蓝色辅助线贯穿本卡片与目标卡片，左右或上下两条边同时对齐时逐条显示
 格子拖出落回桌面由 `_DesktopDropOverlay`（桌面带最底层的全屏透明落放层，仅拖拽期间显示）接住内部处理、不走 Explorer（被占用的文件夹也能拖出），落到资源管理器窗口/其他应用才交 URL 给对方真实移动；拖拽默认「移动」、按住 Ctrl 落放 = 复制；Delete 删除走外壳原生确认弹窗（`_shell_op` 包 SHFileOperation）；
 格子内拖放（外部拖入同规则，`BoxList._drop_loc`）落点三态：条目间缝显白色引导线、松手插入该位并切自定义排序（`sort='custom'`——空白格子 = items 记账顺序、映射格子 = `rec['order']` 文件名表、表外新文件排最后，排序菜单三项勾勾因此全灭；行高中部 50% = 落在条目上、上下各 25% = 缝，图标视图看左右），落文件夹条目上 = 移进去（.lnk 指向目录时按文件夹处理：`_lnk_target_dir` 经 IShellLinkW 解析目标、落上去 = 移进目标目录，`BoxList._lnk_dir` 带缓存随 refresh 清空），落可执行文件/快捷方式上 = 用它打开被拖文件（`_shell_exec_async`，普通文件无此语义、退化为就近引导线——资源管理器同款）；
 列表视图光标超出条目内容宽度（图标+文件名右缘 `_content_right`）的行尾空白区不做落点判定——一律视为移动/复制到格子根，引导线长度与高亮框也收缩到内容区
 收起态（▲ 按钮/双击标题）悬停标题栏 = 临时展开预览、移开自动收回（`_peek_expand`/`_peek_tick`：预览不改 `rec['collapsed']`、不落盘；预览期点 ▼/双击标题走 `set_collapsed` 真正展开后移开不再收回；弹菜单/模态窗/文件拖出/窗口拖动进行中推迟收回；`hideEvent` 随全隐藏直接收回）
 - `calendar_data.py` — 内置国务院节假日数据、农历换算、三源联网回退与离线导入
 - `updater.py` — 应用自身更新：`latest_release` 查 GitHub 最新 release 并挑当前架构的 Setup exe（API 直连优先、ghproxy 镜像兜底）、`has_update` 版本号数值化补齐比较、`download_setup` CDN（dl.wzyjc.cn）优先下载、GitHub 镜像兜底（`.new` + replace；CDN 上的安装包由发版流程上传到 COS 桶 `dl/` 前缀，见 `.codex/skills/zbox-release`）。纯标准库零 Qt，供设置窗在后台线程调用
-- `transfer.py` — 局域网文件传输协议核心（参照 LocalSend v2 的私有实例）：UDP 组播发现 + HTTP REST 传输，纯标准库零 Qt；接收方落盘文件名经 `_sanitize_filename` 清洗（`:` 不洗会把数据写进 NTFS 备用数据流——主文件 0 字节还回 200，`?` `*` 等则 500）
-- `transfer_ui.py` — 面板「传输」tab：设备列表、文件多选 + 拖拽发送、传输记录（「传输中」的记录行亮彩色跑马灯轮廓）、接收确认弹窗、发送方取消；传输服务生命周期自持（默认关闭的门禁层、启用/停用、「?」说明弹窗——手机端段落与「下载移动端安装包」按钮指路官网下载页 `TransferInfoDialog.DOWNLOAD_URL`）；设备列表为空时「未发现设备」缺省字下有「搜索不到设备」链接，弹 `MobileGuideDialog` 引导去同一地址下载移动端；`enable_service()` 成功后后台查一次 Windows 防火墙阻止规则（`sysutil.firewall_blocked` 按 exe 路径匹配、免管理员；命中弹 `_ConfirmDialog` 引导一键修复，UAC 被拒静默，每会话最多提示一次）
+- `transfer.py` — 局域网文件传输协议核心（参照 LocalSend v2 的私有实例）：UDP 组播发现 + HTTP REST 传输，纯标准库零 Qt；接收方落盘文件名经 `_sanitize_filename` 清洗（`:` 不洗会把数据写进 NTFS 备用数据流——主文件 0 字节还回 200，`?` `*` 等则 500）；文件夹传输靠元数据可选字段 `path`（posix 分隔相对路径、含顶层文件夹名，`send_files` 的 `files` 元素可为 `(本地路径, 相对路径)` 二元组），接收端 `_safe_rel_parts` 分段消毒（剔除 `''`/`'.'`/`'..'`、空段 `'_'` 兜底）后在保存目录下还原目录树（目录冲突=合并、文件名仍 `_create_unique`），旧端忽略该字段退化为扁平收文件
+- `transfer_ui.py` — 面板「传输」tab：设备列表、文件/文件夹多选 + 拖拽发送（`_expand_paths` 把文件夹 `os.walk` 展开成 `(本地路径, 相对路径)` 清单，空文件夹展开为 0 项不传；`pick_btn` 点击弹「选择文件/选择文件夹」小菜单，可重复添加累积；记录与 tooltip 的 names 用相对路径）、传输记录（「传输中」的记录行亮彩色跑马灯轮廓，进度条下方三栏状态行——从左到右 已传输/总大小·剩余时间·下载速度，对照视频卡 dl_state_row，仅 busy/cancelling 可见，三栏数字 2s 节流刷新（`_stat_ts`），进度条保持实时；文件夹发送记录显示文件夹名而非「N 个文件」，长名由 `_ElideLabel` 按实际宽度尾部省略、悬停见全名）、接收确认弹窗、发送方取消、失败重试（发送记录 fail 态右侧「重试」按钮：文件粒度断点续传——`_send_worker` 记账 `completed_idx`（经 `idx_map` 换算回原始清单下标逐轮合并），重试跳过已传完的文件，中断文件因接收端已清半成品从头传（协议无字节级续传）；进度不从 0 开始——已传完字节作 `base` 基数，总大小保持原值；对端不在线时不启动并提示）；传输服务生命周期自持（默认关闭的门禁层、启用/停用、「?」说明弹窗——手机端段落与「下载移动端安装包」按钮指路官网下载页 `TransferInfoDialog.DOWNLOAD_URL`）；设备列表为空时「未发现设备」缺省字下有「搜索不到设备」链接，弹 `MobileGuideDialog` 引导去同一地址下载移动端；`enable_service()` 成功后后台查一次 Windows 防火墙阻止规则（`sysutil.firewall_blocked` 按 exe 路径匹配、免管理员；命中弹 `_ConfirmDialog` 引导一键修复，UAC 被拒静默，每会话最多提示一次）
 - `video_dl.py` — 视频解析核心：yt-dlp / ffmpeg 组件下载（ghproxy 镜像优先、GitHub 直连兜底；ffmpeg 优先 npmmirror 的 ffmpeg-static 单文件 gz）、版本查询（本地 `--version` + PyPI JSON / GitHub API，比较走 `version_key` 数值化——本地输出 `2026.08.19`、PyPI 归一成 `2026.8.19`，字符串直接比会误报有新版）、视频下载子进程（照搬参考脚本 `bestvideo[height<=N]+bestaudio` 合并 mp4，解析/下载一律带 `--encoding utf-8` 并按 utf-8 解码——默认 cp936 会把文件名里的 emoji（🎞/▪︎ 等 GBK 外字符）替换成空格，Merger 行路径与真实文件不符导致 `isfile` 失败、完成态卡片丢失「打开」按钮；`--newline` 逐行进度解析并映射成**单趟进度条**：下载段 0→95%（分流源 视频 0–85 / 音频 85–95，合流源 0–95），95→100 留给合并（done 置 100）——不再每路流各走一遍；阶段文案仍按 Destination 计数标「(1/3) 下载视频/(2/3) 下载音频/(3/3) 合并中」（合流源不带计数，由解析时的 `split_heights` 判定；`-f` 带 `/best` 兜底合流单文件）；中间流文件下在保存目录，成功由 yt-dlp 自删，失败/中止由 `_cleanup_parts` 清掉本次 Destination 及 .part/.ytdl 边车；同名成品撞车被 yt-dlp 跳过时自动追加 `-2160P` 式分辨率后缀重试一次，后缀也撞车才报「未重复下载」）；浏览器 cookie：`tools\cookies.txt` 存在即随解析/下载命令带 `--cookies`（抖音等站点匿名请求 403 必需，`import_cookies` 做 Netscape 格式轻校验、缺 douyin.com 条目仅警告，卸载组件时一并删除）。纯标准库零 Qt，回调全在后台线程
 - `glow.py` — 共享轮廓灯效控件 `GlowCard`（待机呼吸灯 / 彩色跑马灯，自绘描边 + 定时器相位；跑马灯是把圆角矩形边框 toSubpathPolygons 离散成折线再按 ~6px 细分（折线只细分圆弧，直边是一整段，不细分就一条边一个颜色）、逐段按「累计周长位置 − 相位」取色——别用线性渐变+转色相，那样上下边同向变色不像追跑；独立成模块而非放 app.py——基类在 import 期就要被求值，放 app.py 会撞三方循环 import；`_sc` 运行期惰性取 app.sc）。传输记录行（`_ClickRow` 继承）与视频解析视频卡共用
 - `video_ui.py` — 面板「视频解析」tab：底栏组件状态（不显示组件名/版本号，检查更新覆盖 yt-dlp 与 ffmpeg 两者、一键更新、卸载）、网址输入（先「解析」yt-dlp -J 出标题/时长/封面/实际档位再选清晰度下载，封面居中裁方圆角、加载前/取不到显示 `_placeholder_pm` 占位图（半透明灰圆角方块+播放三角，卡片高度恒定），偏好档记 `video_quality`）、保存目录（默认桌面，注册表 User Shell Folders 兼容 OneDrive 重定向）、多任务模型：输入框+「解析」即创建一个任务卡（`_VideoTask`，卡片即任务）插到列表顶部（`task_lay` 滚动区，QSS `#videoScroll/#videoBox`），解析/下载进行中输入框不锁、可随时加新任务；重复网址拒建并提示；卡片一经创建留到程序重启（`_clear_tasks` 仅供 selfshot 清场）；parsed / done / downloading 态卡片标题行右侧显示 ✕ 关闭钮（`#cardCloseBtn`，accent 色 hover 变红）：parsed/done 点击直接移出列表销毁；downloading（含暂停）先弹 `_ConfirmDialog` 二次确认（已泛化为标题/正文/确认文案参数化，组件卸载确认同款），确认后 terminate——start() 收尾的 `_cleanup_parts` 会删掉下载到一半的 .part/.ytdl 缓存；parsing/failed 态不显示。下载中右键不再弹「取消下载」（取消唯一入口是 ✕ 二次确认），右键只剩完成态的「打开所在目录」。任务列表容器是 `_TaskBox`（宽度方向 minimumSizeHint 归零——QScrollArea 按内容 minSizeHint 放大容器而横向滚动条禁用会硬裁卡片右侧，归零后恢复布局软压缩；高度照常传递供垂直滚动）；卡片标题/URL 一律按 `ui.sc(172)` elide（更宽会撑爆容器）。任务卡状态机：parsing（转圈+正在解析）→ parsed（时长+清晰度下拉+「下载」，淡蓝 `#6ea8fe` 呼吸灯）→ downloading（跑马灯；meta 行换 `dl_box` 进度区：进度条+「暂停/继续」（yt-dlp 握手期没出真实进度时该按钮位换成 `_Spinner` 自绘旋转环，首个进度到达换回），下方从左到右 已下载/总大小（`_fmt_pair` 按百分比折算同单位）·剩余时间·下载速度三栏 busy 强调色，阶段提示「合并中…」借剩余时间栏）→ done（无轮廓灯，meta 行 时长·文件大小（`_fmt_size`）+「打开」，单击打开文件）/ failed（meta 行红/灰提示文字）。暂停=杀进程树但留 .part、继续=同命令重启靠 yt-dlp 默认 --continue 断点续传（`Download.pause/resume` + `_resume_evt` 挂起等待，暂停中取消走 terminate 唤醒后正常清理 .part）；取消回 parsed 态（取消与完成竞速时完成优先）。右键任务卡：下载中弹「取消下载」、完成态弹「打开所在目录」（explorer /select, 选中文件）。卡外状态行只剩全局提示（组件更新经 `sig_msg`、网址为空/重复），cookie 类报错浮出「查看解决办法」链接开 `CookieGuideDialog`；任一任务忙（`_any_busy`）时卸载/检查更新被挡。默认关闭的门禁层与传输同款（复用 `#transferGate`/`#transferHint`/`#gateHelpBtn`/`#setSave` QSS）；开启是异步的（门禁层显示组件下载进度），失败切「不可用」形态并经 `enabled_changed(False)` 弹回设置窗勾选；启动时恢复 `video_enabled` 仅当 `video_dl.tools_ready()`（组件已下到本地）才直接开启，组件缺失（首次安装/被卸载）则回门禁层等用户手动启用——不在启动时自动联网下载；`video_autostart=False`（ZBOX_SHOT）时不下组件不盖门禁层；cookie 类报错（`video_dl.is_cookie_error`）在状态行右侧浮出「查看解决办法」链接，点开 `CookieGuideDialog` 四步引导（装导出扩展 → 刷 douyin.com → 导出 cookies.txt → 弹窗内导入/移除；弹窗开头有风控警示——2026-09 起抖音详情接口要网页端实时签名 uifid + x-secsdk-web-signature，yt-dlp 上游未实现，导入 cookie 也解析不了抖音，报错文案按 `has_cookies()` 分两态）
-- `transfer_selftest.py` — 传输协议自动化自检（13 用例，动态端口，不依赖组播/Qt）
+- `transfer_selftest.py` — 传输协议自动化自检（16 用例，动态端口，不依赖组播/Qt）
 - `selfshot.py` — 全界面截图自检 harness（`ZBOX_SHOT` 触发）：时间冻结（patch `ui.date`/`ui.datetime`
   成固定时刻）+ 示例数据注入（结束还原）+ `widget.grab()` 离屏渲染，两主题约 45 个场景
 - `tools/compare_shots.py` — 截图前后对比：逐像素 diff + 生成带前/后/差异高亮三图的 report.md
@@ -120,7 +121,7 @@ Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyS
 - `designs/` — 两套主题的设计稿（HTML，浏览器可直接打开）
 - `website/` — 产品介绍页（纯静态无构建），线上 https://zbox.wzyjc.cn（腾讯云 COS 静态托管）；
   `deploy-cos.py` 一键上传部署 / `--bind-cert <ID>` 绑定续期证书，细节见 `.claude/skills/site-deploy/`；URL hash 锚点（`/#download`）由 `js/app.js` 接管：进页面先摘 hash、pin 布局就绪后 `scrollToHash` 滚到正确位置再写回地址栏（pin 分镜用 ScrollTrigger 的 start），load 后二次校正（用户先动则不抢）——别指望浏览器原生锚点滚动，它抢不过 pin-spacer 插入
-- `android/` — Android 端独立 Gradle 工程（Kotlin + Compose，与 PC 代码完全分离）；发送时文件长度不信相册数据库的 SIZE 列（编辑/优化/动态照片会过期，与实际流字节数不符时 OkHttp 写到末尾抛 ProtocolException），优先取 AssetFileDescriptor 的真实文件长度，SIZE 列只作为兜底
+- `android/` — Android 端独立 Gradle 工程（Kotlin + Compose，与 PC 代码完全分离）；发送时文件长度不信相册数据库的 SIZE 列（编辑/优化/动态照片会过期，与实际流字节数不符时 OkHttp 写到末尾抛 ProtocolException），优先取 AssetFileDescriptor 的真实文件长度，SIZE 列只作为兜底；记录页长按弹菜单——传输中可取消（发送走 `Sender.cancel`，接收走 `Receiver.cancelIncoming`：置位 cancelled 由读流循环抛 CancelledException 清半成品，等待确认期的接收不在这里取消、走弹窗拒绝按钮），已完成可「打开文件所在目录」（`openRecordLocation(forceDir=true)` 跳过媒体直开分支；目录跳转按文件真实落点推导——默认路径查 MediaStore RELATIVE_PATH（文件夹传输含子目录）、SAF 取 DocumentFile 父目录，VIEW intent 必须带 FLAG_GRANT_READ_URI_PERMISSION，否则第三方文件管理器无权读 document uri 会退化到默认目录页）；传输中进度条下方三栏（对齐 PC 记录行）：已传/总大小 · 剩余时间 · 速度，primary 强调色，速度未采样到时只显左栏；三栏数字 2s 节流（LaunchedEffect 快照采样），进度条仍实时
 - `harmony/` — 鸿蒙端独立 DevEco 工程（ArkTS + ArkUI，HarmonyOS NEXT API 12+，与 PC 代码完全分离；ohpm 依赖 polka/axios/harmony-utils/harmony-dialog；移植计划与验收标准见 `docs/superpowers/plans/2026-10-06-harmonyos-port.md`，构建说明见 `harmony/README.md`）
 - `assets/` — README 引用的图标与功能截图
 - `docs/` — 历史实现计划存档（`superpowers/plans/`）
@@ -144,8 +145,8 @@ native\build_native.cmd      :: 编译外壳菜单宿主 zshell_host.exe（改 n
 python install.py            :: 源码方式开启开机自启
 python install.py --remove   :: 移除自启并清理旧的右键菜单
 python transfer_selftest.py  :: 传输协议自检（全过打印 SELFTEST OK）
-cd android && gradlew.bat assembleDebug   :: 构建 Android debug APK（build.cmd 已集成）
 python -m unittest discover -s tests -v  :: Python/UI 回归测试
+cd android && gradlew.bat assembleDebug   :: 构建 Android debug APK（build.cmd 已集成）
 cd harmony && hvigorw assembleHap          :: 构建鸿蒙 HAP（需 DevEco Studio 环境，先 ohpm install）
 set ZBOX_SHOT=designs\verify && python main.pyw   :: 截图自检
 ```
@@ -347,9 +348,9 @@ placeholder，Enter 保存、Shift+Enter 换行；从列表
 日期 tag（`due_chip`）：逾期→「逾期 N 天」，当天→「今天」，7 天内→「还剩 N 天」，更远只报日期。
 日期格式统一由 `fmt_due_date` 给出 `M.d`（如 `10.7`），**行内 tag 与编辑器里的日期按钮共用它**
 ——两处各写各的格式就会出现「编辑时 10/9、保存后 10.09」这种不一致。
-
 截止日期弹层（`DuePopup`）点日历只改变选中项，底部只有「清除 / 确定」：清除提交 `None`，
 确定提交 `selectedDate()`，点日历本身不会立即保存或关闭。
+
 ### 主题与 DPI（`themes.py` + `app.py`）
 
 `themes.py` 有两套真主题：`nocturne`（深色）、`mica`（浅色），`THEME_ORDER` 定顺序；另有伪主题 `AUTO`
@@ -900,7 +901,8 @@ HTTP 模式无加密，只面向可信局域网。组播失效时有 /24 子网�
 
 - `transfer.py` 纯标准库零 Qt，可独立测试：`DeviceInfo` / `Discovery` / `TransferServer` /
   `send_files` / `load_or_create_fingerprint`。防护全在服务端：会话状态机 + token 校验、
-  sha256 校验、64KB 流式写盘、同名自动加 " (2)"、路径穿越净化、1MB JSON 上限、
+  sha256 校验、64KB 流式写盘、同名自动加 " (2)"、路径穿越净化（`fileName` 取 basename；
+  文件夹传输的 `path` 字段按 `/` 分段逐段消毒后还原目录树）、1MB JSON 上限、
   会话 TTL 10 分钟（按最后活跃刷新）。设备发现遵循 LocalSend 语义：announce 只在
   启动时发一次（另有「刷新」触发），不做 TTL 过期剔除；「刷新」= 清空列表重新宣告，
   组播宽限 3 秒内无设备才回退 /24 子网扫描（减少请求）。Android 端同语义。
@@ -920,12 +922,17 @@ HTTP 模式无加密，只面向可信局域网。组播失效时有 /24 子网�
   `state='done'`）的行手型光标提示——单击打开文件（一次收了多个文件则 `explorer /select`
   定位第一个）；右键菜单「打开文件所在文件夹 / 删除这条记录」（`_remove_record` 只删记录
   不动文件，删光后空态 `rec_empty` 重新显示）。其余状态（发送完成、等待中、失败等）一律无交互。
-- `transfer_selftest.py` 是自动化协议自检：`python transfer_selftest.py`，13 用例全过打印
+- `transfer_selftest.py` 是自动化协议自检：`python transfer_selftest.py`，16 用例全过打印
   `SELFTEST OK`；用动态端口、不依赖组播与 Qt，**改 `transfer.py` 后必跑**。
 - Android 端在 `android/`：独立 Gradle 工程（Kotlin + Compose + OkHttp + NanoHTTPD，minSdk 26），
-  与 PC 代码完全分离；指纹/别名/保存目录存 SharedPreferences，SAF 落盘，仅前台传输
-  （`onStop` 即停服务）。
-- 鸿蒙端在 `harmony/`：ArkTS + ArkUI 单 UIAbility；polka 起 53327 HTTP 服务端（5 端点），组播 `addMembership` 监听失败退化为 /24 子网扫描；发送走 TCPSocket 手写流式 POST（64KB 分块带进度/取消），接收经 polka 落沙箱 `files/received/` 后由记录页「导出」到公共目录；指纹/别名存 preferences；分享入口走 Share Kit（`ohos.want.action.sendData`）；传输中切后台申请 DATA_TRANSFER 长时任务保活。协议常量（组播 224.0.0.168 / 端口 53327）与 PC/Android 逐字节一致，与官方 LocalSend 不互通。
+  与 PC 代码完全分离；指纹/别名/保存目录存 SharedPreferences，SAF 落盘（文件夹传输按
+  `path` 字段还原目录树：`safeRelParts` 分段消毒（与 PC `_safe_rel_parts` 同语义），SAF 逐级
+  `ensureSubdir` 合并复用 / MediaStore 走 `RELATIVE_PATH` 子目录，文件名仍加 " (2)" 后缀），仅前台传输
+  （`onStop` 即停服务）。接收记录**整会话一条**（文件夹/多文件 = 1 行：显示名取顶层文件夹名
+  或「x 等 N 个文件」，大小为会话总和、进度按 `bytesDone` 聚合，点击定位首个落盘文件）。
+- 鸿蒙端在 `harmony/`：ArkTS + ArkUI 单 UIAbility；polka 起 53327 HTTP 服务端（5 端点），组播 `addMembership` 监听失败退化为 /24 子网扫描；发送走 TCPSocket 手写流式 POST（64KB 分块带进度/取消），接收经 polka 落沙箱 `files/received/`（文件夹传输按 `path` 字段分段消毒后递归 `mkdirSync`
+  还原目录树，目录冲突=合并）后由记录页「导出」到公共目录（聚合记录按 `savedRels` 相对路径逐文件导出、还原目录结构）；
+  接收记录同样整会话一条（与 Android 同语义）；指纹/别名存 preferences；分享入口走 Share Kit（`ohos.want.action.sendData`）；传输中切后台申请 DATA_TRANSFER 长时任务保活。协议常量（组播 224.0.0.168 / 端口 53327）与 PC/Android 逐字节一致，与官方 LocalSend 不互通。
   另有「手动添加」入口输 IP 走 GET /info 登记（组播/扫描失效兜底，模拟器联调填 10.0.2.2）。
   实测坑位（2026-10 CLI + 模拟器联调验证）：① UDPSocket 必须先 bind 再 send（直接发报 Bad file descriptor）；
   ② 组播监听要用 constructMulticastSocketInstance + addMembership(NetAddress)，模拟器上 EINVAL 不可用（真机待验），

@@ -153,6 +153,21 @@ def _create_unique(directory, name):
             n += 1
 
 
+def _safe_rel_parts(rel):
+    '''把发送方声明的 path 相对路径清洗成安全分段（posix 分隔）。
+
+    剔除 ''/'.'/'..' 段防目录穿越；每段过 _sanitize_filename，
+    清洗后为空的段（如 '...' 被 rstrip 剥光）用 '_' 兜底。
+    返回分段列表；无有效段时返回空列表（调用方退回扁平逻辑）。'''
+    parts = []
+    for seg in str(rel).split('/'):
+        if seg in ('', '.', '..'):
+            continue
+        seg = _sanitize_filename(seg)
+        parts.append(seg if seg else '_')
+    return parts
+
+
 class _BodyTooLarge(Exception):
     '''JSON 请求体超过 MAX_JSON_BODY。'''
 
@@ -338,10 +353,22 @@ class _ApiHandler(BaseHTTPRequestHandler):
 
         meta = session['files'][file_id]
         session['state'] = 'transferring'
-        # 防目录穿越：只取文件名部分
-        file_name = _sanitize_filename(os.path.basename(meta.get('fileName') or '')) or file_id
+        # 文件夹传输：meta['path'] 是 posix 分隔的相对路径（含顶层文件夹名），
+        # 分段消毒后在保存目录下还原目录树（目录冲突=合并）；无有效段退回扁平逻辑
+        parts = _safe_rel_parts(meta['path']) if isinstance(meta.get('path'), str) else []
+        if parts:
+            file_name = parts[-1]
+            dir_parts = parts[:-1]
+        else:
+            # 防目录穿越：只取文件名部分
+            file_name = _sanitize_filename(os.path.basename(meta.get('fileName') or '')) or file_id
+            dir_parts = []
         with session['lock']:
-            fd, target = _create_unique(session['save_dir'], file_name)
+            directory = session['save_dir']
+            if dir_parts:
+                directory = os.path.join(directory, *dir_parts)
+                os.makedirs(directory, exist_ok=True)
+            fd, target = _create_unique(directory, file_name)
             session['partial'][file_id] = target
 
         # Content-Length 非法或与 prepare 声明的 size 不符：清占位回 400
@@ -701,7 +728,10 @@ def send_files(host, port, files, on_progress=None, on_done=None, device_info=No
                cancel_event=None):
     '''发送方客户端：prepare-upload -> 逐文件 upload -> 失败 cancel。
 
-    files 为本地路径列表。on_progress(file_index, done_bytes, total_bytes)，
+    files 为本地路径列表，元素可为 str 或 (本地路径, 相对路径) 二元组；
+    str 时相对路径 = basename。相对路径含目录段时元数据多带一个 posix 分隔的
+    path 字段（文件夹传输），旧版接收端忽略该字段退化为扁平收文件。
+    on_progress(file_index, done_bytes, total_bytes)，
     on_done(ok, message)：被拒时 message 为 'rejected'，主动取消为 'cancelled'。
     cancel_event（threading.Event）置位后中断上传并通知对端 cancel；prepare
     等待确认期间无法打断阻塞 IO，在 prepare 返回后检查。同步阻塞，调用方自行放线程。
@@ -713,16 +743,23 @@ def send_files(host, port, files, on_progress=None, on_done=None, device_info=No
     file_meta = {}
     order = []
     try:
-        for path in files:
+        for item in files:
+            if isinstance(item, (tuple, list)):
+                path, rel = item[0], str(item[1]).replace('\\', '/')
+            else:
+                path, rel = item, os.path.basename(item)
             file_id = uuid.uuid4().hex
             mime = mimetypes.guess_type(path)[0] or 'application/octet-stream'
-            file_meta[file_id] = {
+            meta = {
                 'id': file_id,
                 'fileName': os.path.basename(path),
                 'size': os.path.getsize(path),
                 'fileType': mime,
                 # 发送端不预计算大文件哈希，协议允许 sha256 为 null
             }
+            if '/' in rel:
+                meta['path'] = rel
+            file_meta[file_id] = meta
             order.append((file_id, path))
     except OSError as exc:
         _safe_call(on_done, False, '%s' % exc)

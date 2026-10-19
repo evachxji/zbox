@@ -1,6 +1,6 @@
 # 局域网传输支持文件夹（PC 端）
 
-> 状态：已规划，未实现（2026-10-14）
+> 状态：已实现（2026-10-14）
 
 ## Summary
 
@@ -42,6 +42,8 @@
 ## Assumptions
 
 - 范围：只改 PC 端（发送文件夹 + PC 接收还原目录）；Android/鸿蒙端本次不动，旧手机端收到文件夹内容为扁平文件，属可接受降级，后续可单独给移动端加 `path` 支持。
+- 追加（2026-10-14）：移动端 `path` 支持已实现——Android（`Protocol.kt` FileMeta 增 `path` 可选字段，`Receiver.kt` `safeRelParts` 分段消毒 + SAF `ensureSubdir` / MediaStore `RELATIVE_PATH` 还原目录树）与鸿蒙（`Protocol.ets` FileMeta 增 `path?`，`Receiver.ets` `safeRelParts` + 递归 `mkdirSync` 还原目录树）均按 PC 同语义消毒落盘，两端记录显示名优先 `path`。验证：`gradlew assembleDebug` 与 `hvigorw assembleHap` 均 BUILD SUCCESSFUL。
+- 追加 2（2026-10-14）：移动端接收记录由「每文件一条」改为「整会话一条」（对齐 PC 端）——文件夹/多文件接收在记录页只占 1 行，显示名取顶层文件夹名或「x 等 N 个文件」，大小为会话总和、进度按累计字节聚合；鸿蒙「导出」按 `savedRels` 相对路径逐文件导出并还原目录结构。发送方记录未动（仍每文件一条）。
 - 发送形态：逐文件 + 相对路径，不打 zip。
 - 空文件夹不传输、不提示；只选空文件夹时选择列表为空、按钮恢复默认文案。
 - 发送期间源文件被删/不可读：按现有失败路径报错并 cancel 会话，不做快照。

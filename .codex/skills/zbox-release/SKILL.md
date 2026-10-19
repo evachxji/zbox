@@ -78,9 +78,38 @@ tag 打在版本号提交上（website 等后续提交在 tag 之后，没关系
 
 ## 4. 建 GitHub release 并传 assets
 
-notes 参考上一版格式（`gh release view <上一tag>`）：开头一句定位 + 「## 本版变化」
-（从 `git log <上一tag>..HEAD --oneline` 归纳，面向用户语言，不写 commit hash）+ 「## 下载」分端说明。
-写到 `dist\release-notes.md` 再用 `--notes-file` 传，避免 PowerShell 引号地狱。
+notes 参考上一版内容范围（`gh release view <上一tag>`），但格式必须双语：**中文在前，英文在后**。
+两部分都要包含开头定位、「本版变化」和分端「下载」说明，内容保持一致，不写 commit hash；
+中文使用自然措辞，不做逐字机翻。两部分之间用一行 `---` 分隔。
+写入 `dist\release-notes.md` 后，用 `--notes-file` 传，避免 PowerShell 引号地狱。模板：
+
+```markdown
+一句话概括本版更新。
+
+## 本版变化
+
+- 对应的用户可感知变化。
+
+## 下载
+
+- Windows：...
+- Android：...
+- HarmonyOS：...
+
+---
+
+A concise English summary of this release.
+
+## What's Changed
+
+- User-facing change in English.
+
+## Downloads
+
+- Windows: ...
+- Android: ...
+- HarmonyOS: ...
+```
 
 两个坑：
 
@@ -137,6 +166,7 @@ CRC64 完整性比对脚本见 `.claude/skills/site-deploy/SKILL.md` 下载 CDN 
 - [ ] `version.py` = 新版本，一行 diff，已提交已推送
 - [ ] `dist\release\` 四个 v<VER> 产物齐全，`.app` 与上一版 hash 不同
 - [ ] `git ls-remote --tags origin` 有 `v<VER>`，指向版本号提交
-- [ ] `gh release view v<VER>`：非 draft，4 个 assets（exe/apk/hap/app.zip），大小与本地一致
+- [ ] `gh release view v<VER>`：非 draft，4 个 assets（exe/apk/hap/app.zip），大小与本地一致；
+      描述为中文在前、英文在后，两部分变化与下载信息一致
 - [ ] COS `dl/` 下有 v<VER> 的 exe 与 apk，`https://dl.wzyjc.cn/dl/...` 200 且大小一致
 - [ ] 官网首页与 js 里版本号为 v<VER>，下载链接指向 v<VER> assets
