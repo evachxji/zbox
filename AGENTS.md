@@ -470,6 +470,12 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
 - **会话**：`ShotOverlay` 是覆盖虚拟桌面的无边框置顶 Tool 窗，构造时**先逐屏
   `grabWindow(0)` 抓底图再显示**（顺序反了遮罩自己会入镜）。灰罩 = 底图上盖
   `MASK_COLOR`，选区镂空 = 裁剪选区把底图再画一遍——不用 WA_TranslucentBackground。
+- **窗口套选**：空闲态沿 Win32 Z 序探测鼠标下最上层的非本进程程序窗口，
+  用 DWM `DWMWA_EXTENDED_FRAME_BOUNDS` 取不含系统投影的可见外框（失败回退
+  `GetWindowRect`）；悬浮画 2px 主题色轮廓，原地单击套选完整窗口并进入 ready，
+  拖动仍走自由框选。窗口候选在按下时记录，松开位置必须仍在外框内；
+  双击由现有 `mouseDoubleClickEvent` 调用 `_finish_copy()` 复制并退出。
+  桌面壳层、任务栏、透明穿透层、DWM cloaked 与失败外框均跳过。
 - **先关模态弹窗再盖遮罩**：`start_session` 开头把 `QApplication.activeModalWidget()`
   逐个 close（QDialog.close = reject，按「取消」正常收尾）。应用级模态弹窗
   （cookie 引导/关于/传输与视频说明窗等 exec() 弹窗）开着时直接盖遮罩 = **死锁**：
