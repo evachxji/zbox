@@ -47,7 +47,7 @@ A Windows desktop organizer: desktop boxes + a floating panel (calendar / todo /
 
 ## Quick Start
 
-Download `zbox-Setup-v<version>-x64.exe` from [Releases](https://github.com/evachxji/zbox/releases) and double-click to open the installer. It installs for all users into `Program Files` (Windows asks for administrator permission), removes any previous Zbox program files first, and always keeps your personal data in `%APPDATA%\zbox`.
+👉 **[Click to download the latest Windows installer](https://github.com/evachxji/zbox/releases/latest)** (`zbox-Setup-v<version>-x64.exe`) and double-click to open it. It installs for all users into `Program Files` (Windows asks for administrator permission), removes any previous Zbox program files first, and always keeps your personal data in `%APPDATA%\zbox`.
 
 Upgrading: "Check for updates" in the bottom-right corner of the Settings window compares against the latest GitHub release and can download the installer and guide you through the upgrade.
 

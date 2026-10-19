@@ -48,7 +48,7 @@ Windows 桌面整理工具：桌面格子 + 悬浮面板（日历 / 待办 / 传
 
 ## 快速开始
 
-到 [Releases](https://github.com/evachxji/zbox/releases) 下载 `zbox-Setup-v<版本>-x64.exe`，双击打开安装向导。
+👉 **[点击下载最新版 Windows 安装包](https://github.com/evachxji/zbox/releases/latest)**（`zbox-Setup-v<版本>-x64.exe`），双击打开安装向导。
 安装始终按所有用户装到 `Program Files`（Windows 会请求管理员权限），安装前会清理旧版 Zbox 程序文件，
 `%APPDATA%\zbox` 里的个人数据（待办、格子、配置）一律保留。
 
