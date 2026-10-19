@@ -9,21 +9,24 @@ import threading
 import time
 from datetime import date, datetime, timedelta
 
-from PySide6.QtCore import (Qt, QTimer, QSize, QPoint, QPointF, QRectF, QDate, QTime,
+from PySide6.QtCore import (Qt, QTimer, QSize, QPoint, QPointF, QRect, QRectF, QDate, QTime,
                           Signal, QEvent, QPropertyAnimation, QVariantAnimation, QEasingCurve)
 from PySide6.QtGui import (QFont, QFontDatabase, QPainter, QColor, QPixmap, QIcon, QPainterPath,
-                         QRegion, QPen, QLinearGradient, QCursor, QKeySequence)
+                         QRegion, QPen, QLinearGradient, QCursor, QKeySequence, QTextCursor)
 from PySide6.QtWidgets import (QWidget, QFrame, QLabel, QToolButton, QVBoxLayout, QHBoxLayout,
                              QGridLayout, QListWidget,
                              QListWidgetItem, QLineEdit, QMenu, QApplication, QDialog,
                              QFormLayout, QCheckBox, QRadioButton, QPushButton, QCalendarWidget,
-                             QLayout, QGraphicsOpacityEffect, QSizePolicy, QTableView)
+                             QLayout, QGraphicsOpacityEffect, QSizePolicy, QTableView,
+                             QPlainTextEdit, QWidgetAction)
 
 import calendar_data as cd
 import sysutil
 import transfer_ui
 import updater
 import video_ui
+from snapping import (SNAP_ENGAGE, SNAP_RELEASE, SnapGuideOverlay,
+                      guide_segments, snap_move)
 from themes import THEMES, THEME_ORDER, THEME_CHOICES, AUTO, build_qss
 from version import APP_VERSION, GITHUB_URL
 
@@ -761,6 +764,7 @@ class TodoStore(object):
                 self.items = [i for i in json.load(f) if i.get('text')]
         except Exception:
             self.items = []
+        self._sort_items()
 
     def save(self):
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
@@ -772,7 +776,8 @@ class TodoStore(object):
         it = {'id': max(ids) + 1, 'text': text, 'done': False}
         if due:
             it['due'] = due
-        self.items.insert(0, it)
+        self.items.append(it)
+        self._sort_items()
         self.save()
 
     def set_due(self, item_id, due):
@@ -783,22 +788,34 @@ class TodoStore(object):
                 else:
                     it.pop('due', None)
                 break
+        self._sort_items()
         self.save()
 
     def toggle(self, item_id, done):
         for it in self.items:
             if it['id'] == item_id:
                 it['done'] = done
-                self.items.remove(it)
-                if done:
-                    self.items.append(it)       # 完成置底
-                else:
-                    self.items.insert(0, it)    # 取消完成回到顶部
                 break
+        self._sort_items()
         self.save()
 
-    def remove(self, item_id):
-        self.items = [i for i in self.items if i['id'] != item_id]
+    def take(self, item_id):
+        """删除并返回 (记录副本, 原位置)，供删除 toast 的撤销恢复。"""
+        for index, item in enumerate(self.items):
+            if item['id'] == item_id:
+                removed = dict(item)
+                self.items.pop(index)
+                self.save()
+                return removed, index
+        return None, None
+
+    def restore(self, item, index):
+        """恢复撤销记录并按当前排序归位；若 ID 已被新记录复用，则换一个新 ID。"""
+        restored = dict(item)
+        if any(i['id'] == restored['id'] for i in self.items):
+            restored['id'] = max((i['id'] for i in self.items), default=0) + 1
+        self.items.insert(max(0, min(index, len(self.items))), restored)
+        self._sort_items()
         self.save()
 
     def update_text(self, item_id, text):
@@ -810,6 +827,15 @@ class TodoStore(object):
 
     def pending_count(self):
         return sum(1 for i in self.items if not i['done'])
+
+    def _sort_items(self):
+        """完成项置底；同组内有日期项在前并按日期升序，无日期项在后，同日新项在前。"""
+        self.items.sort(key=lambda i: (
+            1 if i.get('done') else 0,
+            0 if i.get('due') else 1,
+            i.get('due') or '',
+            -int(i.get('id', 0)),
+        ))
 
 
 class TodoList(QListWidget):
@@ -826,6 +852,8 @@ class TodoList(QListWidget):
             self.on_resize()
 
     def mouseDoubleClickEvent(self, e):
+        if e.button() != Qt.LeftButton:
+            return
         li = self.itemAt(e.pos())
         if li is None:
             self.emptyDoubleClicked.emit()
@@ -833,6 +861,58 @@ class TodoList(QListWidget):
             item_id = li.data(Qt.UserRole)
             if item_id is not None:  # 双击已有条目 = 编辑（编辑器行无 UserRole，忽略）
                 self.itemEditRequested.emit(item_id)
+
+
+class TodoEditor(QPlainTextEdit):
+    """自适应高度的待办输入框：Enter 提交，Shift+Enter 换行。"""
+    submitted = Signal()
+    heightChanged = Signal(int)
+
+    def __init__(self, text='', parent=None):
+        super(TodoEditor, self).__init__(parent)
+        self.setObjectName('todoEdit')
+        self.setFrameShape(QFrame.NoFrame)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.document().setDocumentMargin(0)
+        self.setPlainText(text)
+        self.setTextCursor(self._end_cursor())
+        self.document().contentsChanged.connect(self._fit_height)
+
+    def _end_cursor(self):
+        cursor = QTextCursor(self.document())
+        cursor.movePosition(QTextCursor.End)
+        return cursor
+
+    def _fit_height(self):
+        if self.viewport().width() <= 0:
+            return
+        doc = self.document()
+        doc.setTextWidth(self.viewport().width())
+        content_h = 0
+        block = doc.firstBlock()
+        while block.isValid():
+            content_h += doc.documentLayout().blockBoundingRect(block).height()
+            block = block.next()
+        content_h = int(content_h + 0.999)
+        chrome_h = max(0, self.height() - self.viewport().height())
+        wanted = max(sc(42), content_h + chrome_h + sc(2))
+        if self.height() != wanted:
+            self.setFixedHeight(wanted)
+            self.heightChanged.emit(wanted)
+
+    def resizeEvent(self, e):
+        super(TodoEditor, self).resizeEvent(e)
+        self._fit_height()
+
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key_Return, Qt.Key_Enter):
+            if e.modifiers() & Qt.ShiftModifier:
+                super(TodoEditor, self).keyPressEvent(e)
+            else:
+                self.submitted.emit()
+            return
+        super(TodoEditor, self).keyPressEvent(e)
 
 
 class DuePopup(QFrame):
@@ -865,23 +945,21 @@ class DuePopup(QFrame):
             if b:
                 b.setIcon(QIcon())   # 默认箭头图标在深色主题下看不清，改用字符
                 b.setText(t)
-        cal.clicked.connect(lambda qd: self._choose(qd.toPyDate()))
         lay.addWidget(cal)
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(sc(6))
-        for label, days in (('今天', 0), ('明天', 1)):
-            b = QToolButton(self)
-            b.setObjectName('todayBtn')
-            b.setText(label)
-            b.clicked.connect(lambda _=False, n=days: self._choose(date.today() + timedelta(days=n)))
-            row.addWidget(b)
-        row.addStretch(1)
         clr = QToolButton(self)
         clr.setObjectName('todayBtn')
         clr.setText('清除')
         clr.clicked.connect(lambda: self._choose(None))
         row.addWidget(clr)
+        row.addStretch(1)
+        ok = QToolButton(self)
+        ok.setObjectName('todayBtn')
+        ok.setText('确定')
+        ok.clicked.connect(lambda: self._choose(cal.selectedDate().toPython()))
+        row.addWidget(ok)
         lay.addLayout(row)
 
     def _choose(self, d):
@@ -933,12 +1011,170 @@ class TimePickerPopup(QFrame):
         self.close()
 
 
+class _TodoDangerActionWidget(QWidget):
+    """红色删除项：把鼠标命中转成标准 QMenu 活动/点击状态。"""
+    def __init__(self, action, parent=None):
+        super(_TodoDangerActionWidget, self).__init__(parent)
+        self._action = action
+        self.setObjectName('todoDangerAction')
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setMouseTracking(True)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(sc(19), 0, sc(22), 0)
+        lay.setSpacing(0)
+        text = QLabel('删除')
+        text.setObjectName('todoDeleteActionText')
+        text.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        text.setAttribute(Qt.WA_TransparentForMouseEvents)
+        lay.addWidget(text)
+
+    def enterEvent(self, e):
+        menu = self.window()
+        if isinstance(menu, QMenu):
+            menu.setActiveAction(self._action)
+        super(_TodoDangerActionWidget, self).enterEvent(e)
+
+    def mouseMoveEvent(self, e):
+        menu = self.window()
+        if isinstance(menu, QMenu):
+            menu.setActiveAction(self._action)
+        super(_TodoDangerActionWidget, self).mouseMoveEvent(e)
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self._action.trigger()
+            self.window().close()
+            e.accept()
+            return
+        super(_TodoDangerActionWidget, self).mouseReleaseEvent(e)
+
+
+class _UndoCountdownLine(QWidget):
+    """toast 底部的 5 秒倒计时细线。"""
+    def __init__(self, parent=None):
+        super(_UndoCountdownLine, self).__init__(parent)
+        self._progress = 1.0
+        self._color = QColor('#e8a33d')
+        self.setFixedHeight(sc(2))
+
+    def set_theme(self, key):
+        self._color = QColor('#0067c0' if key == 'mica' else '#e8a33d')
+        self.update()
+
+    def set_progress(self, value):
+        self._progress = max(0.0, min(float(value), 1.0))
+        self.update()
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        track = QColor(self._color)
+        track.setAlpha(34)
+        p.fillRect(self.rect(), track)
+        fill = QColor(self._color)
+        fill.setAlpha(205)
+        p.fillRect(QRectF(0, 0, self.width() * self._progress, self.height()), fill)
+
+
+class TodoUndoToast(QFrame):
+    """删除成功提示：右下角停留 5 秒，可撤销最近一次删除。"""
+    def __init__(self, parent=None):
+        super(TodoUndoToast, self).__init__(parent)
+        self.setObjectName('todoUndoToast')
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        content = QWidget()
+        lay = QHBoxLayout(content)
+        lay.setContentsMargins(sc(12), sc(8), sc(8), sc(7))
+        lay.setSpacing(sc(8))
+        text = QLabel('已删除')
+        text.setObjectName('todoUndoText')
+        lay.addWidget(text)
+        self.undo_btn = QToolButton()
+        self.undo_btn.setObjectName('todoUndoBtn')
+        self.undo_btn.setText('撤销')
+        self.undo_btn.setCursor(Qt.PointingHandCursor)
+        self.undo_btn.clicked.connect(self._undo)
+        lay.addWidget(self.undo_btn)
+        outer.addWidget(content)
+        self.countdown = _UndoCountdownLine(self)
+        outer.addWidget(self.countdown)
+        self._undo_cb = None
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(5000)
+        self._timer.timeout.connect(self.hide)
+        self._countdown_anim = QVariantAnimation(self)
+        self._countdown_anim.setDuration(5000)
+        self._countdown_anim.setStartValue(1.0)
+        self._countdown_anim.setEndValue(0.0)
+        self._countdown_anim.valueChanged.connect(self.countdown.set_progress)
+        self._show_anims = []
+        self._opacity = QGraphicsOpacityEffect(self)
+        self._opacity.setOpacity(0.0)
+        self.setGraphicsEffect(self._opacity)
+        self.hide()
+
+    def set_theme(self, key):
+        self.countdown.set_theme(key)
+
+    def show_undo(self, callback):
+        self._undo_cb = callback
+        for anim in self._show_anims:
+            anim.stop()
+        self._countdown_anim.stop()
+        self.adjustSize()
+        self.reposition()
+        end_pos = self.pos()
+        self.move(end_pos + QPoint(0, sc(10)))
+        self._opacity.setOpacity(0.0)
+        self.countdown.set_progress(1.0)
+        self.show()
+        self.raise_()
+        fade = QPropertyAnimation(self._opacity, b'opacity', self)
+        fade.setDuration(360)
+        fade.setStartValue(0.0)
+        fade.setEndValue(1.0)
+        fade.setEasingCurve(QEasingCurve.OutCubic)
+        rise = QPropertyAnimation(self, b'pos', self)
+        rise.setDuration(360)
+        rise.setStartValue(self.pos())
+        rise.setEndValue(end_pos)
+        rise.setEasingCurve(QEasingCurve.OutCubic)
+        self._show_anims = [fade, rise]
+        fade.start()
+        rise.start()
+        self._countdown_anim.start()
+        self._timer.start()
+
+    def reposition(self):
+        p = self.parentWidget()
+        if p is None:
+            return
+        self.move(max(0, p.width() - self.width() - sc(12)),
+                  max(0, p.height() - self.height() - sc(12)))
+
+    def _undo(self):
+        callback, self._undo_cb = self._undo_cb, None
+        self._timer.stop()
+        self._countdown_anim.stop()
+        for anim in self._show_anims:
+            anim.stop()
+        self.hide()
+        if callback:
+            callback()
+
+
 class TodoWidget(QWidget):
     def __init__(self, store, parent=None):
         super(TodoWidget, self).__init__(parent)
         self.store = store
         self.theme_key = THEME_ORDER[0]
         self._editing = False
+        self._undo_item = None
+        self._undo_index = None
+        self._undo_toast = TodoUndoToast(self)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -985,7 +1221,12 @@ class TodoWidget(QWidget):
 
     def set_theme(self, key):
         self.theme_key = key
+        self._undo_toast.set_theme(key)
         self._update_count()
+
+    def resizeEvent(self, e):
+        super(TodoWidget, self).resizeEvent(e)
+        self._undo_toast.reposition()
 
     def _update_count(self):
         self.count.setText(THEMES[self.theme_key].get('count_fmt', '{:d} 未完成').format(self.store.pending_count()))
@@ -1023,6 +1264,7 @@ class TodoWidget(QWidget):
         return row
 
     def rebuild(self):
+        scroll_value = self.list.verticalScrollBar().value()
         self.list.clear()
         self._editing = False
         self._editor = None
@@ -1033,6 +1275,8 @@ class TodoWidget(QWidget):
             self.list.addItem(li)
             self.list.setItemWidget(li, self._make_row(it))
         self._sync_row_heights()
+        bar = self.list.verticalScrollBar()
+        bar.setValue(max(0, min(scroll_value, bar.maximum())))
         self._update_count()
 
     def _sync_row_heights(self):
@@ -1104,19 +1348,17 @@ class TodoWidget(QWidget):
         else:
             li = QListWidgetItem()
             li.setSizeHint(QSize(10, sc(48)))
-            self.list.insertItem(0, li)
+            self.list.addItem(li)
         box = QFrame()
         box.setObjectName('todoEditRow')
         hl = QHBoxLayout(box)
         hl.setContentsMargins(0, 0, 0, 0)
         hl.setSpacing(sc(5))
-        ed = QLineEdit(text)
-        ed.setObjectName('todoEdit')
+        ed = TodoEditor(text)
         ed.setMinimumHeight(sc(42))
-        ed.setPlaceholderText('输入待办，回车保存，Esc 取消')
         ed.installEventFilter(self)
-        ed.returnPressed.connect(lambda: self._commit(li, ed, item_id))
-        # ????? eventFilter ???????????????????? clicked ??????
+        ed.submitted.connect(lambda: self._commit(li, ed, item_id))
+        ed.heightChanged.connect(lambda h, row=li: row.setSizeHint(QSize(10, max(h, sc(48)))))
         hl.addWidget(ed, 1)
         btn = QToolButton()
         btn.setObjectName('todoDateBtn')
@@ -1128,16 +1370,27 @@ class TodoWidget(QWidget):
         btn.setIconSize(QSize(sc(17), sc(17)))
         btn.clicked.connect(lambda: self._pick_due(btn))
         hl.addWidget(btn)
+        save_btn = QToolButton()
+        save_btn.setObjectName('todoSaveBtn')
+        save_btn.setFocusPolicy(Qt.NoFocus)
+        save_btn.setCursor(Qt.PointingHandCursor)
+        save_btn.setToolTip('保存')
+        save_btn.setText('✓')
+        save_btn.setFixedSize(sc(32), sc(30))
+        save_btn.clicked.connect(lambda: self._commit(li, ed, item_id))
+        hl.addWidget(save_btn)
         old_w = self.list.itemWidget(li)
         if old_w is not None:  # 替换前先移除并隐藏旧行，避免残留重影
             self.list.removeItemWidget(li)
             old_w.hide()
             old_w.deleteLater()
         self.list.setItemWidget(li, box)
+        li.setSizeHint(QSize(10, max(ed.height(), sc(48))))
         self._editor = (li, ed, item_id)
         self._due_btn = btn
         self._refresh_due_btn()
         ed.setFocus()
+        self.list.scrollToItem(li)
 
     def _refresh_due_btn(self):
         """已选截止日期时按钮显示紧凑日期，否则显示日历图标。"""
@@ -1191,7 +1444,7 @@ class TodoWidget(QWidget):
             self._commit_current()
 
     def eventFilter(self, obj, ev):
-        if isinstance(obj, QLineEdit):
+        if isinstance(obj, TodoEditor):
             if ev.type() == QEvent.KeyPress and ev.key() == Qt.Key_Escape:
                 obj.setProperty('cancelled', True)
                 obj.clearFocus()
@@ -1218,7 +1471,7 @@ class TodoWidget(QWidget):
         if not self._editing or ed.property('cancelled') or getattr(self, '_picking', False):
             return
         self._editing = False
-        text = ed.text().strip()
+        text = ed.toPlainText().strip()
         if text:
             if item_id is None:
                 self.store.add(text, self._edit_due)
@@ -1232,18 +1485,43 @@ class TodoWidget(QWidget):
         if li is None:
             return
         item_id = li.data(Qt.UserRole)
+        text = None
+        for it in self.store.items:
+            if it['id'] == item_id:
+                text = it['text']
+                break
         m = QMenu(self)
         act_edit = m.addAction('编辑')
-        act_del = m.addAction('删除')
+        act_copy = m.addAction('复制')
+        act_del = QWidgetAction(m)
+        act_del.setText('删除')
+        danger = _TodoDangerActionWidget(act_del)
+        act_del.setDefaultWidget(danger)
+        act_del.triggered.connect(lambda: self._delete_item(item_id))
+        m.addAction(act_del)
         act = m.exec(self.list.viewport().mapToGlobal(pos))
         if act is act_edit:
             for it in self.store.items:
                 if it['id'] == item_id:
                     self._open_editor(item_id, it['text'])
                     break
-        elif act is act_del:
-            self.store.remove(item_id)
-            self.rebuild()
+        elif act is act_copy:
+            if text is not None:
+                QApplication.clipboard().setText(text)
+
+    def _delete_item(self, item_id):
+        self._undo_item, self._undo_index = self.store.take(item_id)
+        self.rebuild()
+        if self._undo_item is not None:
+            self._undo_toast.show_undo(self._restore_deleted)
+
+    def _restore_deleted(self):
+        if self._undo_item is None:
+            return
+        self.store.restore(self._undo_item, self._undo_index)
+        self._undo_item = None
+        self._undo_index = None
+        self.rebuild()
 
 
 # ---------------- 桌面层级 ----------------
@@ -2444,6 +2722,9 @@ class FloatingPanel(QWidget):
         self._floating = False      # True = 被点击激活浮起到应用窗口之上，失焦后需要沉回
         self._drag = None           # 窗口拖拽偏移（globalPos - topLeft）；None = 未在拖拽
         self._sizing = False        # 原生边框缩放进行中（WM_ENTERSIZEMOVE 起）：防失焦沉底
+        self._snap_sticky = (None, None)
+        self._snap_guide = None
+        self.card_rects_provider = None
         self.setObjectName('panelRoot')
 
         root = QVBoxLayout(self)
@@ -2674,6 +2955,7 @@ class FloatingPanel(QWidget):
 
     def hideEvent(self, e):
         self.titlebar.hide()   # 栏窗无属主，不随面板隐藏，手动带上
+        self._hide_snap_guide()
         super(FloatingPanel, self).hideEvent(e)
 
     def moveEvent(self, e):
@@ -2768,6 +3050,23 @@ class FloatingPanel(QWidget):
         if self._tb_anim.endValue() == 0:
             self.titlebar.hide()
 
+    def _card_targets(self):
+        provider = self.card_rects_provider
+        return provider(exclude=self) if callable(provider) else []
+
+    def _update_snap_guide(self, source, targets, matches):
+        segments = guide_segments(source, targets, matches, cap=sc(8))
+        if segments:
+            if self._snap_guide is None:
+                self._snap_guide = SnapGuideOverlay(self, scale=ui_scale())
+            self._snap_guide.show_segments(segments)
+        else:
+            self._hide_snap_guide()
+
+    def _hide_snap_guide(self):
+        if self._snap_guide is not None:
+            self._snap_guide.hide()
+
     # --- 四边/四角自由缩放（参考格子缩放，但走 WM_NCHITTEST 原生命中测试：
     # Qt 控件都是共享同一 hwnd 的 alien 子控件，一次命中测试覆盖整个窗口，
     # 不用像格子那样给子视口逐个装事件过滤器；缩放光标也由系统代管） ---
@@ -2783,8 +3082,12 @@ class FloatingPanel(QWidget):
                     return True, ht   # 交给 Windows 驱动交互缩放（最小尺寸走 WM_GETMINMAXINFO）
             elif msg.message == 0x0231:          # WM_ENTERSIZEMOVE
                 self._sizing = True
+                self._snap_sticky = (None, None)
+                self._hide_snap_guide()
             elif msg.message == 0x0232:          # WM_EXITSIZEMOVE：松手收尾，位置尺寸一起落盘
                 self._sizing = False
+                self._snap_sticky = (None, None)
+                self._hide_snap_guide()
                 self._save_pos()
         return super(FloatingPanel, self).nativeEvent(eventType, message)
 
@@ -2825,15 +3128,25 @@ class FloatingPanel(QWidget):
             return False
         if t == QEvent.MouseButtonPress and ev.button() == Qt.LeftButton:
             self._drag = ev.globalPos() - self.frameGeometry().topLeft()
+            self._snap_sticky = (None, None)
+            self._hide_snap_guide()
             unpin_from_desktop(self)   # 拖拽期间临时退出桌面带：普通窗口移动不会触发表层反压
             unpin_from_desktop(self.titlebar)   # 栏窗一起退出：拖拽中面板浮起，栏窗留带内会被应用盖住
             self._desk_pinned = False
             return True
         if t == QEvent.MouseMove and self._drag is not None and ev.buttons() & Qt.LeftButton:
-            self.move(ev.globalPos() - self._drag)
+            proposed = QRect(ev.globalPos() - self._drag, self.size())
+            targets = self._card_targets()
+            snapped, self._snap_sticky = snap_move(
+                proposed, targets, engage=sc(SNAP_ENGAGE),
+                release=sc(SNAP_RELEASE), sticky=self._snap_sticky)
+            self.move(snapped.topLeft())
+            self._update_snap_guide(snapped, targets, self._snap_sticky)
             return True
         if t == QEvent.MouseButtonRelease and self._drag is not None:
             self._drag = None
+            self._snap_sticky = (None, None)
+            self._hide_snap_guide()
             self._save_pos()
             self._desk_pinned = pin_to_desktop(self)   # 归位：重新归属桌面带并沉回桌面层
             pin_to_desktop(self.titlebar)
@@ -2874,29 +3187,3 @@ class FloatingPanel(QWidget):
             self.todo.rebuild()
         if self._theme == AUTO and self.cal.theme_key != resolve_theme(AUTO):
             self.apply_theme(AUTO, save=False)  # 系统「应用模式」改了，跟着切
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

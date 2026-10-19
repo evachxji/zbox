@@ -145,11 +145,12 @@ python install.py            :: 源码方式开启开机自启
 python install.py --remove   :: 移除自启并清理旧的右键菜单
 python transfer_selftest.py  :: 传输协议自检（全过打印 SELFTEST OK）
 cd android && gradlew.bat assembleDebug   :: 构建 Android debug APK（build.cmd 已集成）
+python -m unittest discover -s tests -v  :: Python/UI 回归测试
 cd harmony && hvigorw assembleHap          :: 构建鸿蒙 HAP（需 DevEco Studio 环境，先 ohpm install）
 set ZBOX_SHOT=designs\verify && python main.pyw   :: 截图自检
 ```
 
-自检导出两主题全界面约 53 张场景截图（面板四 tab / 顶部栏展开 / 各弹窗 / 格子各形态 / 安装卸载向导）
+自检导出两主题全界面 59 张场景截图（面板四 tab / 顶部栏展开 / 各弹窗 / 格子各形态 / 安装卸载向导）
 后自动退出，改 UI / 主题 / 布局后必跑。截图 harness 在 `selfshot.py`：冻结时间源 + 注入示例数据
 （结束还原，不落盘用户配置）+ 离屏渲染；自检模式下不创建格子、不起传输服务、不注册截图热键、
 不跑节假日自动更新（防网络不确定性与配置写盘）。前后版本对比用
@@ -320,18 +321,34 @@ ClearType，文字发灰），圆角统一走遮罩（`round_corners`，SetWindo
 - 置灰（非当月）跟随视口中线所在周，平移中只置 `_dim_dirty` 记账，停手时一次性 `_apply_dim`。
 - 滚轮走 `_glide` 阻尼动画，触摸板（pixelDelta）直接跟手不走动画。
 
-#### 待办行的多行文本
+#### 待办列表与编辑器
 
 待办文字是 word-wrapped 的 `QLabel`，行高不再固定，**必须显式同步 item 的 sizeHint**
 （`TodoWidget._sync_row_heights`，挂在 `TodoList.on_resize` 上），否则 `QListWidget` 还按
 36px 压扁行、长文字被裁。测量姿势：先 `list.doItemsLayout()` 让行按新行宽摆好，再问文字标签
 `heightForWidth(它自己的宽度)`——按布局估算出来的宽度算会少算一行；跑两遍是因为第一遍定出的
-新高度可能带出滚动条、行宽还会再变一次。编辑器行高度由 `_open_editor` 固定，同步时要跳过。
+新高度可能带出滚动条、行宽还会再变一次。编辑器行由 `TodoEditor` 按块布局高度自动增高，**不设
+高度上限、不走内部滚动**（否则多行输入会把较早内容滚出视口）；`_open_editor` 把高度同步给 item，
+通用行高同步要跳过编辑器。高度必须加上实际 `height() - viewport().height()`（边框 + QSS padding），
+不能写死固定 chrome 高度，否则高 DPI 下两行文本会因少 1–2px 出现内部滚动、点击后看起来只剩一行。
+
+右键菜单顺序是「编辑 / 复制 / 删除」；删除文案用透明 `QWidgetAction` 承载红色 label（QSS 无法
+按 QAction 单独上色），删除记录由 `TodoStore.take/restore` 保留内容与状态，恢复后按排序规则归位，右下角
+`TodoUndoToast` 停留 5 秒供撤销。删除项的自绘 widget 必须主动设置 `QMenu.activeAction` 并处理
+鼠标点击，否则透明 `QWidgetAction` 会吞掉悬停、导致没有选中反馈；其左内边距按标准菜单项对齐。
+toast 用 360ms 位置 + 透明度入场动画，底部 `_UndoCountdownLine` 在 5 秒内线性缩短。输入框无
+placeholder，Enter 保存、Shift+Enter 换行；从列表
+底部空白双击新建时编辑器追加到列表尾部并 `scrollToItem`。`TodoStore._sort_items` 的稳定
+顺序是「未完成 → 已完成」，同组内「有日期升序 → 无日期」，同日新项在前。编辑、勾选、删除撤销
+重建列表时必须保留滚动条位置，不能跳回顶部（勾选仍按完成状态移动分组）。编辑器右侧是
+「日历 / 勾选保存」，勾选按钮直接复用 `_commit`，与 Enter 保存完全同路径。
 
 日期 tag（`due_chip`）：逾期→「逾期 N 天」，当天→「今天」，7 天内→「还剩 N 天」，更远只报日期。
 日期格式统一由 `fmt_due_date` 给出 `M.d`（如 `10.7`），**行内 tag 与编辑器里的日期按钮共用它**
 ——两处各写各的格式就会出现「编辑时 10/9、保存后 10.09」这种不一致。
 
+截止日期弹层（`DuePopup`）点日历只改变选中项，底部只有「清除 / 确定」：清除提交 `None`，
+确定提交 `selectedDate()`，点日历本身不会立即保存或关闭。
 ### 主题与 DPI（`themes.py` + `app.py`）
 
 `themes.py` 有两套真主题：`nocturne`（深色）、`mica`（浅色），`THEME_ORDER` 定顺序；另有伪主题 `AUTO`

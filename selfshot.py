@@ -226,9 +226,13 @@ class _Runner(object):
                      lambda: p._slide_titlebar(True), lambda: p.titlebar)
             self.job('%s_todo_edit' % theme, 400,
                      lambda: (p._slide_titlebar(False), p.set_tab(1, save=False),
-                              p.todo._open_editor(2, '给妈妈回电话')),
+                              p.todo._open_editor(2, '给妈妈回电话\n顺便问一下周末安排')),
                      lambda: p,
                      teardown=lambda: p.todo.rebuild())
+            self.job('%s_todo_undo' % theme, 400,
+                     lambda: (p.set_tab(1, save=False),
+                              p.todo._undo_toast.show_undo(lambda: None)),
+                     lambda: p, teardown=self._hide_todo_undo)
             self.job('%s_toast_ok' % theme, 500,
                      lambda: ui.show_toast_on(p, '节假日数据已更新', ok=True,
                                               hold_ms=3600000),
@@ -410,6 +414,11 @@ class _Runner(object):
             p._toast_anim.stop()
         p._toast.hide()
         p._toast_op.setOpacity(0.0)
+
+    def _hide_todo_undo(self):
+        toast = self.panel.todo._undo_toast
+        toast._timer.stop()
+        toast.hide()
 
     def _make_settings(self):
         return ui.SettingsDialog(self.panel, lambda **kw: False, lambda: None,

@@ -83,10 +83,22 @@ QToolButton#addHint {
     color: #6d6a62; font: 12px "%CN%"; padding: 7px;
 }
 QToolButton#addHint:hover { border-color: rgba(232,163,61,130); color: #e8a33d; }
-QLineEdit#todoEdit {
+QPlainTextEdit#todoEdit {
     background: rgba(255,255,255,24); border: 1.5px solid rgba(232,163,61,160); border-radius: 9px;
     color: #f0ede6; font: 14px "%CN%"; padding: 8px 12px; selection-background-color: rgba(232,163,61,90);
 }
+QLabel#todoDeleteActionText { color: #e05252; background: transparent; font: 12px "%CN%"; padding: 6px 0; }
+QWidget#todoDangerAction { background: transparent; border-radius: 5px; }
+QWidget#todoDangerAction:hover { background: rgba(232,163,61,55); }
+QFrame#todoUndoToast {
+    background: #2c2f38; border: 1px solid rgba(232,163,61,105); border-radius: 10px;
+}
+QLabel#todoUndoText { color: #f0ede6; font: 12px "%CN%"; background: transparent; }
+QToolButton#todoUndoBtn {
+    color: #e8a33d; background: transparent; border: none; border-radius: 6px;
+    font: 600 12px "%CN%"; padding: 3px 7px;
+}
+QToolButton#todoUndoBtn:hover { background: rgba(232,163,61,35); }
 QMenu {
     background: #23252d; color: #e8e6e1; border: 1px solid rgba(255,255,255,30);
     border-radius: 8px; padding: 5px; font: 12px "%CN%";
@@ -172,10 +184,13 @@ QLabel#todoDue {
     font: 10px "%CN%"; padding: 2px 7px;
 }
 QLabel#todoDue[late="true"] { color: #e06666; background: rgba(224,102,102,30); }
-QToolButton#todoDateBtn {
+QToolButton#todoDateBtn, QToolButton#todoSaveBtn {
     background: transparent; border: none; border-radius: 6px; color: #8d8a82; font: 11px "%CN%";
 }
-QToolButton#todoDateBtn:hover { background: rgba(255,255,255,20); color: #e8a33d; }
+QToolButton#todoDateBtn:hover, QToolButton#todoSaveBtn:hover {
+    background: rgba(255,255,255,20); color: #e8a33d;
+}
+QToolButton#todoSaveBtn { font: 700 15px "%CN%"; }
 QFrame#duePopup { background: #23252d; border: 1px solid rgba(255,255,255,30); border-radius: 10px; }
 QCalendarWidget QWidget#qt_calendar_navigationbar { background: #23252d; }
 QCalendarWidget QWidget#qt_calendar_calendarview { background: #23252d; alternate-background-color: #23252d; }
@@ -396,10 +411,22 @@ QToolButton#addHint {
     color: #8a8a90; font: 12px "%CN%"; padding: 7px;
 }
 QToolButton#addHint:hover { border-color: #0067c0; color: #0067c0; background: rgba(0,103,192,13); }
-QLineEdit#todoEdit {
+QPlainTextEdit#todoEdit {
     background: #ffffff; border: 1px solid #0067c0; border-radius: 8px;
     color: #1b1b1f; font: 14px "%CN%"; padding: 8px 12px; selection-background-color: rgba(0,103,192,60);
 }
+QLabel#todoDeleteActionText { color: #c42b1c; background: transparent; font: 12px "%CN%"; padding: 6px 0; }
+QWidget#todoDangerAction { background: transparent; border-radius: 5px; }
+QWidget#todoDangerAction:hover { background: rgba(0,103,192,26); }
+QFrame#todoUndoToast {
+    background: #ffffff; border: 1px solid rgba(196,43,28,85); border-radius: 9px;
+}
+QLabel#todoUndoText { color: #1b1b1f; font: 12px "%CN%"; background: transparent; }
+QToolButton#todoUndoBtn {
+    color: #c42b1c; background: transparent; border: none; border-radius: 6px;
+    font: 600 12px "%CN%"; padding: 3px 7px;
+}
+QToolButton#todoUndoBtn:hover { background: rgba(196,43,28,18); }
 QMenu {
     background: rgba(252,252,253,248); color: #1b1b1f; border: 1px solid rgba(0,0,0,26);
     border-radius: 8px; padding: 5px; font: 12px "%CN%";
@@ -483,10 +510,13 @@ QLabel#todoDue {
     font: 10px "%CN%"; padding: 2px 7px;
 }
 QLabel#todoDue[late="true"] { color: #c42b1c; background: #fde7e6; }
-QToolButton#todoDateBtn {
+QToolButton#todoDateBtn, QToolButton#todoSaveBtn {
     background: transparent; border: none; border-radius: 6px; color: #8a8a90; font: 11px "%CN%";
 }
-QToolButton#todoDateBtn:hover { background: rgba(0,103,192,13); color: #0067c0; }
+QToolButton#todoDateBtn:hover, QToolButton#todoSaveBtn:hover {
+    background: rgba(0,103,192,13); color: #0067c0;
+}
+QToolButton#todoSaveBtn { font: 700 15px "%CN%"; }
 QFrame#duePopup { background: #ffffff; border: 1px solid rgba(0,0,0,26); border-radius: 10px; }
 QCalendarWidget QWidget#qt_calendar_navigationbar { background: #ffffff; }
 QCalendarWidget QWidget#qt_calendar_calendarview { background: #ffffff; alternate-background-color: #ffffff; }
