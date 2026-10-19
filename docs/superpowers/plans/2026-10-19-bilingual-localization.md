@@ -52,7 +52,7 @@
 - 创建：`i18n_en.py`
 - 测试：`tests/test_i18n.py`
 
-- [ ] **步骤 1：编写失败测试**
+- [x] **步骤 1：编写失败测试**
 
 ```python
 # tests/test_i18n.py
@@ -92,13 +92,13 @@ if __name__ == '__main__':
     unittest.main()
 ```
 
-- [ ] **步骤 2：运行测试确认失败**
+- [x] **步骤 2：运行测试确认失败**
 
 运行：`python -m unittest tests.test_i18n -v`
 
 预期：FAIL，出现 `ModuleNotFoundError: No module named 'i18n'`。
 
-- [ ] **步骤 3：实现最小语言核心**
+- [x] **步骤 3：实现最小语言核心**
 
 ```python
 # i18n.py
@@ -178,13 +178,13 @@ CATALOG = {
 }
 ```
 
-- [ ] **步骤 4：运行测试确认通过**
+- [x] **步骤 4：运行测试确认通过**
 
 运行：`python -m unittest tests.test_i18n -v`
 
 预期：4 个测试全部 PASS。
 
-- [ ] **步骤 5：提交**
+- [x] **步骤 5：提交**
 
 ```powershell
 git add i18n.py i18n_zh.py i18n_en.py tests/test_i18n.py
@@ -209,7 +209,7 @@ git commit -m "feat: 增加 PC 双语语言核心"
 - 修改：`sysutil.py`
 - 创建：`tests/test_pc_localization_coverage.py`
 
-- [ ] **步骤 1：编写覆盖检查测试**
+- [x] **步骤 1：编写覆盖检查测试**
 
 ```python
 # tests/test_pc_localization_coverage.py
@@ -255,13 +255,13 @@ if __name__ == '__main__':
     unittest.main()
 ```
 
-- [ ] **步骤 2：运行测试确认失败**
+- [x] **步骤 2：运行测试确认失败**
 
 运行：`python -m unittest tests.test_pc_localization_coverage -v`
 
 预期：FAIL，输出当前 UI 文件中全部中文文案字面量。
 
-- [ ] **步骤 3：建立完整 PC 词典**
+- [x] **步骤 3：建立完整 PC 词典**
 
 词典按域分组；所有键必须同时存在于中英文件：
 
@@ -321,7 +321,7 @@ CATALOG = {
 
 完成时词典必须包含覆盖检查暴露的每个界面字符串、错误、tooltip、菜单项、窗口标题和辅助文本；中文与英文键集合保持完全一致。
 
-- [ ] **步骤 4：迁移 UI 调用点**
+- [x] **步骤 4：迁移 UI 调用点**
 
 每个文件顶部统一导入：
 
@@ -366,7 +366,7 @@ def t_data(value):
 sub.setText(t_data(cd.day_label(d)))
 ```
 
-- [ ] **步骤 5：运行覆盖与现有测试**
+- [x] **步骤 5：运行覆盖与现有测试**
 
 运行：`python -m unittest tests.test_pc_localization_coverage -v`
 
@@ -376,7 +376,7 @@ sub.setText(t_data(cd.day_label(d)))
 
 预期：现有测试全部 PASS。
 
-- [ ] **步骤 6：提交**
+- [x] **步骤 6：提交**
 
 ```powershell
 git add i18n_zh.py i18n_en.py app.py main.pyw transfer_ui.py video_ui.py boxes.py screenshot.py pinshot.py sysutil.py tests/test_pc_localization_coverage.py
@@ -394,7 +394,7 @@ git commit -m "feat: 完成 PC 全界面中英文案"
 - 修改：`sysutil.py`
 - 测试：`tests/test_settings_language.py`
 
-- [ ] **步骤 1：编写失败测试**
+- [x] **步骤 1：编写失败测试**
 
 ```python
 # tests/test_settings_language.py
@@ -463,13 +463,13 @@ if __name__ == '__main__':
     unittest.main()
 ```
 
-- [ ] **步骤 2：运行测试确认失败**
+- [x] **步骤 2：运行测试确认失败**
 
 运行：`python -m unittest tests.test_settings_language -v`
 
 预期：FAIL，`languageCombo` 为 `None`。
 
-- [ ] **步骤 3：实现机器语言读取和启动解析**
+- [x] **步骤 3：实现机器语言读取和启动解析**
 
 ```python
 # sysutil.py
@@ -500,7 +500,7 @@ if language == i18n.ZH and _tr.load(
     qapp.installTranslator(_tr)
 ```
 
-- [ ] **步骤 4：实现设置页语言下拉框**
+- [x] **步骤 4：实现设置页语言下拉框**
 
 ```python
 from PySide6.QtWidgets import QComboBox, QMessageBox
@@ -551,13 +551,13 @@ def restart_application():
     QApplication.instance().quit()
 ```
 
-- [ ] **步骤 5：运行测试**
+- [x] **步骤 5：运行测试**
 
 运行：`python -m unittest tests.test_settings_language tests.test_i18n -v`
 
 预期：全部 PASS。
 
-- [ ] **步骤 6：提交**
+- [x] **步骤 6：提交**
 
 ```powershell
 git add main.pyw app.py sysutil.py tests/test_settings_language.py
@@ -575,7 +575,7 @@ git commit -m "feat: 增加 PC 语言设置与重启提示"
 - 修改：`sysutil.py`
 - 测试：`tests/test_installer_language.py`
 
-- [ ] **步骤 1：编写失败测试**
+- [x] **步骤 1：编写失败测试**
 
 ```python
 # tests/test_installer_language.py
@@ -615,13 +615,13 @@ if __name__ == '__main__':
     unittest.main()
 ```
 
-- [ ] **步骤 2：运行测试确认失败**
+- [x] **步骤 2：运行测试确认失败**
 
 运行：`python -m unittest tests.test_installer_language -v`
 
 预期：FAIL，缺少 `cleanup_existing_zbox`、`_registered_zbox_dirs`。
 
-- [ ] **步骤 3：实现 Zbox 专用注册表清理**
+- [x] **步骤 3：实现 Zbox 专用注册表清理**
 
 ```python
 # sysutil.py
@@ -640,7 +640,7 @@ def uninstall_reg_remove_zbox():
 
 `uninstall_reg_install` 增加 `language` 参数并写入 `('Language', winreg.REG_SZ, language)`。
 
-- [ ] **步骤 4：实现旧 Zbox 检测与清理**
+- [x] **步骤 4：实现旧 Zbox 检测与清理**
 
 ```python
 def _registered_zbox_dirs():
@@ -687,7 +687,7 @@ sysutil.uninstall_reg_install(
 )
 ```
 
-- [ ] **步骤 5：安装器增加语言选择并强制所有用户**
+- [x] **步骤 5：安装器增加语言选择并强制所有用户**
 
 ```python
 self._language = QComboBox()
@@ -717,7 +717,7 @@ def _on_install(self):
 
 删除安装范围 radio 与 `_on_scope_changed`，路径默认改为 `install_dir(True)`。`setup_main()` 的提权分支解析 `--lang`，先 `i18n.set_language(value)`，再构造向导。
 
-- [ ] **步骤 6：迁移安装/卸载向导全部文案并运行测试**
+- [x] **步骤 6：迁移安装/卸载向导全部文案并运行测试**
 
 所有标题、说明、按钮、错误、进度文本改为 `t()`。`setup.pyw` 根据系统检测结果设置初始语言，中文时安装 `qtbase_zh_CN`。
 
@@ -725,7 +725,7 @@ def _on_install(self):
 
 预期：全部 PASS。
 
-- [ ] **步骤 7：提交**
+- [x] **步骤 7：提交**
 
 ```powershell
 git add installer.py setup.pyw sysutil.py tests/test_installer_language.py
@@ -744,7 +744,7 @@ git commit -m "feat: 安装器支持双语并清理旧 Zbox"
 - 修改：`README.zh-CN.md`
 - 修改：`AGENTS.md`
 
-- [ ] **步骤 1：加入截图语言测试钩子**
+- [x] **步骤 1：加入截图语言测试钩子**
 
 ```python
 shot_language = os.environ.get('ZBOX_SHOT_LANG') if shot_dir else None
@@ -758,7 +758,7 @@ language = i18n.resolve_language(
 
 自检模式下不把该值写回 `config.json`。
 
-- [ ] **步骤 2：运行中文与英文截图**
+- [x] **步骤 2：运行中文与英文截图**
 
 ```powershell
 $env:ZBOX_SHOT='designs\verify-zh'
@@ -773,11 +773,11 @@ Remove-Item Env:ZBOX_SHOT_LANG
 
 预期：两套目录各生成当前 harness 的全部场景截图，无空白窗口、异常退出或主线程异常。
 
-- [ ] **步骤 3：检查英文布局并修复截断**
+- [x] **步骤 3：检查英文布局并修复截断**
 
 逐张查看英文截图。按钮文字截断时优先调整固定宽度或使用现有 `_ElideLabel`，不得缩到不可读字号；英文文案不得溢出设置、传输、视频和安装向导卡片。
 
-- [ ] **步骤 4：同步文档**
+- [x] **步骤 4：同步文档**
 
 README 与 AGENTS 增加：
 
@@ -787,7 +787,7 @@ README 与 AGENTS 增加：
 - 截图自检可用 `ZBOX_SHOT_LANG=en-US` 生成英文场景。
 ```
 
-- [ ] **步骤 5：运行完整 PC 验证**
+- [x] **步骤 5：运行完整 PC 验证**
 
 ```powershell
 python -m unittest discover -s tests -v
@@ -797,7 +797,7 @@ python -m py_compile i18n.py i18n_zh.py i18n_en.py app.py installer.py main.pyw
 
 预期：单元测试全部 PASS；传输自检打印 `SELFTEST OK`；编译无输出。
 
-- [ ] **步骤 6：提交**
+- [x] **步骤 6：提交**
 
 ```powershell
 git add main.pyw selfshot.py README.md README.zh-CN.md AGENTS.md
@@ -818,7 +818,7 @@ git commit -m "test: 增加 PC 双语截图验收并同步文档"
 - 修改：`android/app/src/main/java/com/zbox/transfer/Sender.kt`
 - 修改：`android/app/src/main/java/com/zbox/transfer/Receiver.kt`
 
-- [ ] **步骤 1：加入测试依赖并编写失败测试**
+- [x] **步骤 1：加入测试依赖并编写失败测试**
 
 ```kotlin
 // android/app/build.gradle.kts
@@ -849,13 +849,13 @@ class AppStringsTest {
 }
 ```
 
-- [ ] **步骤 2：运行测试确认失败**
+- [x] **步骤 2：运行测试确认失败**
 
 运行：`cd android; .\gradlew.bat testDebugUnitTest --tests com.zbox.transfer.AppStringsTest`
 
 预期：FAIL，`AppLanguage` 未定义。
 
-- [ ] **步骤 3：实现语言状态与双语文案接口**
+- [x] **步骤 3：实现语言状态与双语文案接口**
 
 ```kotlin
 package com.zbox.transfer
@@ -903,7 +903,7 @@ object AppStrings {
 
 `Settings.init()` 读取 `prefs.getString("language", null)`，首次为空时调用 `AppLanguage.detect()` 并写回；`Settings.language` 使用 Compose `mutableStateOf` 暴露 setter。`AppStrings.current` 读取 `Settings.language`。
 
-- [ ] **步骤 4：将持久化错误改为错误码**
+- [x] **步骤 4：将持久化错误改为错误码**
 
 ```kotlin
 enum class AppError {
@@ -928,7 +928,7 @@ enum class AppError {
 
 `TransferRecord.error` 改为 `AppError?`；`friendlyNetError()` 返回 `AppError`。UI 通过 `AppStrings.current.error(record.error!!)` 展示。协议响应中的底层英文错误不翻译，用户可见记录只保存错误码。
 
-- [ ] **步骤 5：运行单元测试与编译**
+- [x] **步骤 5：运行单元测试与编译**
 
 ```powershell
 cd android
@@ -938,7 +938,7 @@ cd android
 
 预期：测试 PASS，APK 构建成功。
 
-- [ ] **步骤 6：提交**
+- [x] **步骤 6：提交**
 
 ```powershell
 git add android/app/build.gradle.kts android/app/src/main/java/com/zbox/transfer/AppStrings.kt android/app/src/main/java/com/zbox/transfer/MainActivity.kt android/app/src/main/java/com/zbox/transfer/Protocol.kt android/app/src/main/java/com/zbox/transfer/Sender.kt android/app/src/main/java/com/zbox/transfer/Receiver.kt android/app/src/test/java/com/zbox/transfer/AppStringsTest.kt
@@ -959,7 +959,7 @@ git commit -m "feat: 增加 Android 双语状态与错误码"
 - 创建：`android/app/src/main/java/com/zbox/transfer/ui/SettingsScreen.kt`
 - 修改：`android/app/src/main/AndroidManifest.xml`
 
-- [ ] **步骤 1：实现设置页**
+- [x] **步骤 1：实现设置页**
 
 ```kotlin
 @Composable
@@ -984,7 +984,7 @@ fun SettingsScreen() {
 }
 ```
 
-- [ ] **步骤 2：增加底部 NavigationBar**
+- [x] **步骤 2：增加底部 NavigationBar**
 
 ```kotlin
 var currentTab by rememberSaveable { mutableIntStateOf(0) }
@@ -1014,7 +1014,7 @@ Scaffold(
 }
 ```
 
-- [ ] **步骤 3：迁移 Android 全部可见文案**
+- [x] **步骤 3：迁移 Android 全部可见文案**
 
 `AppStrings` 提供首页、传输记录、弹窗、设备类型、保存路径、状态、错误和 contentDescription 对应字段与函数。调用点改为：
 
@@ -1035,7 +1035,7 @@ enum class TransferStatus { WAITING, TRANSFERRING, DONE, FAILED, REJECTED, CANCE
 val statusText = AppStrings.current.status(record.status)
 ```
 
-- [ ] **步骤 4：应用名改为品牌名**
+- [x] **步骤 4：应用名改为品牌名**
 
 ```xml
 <application
@@ -1043,7 +1043,7 @@ val statusText = AppStrings.current.status(record.status)
     ...>
 ```
 
-- [ ] **步骤 5：扫描遗漏并构建**
+- [x] **步骤 5：扫描遗漏并构建**
 
 ```powershell
 rg -n 'Text\("[^"]*[\u4e00-\u9fff]|contentDescription\s*=\s*"[^"]*[\u4e00-\u9fff]' android/app/src/main/java -g '*.kt'
@@ -1054,7 +1054,7 @@ cd android
 
 预期：扫描无输出；JVM 测试 PASS；APK 构建成功。
 
-- [ ] **步骤 6：手工验收**
+- [x] **步骤 6：手工验收**
 
 分别把 SharedPreferences 清空并在中文、英文系统模拟器启动。检查：
 
@@ -1063,7 +1063,7 @@ cd android
 - 设置页切语言后首页、记录、弹窗立即更新。
 - 横竖屏和窄屏下英文 tab 与设置项不截断。
 
-- [ ] **步骤 7：提交**
+- [x] **步骤 7：提交**
 
 ```powershell
 git add android/app/src/main/java/com/zbox/transfer/AppStrings.kt android/app/src/main/java/com/zbox/transfer/MainActivity.kt android/app/src/main/java/com/zbox/transfer/ui/DevicesScreen.kt android/app/src/main/java/com/zbox/transfer/ui/TransfersScreen.kt android/app/src/main/java/com/zbox/transfer/ui/ReceiveDialog.kt android/app/src/main/java/com/zbox/transfer/ui/SettingsScreen.kt android/app/src/main/AndroidManifest.xml
@@ -1080,7 +1080,7 @@ git commit -m "feat: 完成 Android 双语界面与设置 tab"
 - 修改：`README.zh-CN.md`
 - 修改：`AGENTS.md`
 
-- [ ] **步骤 1：同步最终用户与开发文档**
+- [x] **步骤 1：同步最终用户与开发文档**
 
 README 记录语言切换、PC 安装器行为和安卓设置 tab。AGENTS 更新：
 
@@ -1089,7 +1089,7 @@ README 记录语言切换、PC 安装器行为和安卓设置 tab。AGENTS 更�
 - Android `AppStrings`、底部导航、错误码化要求。
 - 新增测试和截图命令。
 
-- [ ] **步骤 2：运行全部自动验证**
+- [x] **步骤 2：运行全部自动验证**
 
 ```powershell
 python -m unittest discover -s tests -v
@@ -1102,7 +1102,7 @@ cd android
 
 预期：Python 测试全部 PASS；`SELFTEST OK`；`py_compile` 无输出；Gradle 测试与 APK 构建 `BUILD SUCCESSFUL`。
 
-- [ ] **步骤 3：运行中文和英文截图自检**
+- [x] **步骤 3：运行中文和英文截图自检**
 
 ```powershell
 $env:ZBOX_SHOT='designs\verify-final-zh'
@@ -1117,7 +1117,7 @@ Remove-Item Env:ZBOX_SHOT_LANG
 
 预期：两套截图全部生成；抽查面板、设置、传输、视频、弹窗、格子和安装/卸载向导无漏翻、重叠或截断。
 
-- [ ] **步骤 4：检查工作区**
+- [x] **步骤 4：检查工作区**
 
 ```powershell
 git diff --check
@@ -1126,7 +1126,7 @@ git status --short
 
 预期：`git diff --check` 无输出；除用户原有改动外，只出现本计划涉及文件。
 
-- [ ] **步骤 5：提交文档**
+- [x] **步骤 5：提交文档**
 
 ```powershell
 git add README.md README.zh-CN.md AGENTS.md
