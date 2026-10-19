@@ -53,6 +53,14 @@ _u32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
 _u32.ScreenToClient.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]
 _u32.ChildWindowFromPointEx.restype = wintypes.HWND
 _u32.ChildWindowFromPointEx.argtypes = [wintypes.HWND, wintypes.POINT, wintypes.UINT]
+_u32.GetAncestor.restype = wintypes.HWND
+_u32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+_u32.GetClassNameW.restype = ctypes.c_int
+_u32.GetClassNameW.argtypes = [wintypes.HWND, ctypes.c_wchar_p, ctypes.c_int]
+_dwm = ctypes.windll.dwmapi
+_dwm.DwmGetWindowAttribute.restype = ctypes.c_long
+_dwm.DwmGetWindowAttribute.argtypes = [
+    wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
 _u32.mouse_event.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.DWORD,
                              wintypes.DWORD, ctypes.c_size_t]
 _u32.SetWindowsHookExW.restype = ctypes.c_void_p
@@ -616,6 +624,65 @@ _WHEEL_RATE = 400.0       # 令牌桶回补速度（delta/秒）≈ 一格/300ms
 _GWL_EXSTYLE = -20
 _WS_EX_PASS_THROUGH = 0x00080020   # WS_EX_LAYERED | WS_EX_TRANSPARENT
 _CWP_SKIP = 0x0007                 # CWP_SKIPINVISIBLE | SKIPDISABLED | SKIPTRANSPARENT
+_GA_ROOT = 2
+_DWMWA_EXTENDED_FRAME_BOUNDS = 9
+_DWMWA_CLOAKED = 14
+_SHELL_WINDOW_CLASSES = frozenset((
+    'Progman', 'WorkerW', 'Shell_TrayWnd', 'Shell_SecondaryTrayWnd',
+))
+
+
+def _window_class(hwnd):
+    buf = ctypes.create_unicode_buffer(256)
+    _u32.GetClassNameW(hwnd, buf, len(buf))
+    return buf.value
+
+
+def _window_is_cloaked(hwnd):
+    value = wintypes.DWORD()
+    try:
+        return (_dwm.DwmGetWindowAttribute(
+            hwnd, _DWMWA_CLOAKED, ctypes.byref(value), ctypes.sizeof(value)) == 0
+            and bool(value.value))
+    except Exception:
+        return False
+
+
+def _window_frame(hwnd):
+    """返回不含系统投影的顶层窗口屏幕矩形；DWM 失败时回退 GetWindowRect。"""
+    rc = wintypes.RECT()
+    ok = False
+    try:
+        ok = _dwm.DwmGetWindowAttribute(
+            hwnd, _DWMWA_EXTENDED_FRAME_BOUNDS,
+            ctypes.byref(rc), ctypes.sizeof(rc)) == 0
+    except Exception:
+        ok = False
+    if not ok and not _u32.GetWindowRect(hwnd, ctypes.byref(rc)):
+        return None
+    if rc.right <= rc.left or rc.bottom <= rc.top:
+        return None
+    return QRect(rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top)
+
+
+def _window_frame_at(pt):
+    """返回屏幕坐标 pt 下最上层的非本进程程序窗口 (hwnd, 可见外框)。"""
+    hwnd = _u32.GetTopWindow(None)
+    while hwnd:
+        pid = wintypes.DWORD()
+        _u32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        styles = _u32.GetWindowLongPtrW(hwnd, _GWL_EXSTYLE)
+        if (pid.value != os.getpid() and _u32.IsWindowVisible(hwnd)
+                and _u32.IsWindowEnabled(hwnd)
+                and (styles & _WS_EX_PASS_THROUGH) != _WS_EX_PASS_THROUGH
+                and _window_class(hwnd) not in _SHELL_WINDOW_CLASSES
+                and not _window_is_cloaked(hwnd)):
+            frame = _window_frame(hwnd)
+            if frame is not None and frame.contains(pt):
+                root = _u32.GetAncestor(hwnd, _GA_ROOT) or hwnd
+                return root, _window_frame(root) or frame
+        hwnd = _u32.GetWindow(hwnd, 2)
+    return None
 
 
 def _find_wheel_target(pt):
@@ -855,6 +922,8 @@ class ShotOverlay(QWidget):
         self._invert = False
         self._editor = None        # (QPlainTextEdit, QPointF 落点)
         self._eat_press = False      # 点击别处关输入框的那一按只保存、不触发新动作
+        self._hover_frame = None     # 空闲态鼠标下的程序窗口外框（本地坐标）
+        self._press_window = None    # 本次按下命中的窗口外框，短点击时套选
         self._long = None          # 长图模式状态 dict
         if self._pin_mode:
             self._sel = self.rect()
@@ -1260,6 +1329,10 @@ class ShotOverlay(QWidget):
             p.end()
             return
         p.fillRect(self.rect(), MASK_COLOR)
+        if self._hover_frame is not None:
+            p.setPen(QPen(QColor(self.pal['sel']), 2))
+            p.setBrush(Qt.NoBrush)
+            p.drawRect(QRectF(self._hover_frame).adjusted(1, 1, -1, -1))
         if self._sel.isValid() and not self._sel.isNull():
             # 选区镂空：把底图在选区内再画一遍（盖住灰罩），再画标注
             p.save()
@@ -1459,11 +1532,34 @@ class ShotOverlay(QWidget):
                 return h
         return None
 
+    def _window_rect_at(self, gpos):
+        try:
+            hit = _window_frame_at(gpos)
+        except Exception:
+            return None
+        if hit is None:
+            return None
+        _hwnd, frame = hit
+        frame = QRect(frame.topLeft() - self._tl, frame.size()).intersected(self.rect())
+        if frame.width() < MIN_SEL or frame.height() < MIN_SEL:
+            return None
+        return frame
+
+    def _refresh_window_hover(self, gpos):
+        if self._pin_mode or self._mode != 'idle' or self._drag is not None:
+            frame = None
+        else:
+            frame = self._window_rect_at(gpos)
+        if frame != self._hover_frame:
+            self._hover_frame = frame
+            self.update()
+
     # ---------- 鼠标 ----------
 
     def mousePressEvent(self, e):
         if self._long is not None:
             return
+        self._press_window = None
         if self._eat_press:
             self._eat_press = False
             if self._editor:
@@ -1555,6 +1651,8 @@ class ShotOverlay(QWidget):
         self._shapes = []
         self._edit_shape = None
         self._cur = None
+        self._press_window = self._window_rect_at(e.globalPosition().toPoint())
+        self._hover_frame = None
         self._sel = QRect(pos, QSize(0, 0))
         self._mode = 'creating'
         self._drag = ('create', pos)
@@ -1564,7 +1662,8 @@ class ShotOverlay(QWidget):
     def mouseMoveEvent(self, e):
         pos = e.pos()
         if self._drag is None:
-            self._update_cursor(QCursor.pos())
+            self._refresh_window_hover(e.globalPosition().toPoint())
+            self._update_cursor(e.globalPosition().toPoint())
             return
         kind, data = self._drag
         if kind == 'window':
@@ -1629,11 +1728,16 @@ class ShotOverlay(QWidget):
         if kind == 'window':
             pass
         elif kind == 'create':
-            if self._sel.width() < MIN_SEL or self._sel.height() < MIN_SEL:
+            manual = self._sel.width() >= MIN_SEL or self._sel.height() >= MIN_SEL
+            if manual:
+                self._mode = 'ready'
+            elif (self._press_window is not None
+                  and self._press_window.contains(e.pos())):
+                self._sel = QRect(self._press_window)
+                self._mode = 'ready'
+            else:
                 self._sel = QRect()
                 self._mode = 'idle'
-            else:
-                self._mode = 'ready'
         elif kind == 'draw' and self._cur:
             if self._cur['kind'] == 'arrow':
                 start, end = self._cur['start'], self._cur['end']
@@ -1655,13 +1759,27 @@ class ShotOverlay(QWidget):
                 self._open_marker_editor(sh)
         elif kind == 'shape_move':
             self._select_shape(_d[0])   # 点击/拖动后都选中：调色板、滑动条接着改
+        self._press_window = None
+        if self._mode == 'idle':
+            self._refresh_window_hover(e.globalPosition().toPoint())
         self._arm_idle_timer()
         self._update_chrome()
         self.update()
 
     def mouseDoubleClickEvent(self, e):
-        if (not self._pin_mode and e.button() == Qt.LeftButton and self._long is None
-                and self._mode == 'ready' and self._sel.contains(e.pos())):
+        if self._pin_mode or e.button() != Qt.LeftButton or self._long is not None:
+            return
+        if self._mode == 'idle':
+            frame = self._window_rect_at(e.globalPosition().toPoint())
+            if frame is None or not frame.contains(e.pos()):
+                return
+            self._sel = frame
+            self._mode = 'ready'
+            self._hover_frame = None
+            self._press_window = None
+            self._update_chrome()
+            self.update()
+        if self._mode == 'ready' and self._sel.contains(e.pos()):
             self._finish_copy()
 
     def _fixed_point(self, h):
@@ -1735,6 +1853,7 @@ class ShotOverlay(QWidget):
         self.raise_()
         self.grabKeyboard()   # 全屏 Tool 窗不一定有焦点，Esc/Enter/Ctrl+Z 靠抢键盘保证
         self._arm_idle_timer()
+        QTimer.singleShot(0, lambda: self._refresh_window_hover(QCursor.pos()))
         if self._pin_mode:
             self._update_chrome()
 
@@ -1747,6 +1866,7 @@ class ShotOverlay(QWidget):
         super(ShotOverlay, self).closeEvent(e)
 
     def hideEvent(self, e):
+        self._hover_frame = None
         if self._pin_mode:
             self.bar.hide()
             self.sub.hide()
@@ -2036,8 +2156,11 @@ class ShotOverlay(QWidget):
         self._sel = QRect()
         self._shapes = []
         self._cur = None
+        self._press_window = None
+        self._hover_frame = None
         self._mode = 'idle'
         self._arm_idle_timer()
+        self._refresh_window_hover(QCursor.pos())
         self._update_chrome()
         self.update()
 
