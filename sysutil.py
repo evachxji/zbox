@@ -9,27 +9,47 @@ import sys
 import tempfile
 import winreg
 
+from i18n import t
 from version import APP_VERSION
 
 APP_NAME = 'zbox'
-MENU_TITLE = 'Zbox桌面格子'
 
-# 桌面右键二级菜单项：(注册表子键名, 显示文字, exe 命令行参数)
-# 子键名的字母序就是菜单顺序，故带 A_/B_… 前缀
-MENU_ITEMS = [
-    ('A_NewBox', '新建格子', '--new-box'),
-    ('B_NewFolderBox', '新建文件夹格子', '--pick-folder'),
-    ('C_Toggle', '显示 / 隐藏卡片', '--toggle'),
-    ('D_Settings', '设置', '--settings'),
-    ('E_About', '关于', '--about'),
-    ('F_Quit', '退出', '--quit'),
+# 桌面右键二级菜单项：(注册表子键名, 词典键, exe 命令行参数)
+# 子键名的字母序就是菜单顺序，故带 A_/B_… 前缀；显示文字在运行时按当前语言取。
+MENU_ITEM_DEFS = [
+    ('A_NewBox', 'menu.new_box', '--new-box'),
+    ('B_NewFolderBox', 'menu.new_folder_box', '--pick-folder'),
+    ('C_Toggle', 'menu.toggle', '--toggle'),
+    ('D_Settings', 'menu.settings', '--settings'),
+    ('E_About', 'menu.about', '--about'),
+    ('F_Quit', 'menu.quit', '--quit'),
 ]
+
+
+def menu_title():
+    """桌面右键父项文案（运行时取值，避免 import 期固化语言）。"""
+    return t('app.name')
+
+
+def menu_items():
+    """桌面右键二级菜单项 (子键名, 显示文字, 命令行参数)。"""
+    return [(name, t(key), arg) for name, key, arg in MENU_ITEM_DEFS]
+
+
+def show_icons_text():
+    """全隐藏态桌面右键唯一直链项文案。"""
+    return t('menu.show_icons')
+
+
+def folder_menu_text():
+    """文件夹/盘符右键项文案。"""
+    return t('menu.add_folder')
+
+
 # 2026-10 改版前的一代子键名（当时七项、前缀不同）：整树删除时两代都要算，
 # 否则改名后旧键清不掉，右键菜单新旧并存
 MENU_SUBKEYS_OLD = ['A_Toggle', 'B_NewBox', 'C_NewFolderBox', 'D_ToggleBoxes',
                     'E_Settings', 'F_About', 'G_Quit']
-# 全隐藏态（双击桌面把图标/格子/面板全收起来后）的桌面右键唯一直链项：单击恢复原状
-SHOW_ICONS_TEXT = '显示桌面图标'
 SHOW_ICONS_ARG = '--show-icons'
 IPC_KEY = 'zbox-panel-v1'   # 新名字从 v1 重新起：与旧版 zviber（zviber-panel-v2）天然不串话
 RUN_KEY = r'Software\Microsoft\Windows\CurrentVersion\Run'
@@ -37,7 +57,6 @@ RUN_KEY = r'Software\Microsoft\Windows\CurrentVersion\Run'
 SHELL_SUBKEY = r'Directory\Background\shell\zbox'
 SHELL_KEY = r'Software\Classes\\' + SHELL_SUBKEY
 # 文件夹（Directory）与盘符（Drive）右键「添加到Zbox桌面格子」静态动词：仅运行中注入，随面板启停写删
-FOLDER_MENU_TEXT = '添加到Zbox桌面格子'
 FOLDER_SHELL_KEY = r'Software\Classes\Directory\shell\zbox'
 DRIVE_SHELL_KEY = r'Software\Classes\Drive\shell\zbox'
 LEGACY_SHELL_KEY = r'Software\Classes\Directory\Background\shell\zviber'  # 旧名残留，安装/退出时清掉
@@ -196,7 +215,7 @@ def autostart_remove():
 def _shell_tree_subs():
     """SHELL_KEY 整棵子树的自底向上删除顺序（winreg 不能删带子键的键）。
     含三代旧结构：直链 command、子项误放父项 shell\\ 的级联版、CommandStore 短命版。"""
-    names = [n for n, _t, _a in MENU_ITEMS] + MENU_SUBKEYS_OLD
+    names = [n for n, _k, _a in MENU_ITEM_DEFS] + MENU_SUBKEYS_OLD
     subs = [SHELL_KEY + r'\shell\%s\command' % n for n in names]
     subs += [SHELL_KEY + r'\shell\%s' % n for n in names]
     subs += [SHELL_KEY + r'\shell', SHELL_KEY + r'\command', SHELL_KEY]
@@ -231,7 +250,7 @@ def _delete_folder_shell_tree(root):
 
 def _delete_legacy_shell_tree(root):
     """旧名 SHELL_KEY（zviber）整棵子树的删除顺序。"""
-    names = [n for n, _t, _a in MENU_ITEMS] + MENU_SUBKEYS_OLD
+    names = [n for n, _k, _a in MENU_ITEM_DEFS] + MENU_SUBKEYS_OLD
     subs = [LEGACY_SHELL_KEY + r'\shell\%s\command' % n for n in names]
     subs += [LEGACY_SHELL_KEY + r'\shell\%s' % n for n in names]
     subs += [LEGACY_SHELL_KEY + r'\shell', LEGACY_SHELL_KEY + r'\command', LEGACY_SHELL_KEY]
@@ -250,6 +269,14 @@ def context_menu_remove():
     for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
         _delete_shell_tree(root)
         _delete_legacy_shell_tree(root)
+
+
+def context_menu_remove_zbox():
+    """清 Zbox 自身的右键菜单树（HKCU/HKLM）。
+    _delete_shell_tree 会顺带清掉 Zbox 菜单键下历史遗留的 zviber.* 子键，
+    但不会删 zviber 自己的独立菜单键——那由 context_menu_remove / legacy_integration_remove 处理。"""
+    for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+        _delete_shell_tree(root)
 
 
 def legacy_integration_remove():
@@ -274,7 +301,7 @@ def _menu_icon(exe, icon_path):
 def _write_flat(root, exe, icon_path):
     """未运行形态：直链菜单项「Zbox桌面格子」，单击启动程序。"""
     with winreg.CreateKey(root, SHELL_KEY) as k:
-        winreg.SetValueEx(k, 'MUIVerb', 0, winreg.REG_SZ, MENU_TITLE)
+        winreg.SetValueEx(k, 'MUIVerb', 0, winreg.REG_SZ, menu_title())
         icon = _menu_icon(exe, icon_path)
         if icon:
             winreg.SetValueEx(k, 'Icon', 0, winreg.REG_SZ, icon)
@@ -286,7 +313,7 @@ def _write_show_icons(root, exe, icon_path):
     """全隐藏形态：直链单项「显示桌面图标」，单击恢复桌面图标 + 格子 + 面板。
     结构与 _write_flat 相同（SHELL_KEY + command），整树删除逻辑无需改。"""
     with winreg.CreateKey(root, SHELL_KEY) as k:
-        winreg.SetValueEx(k, 'MUIVerb', 0, winreg.REG_SZ, SHOW_ICONS_TEXT)
+        winreg.SetValueEx(k, 'MUIVerb', 0, winreg.REG_SZ, show_icons_text())
         icon = _menu_icon(exe, icon_path)
         if icon:
             winreg.SetValueEx(k, 'Icon', 0, winreg.REG_SZ, icon)
@@ -300,12 +327,12 @@ def _write_cascade(root, exe, icon_path):
     两个实测坑（Win11 真机验证）：① 别用 SubCommands——它只按 HKLM 的 Explorer\\CommandStore
     解析，HKCU 的不认，免管理员安装没法用；② 父项有 command 子键会退化成直链不展开。"""
     with winreg.CreateKey(root, SHELL_KEY) as k:
-        winreg.SetValueEx(k, 'MUIVerb', 0, winreg.REG_SZ, MENU_TITLE)
+        winreg.SetValueEx(k, 'MUIVerb', 0, winreg.REG_SZ, menu_title())
         winreg.SetValueEx(k, 'ExtendedSubCommandsKey', 0, winreg.REG_SZ, SHELL_SUBKEY)
         icon = _menu_icon(exe, icon_path)
         if icon:
             winreg.SetValueEx(k, 'Icon', 0, winreg.REG_SZ, icon)
-    for name, text, arg in MENU_ITEMS:
+    for name, text, arg in menu_items():
         sub = SHELL_KEY + r'\shell\%s' % name
         with winreg.CreateKey(root, sub) as k:
             winreg.SetValueEx(k, None, 0, winreg.REG_SZ, text)
@@ -320,7 +347,7 @@ def _write_folder_item(root, exe, icon_path):
     尾反斜杠吃掉闭合引号与 "F:" 两种形态。"""
     for base in (FOLDER_SHELL_KEY, DRIVE_SHELL_KEY):
         with winreg.CreateKey(root, base) as k:
-            winreg.SetValueEx(k, 'MUIVerb', 0, winreg.REG_SZ, FOLDER_MENU_TEXT)
+            winreg.SetValueEx(k, 'MUIVerb', 0, winreg.REG_SZ, folder_menu_text())
             icon = _menu_icon(exe, icon_path)
             if icon:
                 winreg.SetValueEx(k, 'Icon', 0, winreg.REG_SZ, icon)
@@ -371,12 +398,13 @@ def context_menu_set_icons_hidden(hidden, icon_path=None):
         context_menu_set_running(True, icon_path)
 
 
-def uninstall_reg_install(exe_path, all_users=False, size_kb=None):
-    """写入「设置→应用→安装的应用」卸载项。size_kb 不给时按 exe 自身大小估算。"""
+def uninstall_reg_install(exe_path, all_users=False, size_kb=None, language=None):
+    """写入「设置→应用→安装的应用」卸载项。size_kb 不给时按 exe 自身大小估算；
+    language 记录安装时选择的语言（空值不写），供首次启动与卸载向导选择文案。"""
     if size_kb is None:
         size_kb = os.path.getsize(exe_path) // 1024
     vals = [
-        ('DisplayName', winreg.REG_SZ, 'Zbox桌面格子'),
+        ('DisplayName', winreg.REG_SZ, t('app.name')),
         ('DisplayVersion', winreg.REG_SZ, APP_VERSION),
         ('Publisher', winreg.REG_SZ, 'Zbox'),
         ('DisplayIcon', winreg.REG_SZ, exe_path),
@@ -386,13 +414,31 @@ def uninstall_reg_install(exe_path, all_users=False, size_kb=None):
         ('NoRepair', winreg.REG_DWORD, 1),
         ('EstimatedSize', winreg.REG_DWORD, size_kb),
     ]
+    if language:
+        vals.append(('Language', winreg.REG_SZ, language))
     with winreg.CreateKey(_root(all_users), UNINSTALL_KEY) as k:
         for name, vtype, val in vals:
             winreg.SetValueEx(k, name, 0, vtype, val)
+        if not language:
+            try:
+                winreg.DeleteValue(k, 'Language')   # 覆盖安装时清掉上一版残留的语言值
+            except OSError:
+                pass
 
 
 def uninstall_reg_get(name, all_users=False):
     return _get(_root(all_users), UNINSTALL_KEY, name)
+
+
+def installed_language(all_users=None):
+    """安装时记录的机器语言（卸载项 Language 值）；未安装或未记录时返回 None。
+    all_users=None 时先查 HKCU、再查 HKLM。"""
+    roots = (all_users,) if all_users is not None else (False, True)
+    for root_all_users in roots:
+        value = uninstall_reg_get('Language', root_all_users)
+        if value:
+            return value
+    return None
 
 
 def legacy_uninstall_reg_get(name, all_users=False):
@@ -410,6 +456,15 @@ def uninstall_reg_remove():
                 pass
 
 
+def uninstall_reg_remove_zbox():
+    """只清 Zbox 自身的卸载项（HKCU/HKLM）；旧名 zviber 的残留留在原处。"""
+    for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+        try:
+            winreg.DeleteKey(root, UNINSTALL_KEY)
+        except OSError:
+            pass
+
+
 # ---------------- Windows 防火墙（局域网传输） ----------------
 # 首次监听端口时系统弹「安全警告」，点「取消」会写入一条针对本程序 exe 的
 # 「阻止」规则且不再弹窗：出站正常（别的设备能发现本机）、入站被静默丢弃
@@ -422,6 +477,14 @@ CREATE_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 def _fw_exe():
     """防火墙规则按程序路径匹配：frozen 是 zbox.exe，源码运行是 python(w).exe。"""
     return os.path.realpath(sys.executable)
+
+
+def _fw_rule_names():
+    """防火墙规则名的中英两种写法：规则一旦创建就按名称留在系统里，
+    语言切换后仍要能匹配到旧语言的规则，避免重复放行。"""
+    from i18n_en import CATALOG as EN
+    from i18n_zh import CATALOG as ZH
+    return ZH['sysutil.fw.rule_name'], EN['sysutil.fw.rule_name']
 
 
 def _fw_match_ps():
@@ -451,6 +514,7 @@ def fix_firewall_rules():
     """删除本程序的阻止规则并放行 53327（TCP/UDP 入站），经 UAC 提权后执行。
     返回 'ok' / 'cancelled'（用户拒绝提权）/ 'error'。"""
     exe = _fw_exe().replace("'", "''")
+    zh_name, en_name = (n.replace("'", "''") for n in _fw_rule_names())
     body = (
         "$exe = [Environment]::ExpandEnvironmentVariables('%s')\n" % exe +
         "function _rules($a) {\n"
@@ -460,11 +524,13 @@ def fix_firewall_rules():
         " -ErrorAction SilentlyContinue } |\n"
         "  Where-Object { $_.Action -eq $a }\n"
         "}\n"
-        "_rules 'Block' | Remove-NetFirewallRule -ErrorAction SilentlyContinue\n"
-        "$name = 'Zbox 局域网传输'\n"
+        "_rules 'Block' | Remove-NetFirewallRule -ErrorAction SilentlyContinue\n" +
+        "$name = '%s'\n" % t('sysutil.fw.rule_name').replace("'", "''") +
+        "$names = @('%s', '%s')\n" % (zh_name, en_name) +
         "function _allow {\n"
-        " Get-NetFirewallRule -DisplayName \"$name*\" -ErrorAction SilentlyContinue |\n"
-        "  Where-Object { [Environment]::ExpandEnvironmentVariables("
+        " $names | ForEach-Object {\n"
+        "  Get-NetFirewallRule -DisplayName \"$_*\" -ErrorAction SilentlyContinue\n"
+        " } | Where-Object { [Environment]::ExpandEnvironmentVariables("
         "($_ | Get-NetFirewallApplicationFilter).Program) -ieq $exe }\n"
         "}\n"
         "if (-not (_allow)) {\n"

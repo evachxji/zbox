@@ -8,6 +8,8 @@ from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QPainter, QColor, QPen
 from PySide6.QtWidgets import QApplication, QFileDialog, QWidget
 
+from i18n import t
+
 _pins = []   # 存活引用：贴图窗无父对象，靠它防 GC；窗口销毁时移除
 
 
@@ -196,9 +198,9 @@ class PinWindow(QWidget):
         self._hide_toolbar()
 
     def _save_image(self):
-        name = '截图_%s.png' % datetime.now().strftime('%Y%m%d_%H%M%S')
+        name = t('shot.default_name', time=datetime.now().strftime('%Y%m%d_%H%M%S'))
         path, _f = QFileDialog.getSaveFileName(
-            self, '保存截图', name, 'PNG 图片 (*.png)')
+            self, t('shot.save_title'), name, t('shot.save_filter'))
         if path:
             self._img.save(path)
             self._hide_toolbar()

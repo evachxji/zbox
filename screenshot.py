@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (QWidget, QApplication, QFrame, QHBoxLayout, QTool
 import app as ui          # sc / ui_scale / pick_fonts / resolve_theme
 import pinshot
 import sysutil
+from i18n import t
 
 _u32 = ctypes.windll.user32
 _u32.RegisterHotKey.restype = wintypes.BOOL
@@ -102,11 +103,12 @@ PALETTES = {
 }
 
 # 截图主工具条的唯一按钮清单：钉图从同一份数据生成，只排除截图专属动作。
+# 第二列存词典键，构建时按当前语言取文案（模块 import 时语言可能未解析完）。
 SHOT_TOOLBAR_GROUPS = (
-    (('rect', '矩形'), ('ellipse', '椭圆'), ('arrow', '箭头'),
-     ('text', '文字'), ('marker', '序号笔')),
-    (('long', '截长图'), ('pin', '钉在桌面'), ('save', '保存')),
-    (('close', '取消 (Esc)'), ('confirm', '复制到剪贴板并关闭 (Enter)')),
+    (('rect', 'shot.tool.rect'), ('ellipse', 'shot.tool.ellipse'), ('arrow', 'shot.tool.arrow'),
+     ('text', 'shot.tool.text'), ('marker', 'shot.tool.marker')),
+    (('long', 'shot.tool.long'), ('pin', 'shot.tool.pin'), ('save', 'shot.tool.save')),
+    (('close', 'shot.tool.cancel'), ('confirm', 'shot.copy_tooltip')),
 )
 SHOT_TOOLBAR_KINDS = tuple(kind for group in SHOT_TOOLBAR_GROUPS for kind, _tip in group)
 PIN_TOOLBAR_EXCLUDED = frozenset(('pin', 'long'))
@@ -259,7 +261,7 @@ def build_shot_toolbar(parent, pal, callbacks, exclude=()):
         previous_group = True
         for kind, tip in visible:
             if kind == 'confirm':
-                b = QPushButton('完成')
+                b = QPushButton(t('shot.done'))
                 b.setObjectName('shotConfirm')
                 b.setFixedHeight(ui.sc(30))
             else:
@@ -272,7 +274,7 @@ def build_shot_toolbar(parent, pal, callbacks, exclude=()):
             b._action_kind = kind
             b.setCursor(Qt.PointingHandCursor)
             b.setFocusPolicy(Qt.NoFocus)
-            b.setToolTip(tip)
+            b.setToolTip(t(tip))
             fn = callbacks.get(kind)
             if fn is not None:
                 b.clicked.connect(lambda _checked=False, fn=fn: fn())
@@ -401,26 +403,36 @@ class _LongBar(QWidget):
         row = QHBoxLayout(card)
         row.setContentsMargins(ui.sc(6), ui.sc(6), ui.sc(6), ui.sc(6))
         row.setSpacing(ui.sc(6))
-        self._auto_btn = QPushButton('自动下滚')
+        self._auto_btn = QPushButton(t('shot.long.auto'))
         self._auto_btn.setObjectName('shotGhost')
         self._auto_btn.setFixedHeight(ui.sc(28))
         self._auto_btn.setCursor(Qt.PointingHandCursor)
         self._auto_btn.setFocusPolicy(Qt.NoFocus)
-        self._auto_btn.setToolTip('自动匀速向下滚动；期间往回滚或点击截图区域即停')
+        self._auto_btn.setToolTip(t('shot.long.auto_tooltip'))
         self._auto_btn.clicked.connect(self.auto_clicked)
         row.addWidget(self._auto_btn)
-        ok = QPushButton('✓ 完成')
+        ok = QPushButton(t('shot.long.done'))
         ok.setObjectName('shotConfirm')
         ok.setFixedHeight(ui.sc(28))
         ok.setCursor(Qt.PointingHandCursor)
         ok.setFocusPolicy(Qt.NoFocus)
-        ok.setToolTip('完成并复制到剪贴板 (Enter)')
+        ok.setToolTip(t('shot.long.done_tooltip'))
         ok.clicked.connect(self.done)
         row.addWidget(ok)
         self.setStyleSheet(qss)
+        # 两个状态的文案宽度都量一遍：切换只换文字、不重排窗口，
+        # 宽度按较长的那个预留，避免英文 "Stop scrolling" 被裁。
+        texts = (t('shot.long.auto'), t('shot.long.stop'))
+        width = 0
+        for text in texts:
+            self._auto_btn.setText(text)
+            self._auto_btn.ensurePolished()
+            width = max(width, self._auto_btn.sizeHint().width())
+        self._auto_btn.setMinimumWidth(width)
+        self._auto_btn.setText(texts[0])
 
     def set_auto_on(self, on):
-        self._auto_btn.setText('停止下滚' if on else '自动下滚')
+        self._auto_btn.setText(t('shot.long.stop') if on else t('shot.long.auto'))
 
     def showEvent(self, e):
         super(_LongBar, self).showEvent(e)
@@ -924,18 +936,18 @@ class ShotOverlay(QWidget):
         self._size_slider.setFocusPolicy(Qt.NoFocus)
         self._size_slider.setRange(*STROKE_RANGE)
         self._size_slider.setValue(self._stroke)
-        self._size_slider.setToolTip('粗细 / 字号')
+        self._size_slider.setToolTip(t('shot.stroke'))
         self._size_slider.valueChanged.connect(self._slider_changed)
         sl.addWidget(self._size_slider)
         self._sep2 = self._sep()
         sl.addWidget(self._sep2)
         self._invert_btn = QToolButton()
         self._invert_btn.setObjectName('shotInvert')
-        self._invert_btn.setText('Aa 反色')
+        self._invert_btn.setText(t('shot.invert'))
         self._invert_btn.setFixedHeight(ui.sc(23))
         self._invert_btn.setCursor(Qt.PointingHandCursor)
         self._invert_btn.setFocusPolicy(Qt.NoFocus)
-        self._invert_btn.setToolTip('文字垫色块、字色取反（仅文字工具可用）')
+        self._invert_btn.setToolTip(t('shot.invert_tooltip'))
         self._invert_btn.setProperty('on', 'false')
         self._invert_btn.clicked.connect(self._toggle_invert)
         sl.addWidget(self._invert_btn)
@@ -1159,7 +1171,7 @@ class ShotOverlay(QWidget):
             self._commit_marker_editor()
         ed = QPlainTextEdit(self)
         ed.setPlainText(sh.get('text', ''))
-        ed.setPlaceholderText('输入说明')
+        ed.setPlaceholderText(t('shot.marker.placeholder'))
         ed.setFrameShape(QFrame.NoFrame)
         ed.setLineWrapMode(QPlainTextEdit.WidgetWidth)
         ed.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -1958,8 +1970,8 @@ class ShotOverlay(QWidget):
             return
         img = self._result_image()
         self.hide()   # 置顶遮罩不收起，文件对话框会被压在下面
-        path, _f = QFileDialog.getSaveFileName(None, '保存截图', self._default_name(),
-                                               'PNG 图片 (*.png)')
+        path, _f = QFileDialog.getSaveFileName(None, t('shot.save_title'), self._default_name(),
+                                               t('shot.save_filter'))
         if path:
             img.save(path)
             if self._pin_mode:
@@ -1976,7 +1988,7 @@ class ShotOverlay(QWidget):
         self._close()
 
     def _default_name(self):
-        return '截图_%s.png' % datetime.now().strftime('%Y%m%d_%H%M%S')
+        return t('shot.default_name', time=datetime.now().strftime('%Y%m%d_%H%M%S'))
 
     def _reset_sel(self):
         self._sel = QRect()
@@ -2230,15 +2242,15 @@ class HotkeyManager(object):
             return None
         seq = QKeySequence(text)
         if seq.isEmpty() or seq.count() != 1:
-            return '无法识别的快捷键'
+            return t('shot.hotkey.invalid_shortcut')
         mods, vk = _qt_to_win(seq[0])
         if vk is None:
-            return '无法识别的按键'
+            return t('shot.hotkey.invalid_key')
         # 裸键只放行 F1-F12 / PrintScreen，其余必须带修饰键，避免抢正常输入
         if not mods and not (0x70 <= vk <= 0x7B or vk == 0x2C):
-            return '快捷键需要修饰键（Ctrl/Alt/Shift）'
+            return t('shot.hotkey.need_modifier')
         if not _u32.RegisterHotKey(None, self._ID, mods | _MOD_NOREPEAT, vk):
-            return '快捷键被其他程序占用'
+            return t('shot.hotkey.occupied')
         self._registered = True
         return None
 

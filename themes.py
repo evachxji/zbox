@@ -11,9 +11,10 @@ QFrame#todoEditRow { background: transparent; }
 """
 
 NOCTURNE = {
-    'name': '深色',
-    'count_fmt': '{:02d} OPEN',
-    'week': ['周一', '周二', '周三', '周四', '周五', '周六', '周日'],
+    'name_key': 'theme.nocturne',
+    'count_fmt_key': 'theme.count.nocturne',
+    'week_keys': ['week.mon', 'week.tue', 'week.wed', 'week.thu',
+                  'week.fri', 'week.sat', 'week.sun'],
     'qss': COMMON.replace('%TOOLTIP%', '#e8e6e1').replace('%SCROLL%', 'rgba(255,255,255,40)') + """
 QWidget#panelRoot { background: #1b1d24; }
 QWidget#panel {
@@ -154,6 +155,25 @@ QLineEdit#srcEdit {
     color: #cfccc4; font: 11px "%NUM%"; padding: 5px 8px; selection-background-color: rgba(232,163,61,90);
 }
 QLineEdit#srcEdit:focus { border-color: #e8a33d; color: #f0ede6; background: rgba(232,163,61,16); }
+QWidget#settingsPanel QComboBox {
+    background: rgba(255,255,255,10); border: 1px solid rgba(255,255,255,30); border-radius: 7px;
+    color: #e8e6e1; font: 12.5px "%CN%"; padding: 4px 8px;
+}
+QWidget#settingsPanel QComboBox:hover { border-color: rgba(232,163,61,120); }
+QWidget#settingsPanel QComboBox:focus { border-color: #e8a33d; background: rgba(232,163,61,16); }
+QWidget#settingsPanel QComboBox::drop-down { border: none; width: 18px; }
+QWidget#settingsPanel QComboBox::down-arrow {
+    image: url("%ICON_DIR%/chevron_dark.png"); width: 10px; height: 10px;
+}
+QWidget#settingsPanel QComboBox QAbstractItemView {
+    background: #23252d; border: 1px solid rgba(255,255,255,30); border-radius: 8px;
+    color: #e8e6e1; outline: none; padding: 3px;
+}
+QWidget#settingsPanel QComboBox QAbstractItemView::item { min-height: 24px; padding: 2px 8px; }
+QWidget#settingsPanel QComboBox QAbstractItemView::item:hover { background: rgba(255,255,255,14); }
+QWidget#settingsPanel QComboBox QAbstractItemView::item:selected {
+    background: rgba(232,163,61,55); color: #f2b45a;
+}
 QToolButton#timeBtn { background: transparent; border: none; border-radius: 5px; }
 QToolButton#timeBtn:hover { background: rgba(255,255,255,16); }
 QFrame#timePopup { background: #23252d; border: 1px solid rgba(255,255,255,30); border-radius: 10px; }
@@ -338,9 +358,10 @@ QToolButton#parseBtn:disabled { border-color: rgba(255,255,255,20); color: #5755
 }
 
 MICA = {
-    'name': '浅色',
-    'count_fmt': '{:d} 项未完成',
-    'week': ['周一', '周二', '周三', '周四', '周五', '周六', '周日'],
+    'name_key': 'theme.mica',
+    'count_fmt_key': 'theme.count.mica',
+    'week_keys': ['week.mon', 'week.tue', 'week.wed', 'week.thu',
+                  'week.fri', 'week.sat', 'week.sun'],
     'qss': COMMON.replace('%TOOLTIP%', '#1b1b1f').replace('%SCROLL%', 'rgba(0,0,0,50)') + """
 QWidget#panelRoot { background: #f7f8fa; }
 QWidget#panel {
@@ -352,7 +373,9 @@ QFrame#titlebar { background: #f7f8fa; }
 QFrame#tabBox { background: rgba(0,0,0,14); border-radius: 8px; }
 QToolButton#tab {
     background: transparent; border: none; border-radius: 6px;
-    color: #5b5b60; font: 600 12px "%CN%"; padding: 5px 10px;
+    /* 英文 tab 比中文宽得多：横向 padding 收到 2px（与 nocturne 一致），
+       否则 Calendar/To-dos/Transfer/Video 四个按钮在 344px 面板里会挤成省略号 */
+    color: #5b5b60; font: 600 12px "%CN%"; padding: 5px 2px;
 }
 QToolButton#tab[active="true"] { background: #ffffff; color: #e8a33d; border: 1px solid rgba(0,0,0,10); }
 QToolButton#closeBtn {
@@ -481,6 +504,25 @@ QLineEdit#srcEdit {
     color: #4a4a50; font: 11px "%NUM%"; padding: 5px 8px; selection-background-color: rgba(0,103,192,60);
 }
 QLineEdit#srcEdit:focus { border-color: #0067c0; color: #1b1b1f; background: rgba(0,103,192,10); }
+QWidget#settingsPanel QComboBox {
+    background: #ffffff; border: 1px solid rgba(0,0,0,26); border-radius: 7px;
+    color: #1b1b1f; font: 12.5px "%CN%"; padding: 4px 8px;
+}
+QWidget#settingsPanel QComboBox:hover { border-color: rgba(0,103,192,140); }
+QWidget#settingsPanel QComboBox:focus { border-color: #0067c0; background: rgba(0,103,192,10); }
+QWidget#settingsPanel QComboBox::drop-down { border: none; width: 18px; }
+QWidget#settingsPanel QComboBox::down-arrow {
+    image: url("%ICON_DIR%/chevron_light.png"); width: 10px; height: 10px;
+}
+QWidget#settingsPanel QComboBox QAbstractItemView {
+    background: #ffffff; border: 1px solid rgba(0,0,0,30); border-radius: 8px;
+    color: #1b1b1f; outline: none; padding: 3px;
+}
+QWidget#settingsPanel QComboBox QAbstractItemView::item { min-height: 24px; padding: 2px 8px; }
+QWidget#settingsPanel QComboBox QAbstractItemView::item:hover { background: rgba(0,0,0,10); }
+QWidget#settingsPanel QComboBox QAbstractItemView::item:selected {
+    background: rgba(0,103,192,40); color: #0067c0;
+}
 QToolButton#timeBtn { background: transparent; border: none; border-radius: 5px; }
 QToolButton#timeBtn:hover { background: rgba(0,0,0,12); }
 QFrame#timePopup { background: #ffffff; border: 1px solid rgba(0,0,0,30); border-radius: 10px; }

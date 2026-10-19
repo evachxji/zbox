@@ -114,7 +114,7 @@ object Sender {
                     size = -1L,
                 ).also {
                     it.status = TransferStatus.FAILED
-                    it.error = "无法获取文件大小"
+                    it.error = AppError.FILE_SIZE_UNAVAILABLE
                     TransferStore.add(it)
                 }
                 return@mapNotNull null
@@ -165,7 +165,7 @@ object Sender {
             } catch (e: Exception) {
                 // 被取消时记录已由 cancel() 置为「已取消」
                 if (session.cancelled) return
-                files.forEach { fail(it.record, friendlyNetError(e, "连接失败")) }
+                files.forEach { fail(it.record, friendlyNetError(e, AppError.CONNECT_FAILED)) }
                 return
             }
 
@@ -179,11 +179,11 @@ object Sender {
                         null
                     }
                     409 -> {
-                        files.forEach { fail(it.record, "对方正忙") }
+                        files.forEach { fail(it.record, AppError.PEER_BUSY) }
                         null
                     }
                     else -> {
-                        files.forEach { fail(it.record, "协商失败：HTTP " + resp.code) }
+                        files.forEach { fail(it.record, AppError.NEGOTIATION_FAILED) }
                         null
                     }
                 }
@@ -201,7 +201,7 @@ object Sender {
             for (file in files) {
                 val token = prepare.files[file.meta.id]
                 if (token == null) {
-                    fail(file.record, "对方未接受该文件")
+                    fail(file.record, AppError.PEER_REJECTED_FILE)
                     continue
                 }
                 val ok = uploadOne(context, base, prepare.sessionId, token, file, session)
@@ -268,20 +268,20 @@ object Sender {
                     file.record.status = TransferStatus.DONE
                     true
                 } else {
-                    fail(file.record, "上传失败：HTTP " + resp.code)
+                    fail(file.record, AppError.UNKNOWN)
                     false
                 }
             }
         } catch (e: Exception) {
             if (session.cancelled) return false
-            fail(file.record, friendlyNetError(e, "上传失败"))
+            fail(file.record, friendlyNetError(e))
             false
         }
     }
 
-    private fun fail(record: TransferRecord, message: String) {
+    private fun fail(record: TransferRecord, error: AppError) {
         record.status = TransferStatus.FAILED
-        record.error = message
+        record.error = error
     }
 
     /** 从 SAF Uri 读出显示名与大小 */

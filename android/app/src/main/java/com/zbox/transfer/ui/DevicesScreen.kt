@@ -53,6 +53,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.zbox.transfer.AppStrings
 import com.zbox.transfer.DeviceStore
 import com.zbox.transfer.Discovery
 import com.zbox.transfer.PeerDevice
@@ -66,6 +67,7 @@ import kotlinx.coroutines.delay
 @Composable
 fun HomeScreen(discovery: Discovery) {
     val context = LocalContext.current
+    val strings = AppStrings.current
     val scope = rememberCoroutineScope()
     var pickedDevice by remember { mutableStateOf<PeerDevice?>(null) }
     var showSourceDialog by remember { mutableStateOf(false) }
@@ -105,11 +107,11 @@ fun HomeScreen(discovery: Discovery) {
                 showSourceDialog = false
                 pickedDevice = null
             },
-            title = { Text("发送到 " + (device?.info?.alias ?: "")) },
+            title = { Text(strings.sendTo(device?.info?.alias ?: "")) },
             confirmButton = {},
             text = {
                 Column {
-                    Text("选择要发送的内容来源")
+                    Text(strings.sourcePrompt)
                     Spacer(modifier = Modifier.height(12.dp))
                     OutlinedButton(
                         onClick = {
@@ -120,7 +122,7 @@ fun HomeScreen(discovery: Discovery) {
                         },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text("从相册选择")
+                        Text(strings.fromGallery)
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedButton(
@@ -130,7 +132,7 @@ fun HomeScreen(discovery: Discovery) {
                         },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text("从文件选择")
+                        Text(strings.fromFiles)
                     }
                 }
             },
@@ -142,7 +144,7 @@ fun HomeScreen(discovery: Discovery) {
         Spacer(modifier = Modifier.height(16.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = "附近设备",
+                text = strings.nearbyDevices,
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.weight(1f),
             )
@@ -155,7 +157,7 @@ fun HomeScreen(discovery: Discovery) {
             ) {
                 Icon(
                     Icons.Filled.Refresh,
-                    contentDescription = "刷新",
+                    contentDescription = strings.refresh,
                     modifier = Modifier.graphicsLayer {
                         rotationZ = if (refreshing) spinAngle else 0f
                     },
@@ -170,12 +172,12 @@ fun HomeScreen(discovery: Discovery) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = "待发送 " + shareUris.size + " 个文件，点选下方设备发送",
+                        text = strings.pendingFiles(shareUris.size),
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.weight(1f),
                     )
                     TextButton(onClick = { ShareInbox.uris = emptyList() }) {
-                        Text("取消")
+                        Text(strings.cancel)
                     }
                 }
             }
@@ -184,7 +186,7 @@ fun HomeScreen(discovery: Discovery) {
         val devices = DeviceStore.devices
         if (devices.isEmpty()) {
             Text(
-                text = "未发现设备\n请确认对方在同一局域网并已打开应用，或点右上角刷新扫描",
+                text = strings.noDevices,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -216,7 +218,7 @@ fun HomeScreen(discovery: Discovery) {
                             Text(device.info.alias, style = MaterialTheme.typography.titleSmall)
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = deviceTypeLabel(device.info.deviceType) + " · " + device.ip + " · 在线",
+                                text = strings.deviceType(device.info.deviceType) + " · " + device.ip + " · " + strings.online,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -242,6 +244,7 @@ fun HomeScreen(discovery: Discovery) {
 /** 本机别名卡片（可编辑，保存有动效反馈） */
 @Composable
 private fun AliasCard() {
+    val strings = AppStrings.current
     var alias by remember { mutableStateOf(Settings.alias) }
     var saved by remember { mutableStateOf(false) }      // 保存成功：短暂高亮反馈
     var emptyError by remember { mutableStateOf(false) } // 空别名：错误反馈
@@ -263,7 +266,7 @@ private fun AliasCard() {
     }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp)) {
-            Text("本机", style = MaterialTheme.typography.titleSmall)
+            Text(strings.thisDevice, style = MaterialTheme.typography.titleSmall)
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
                 value = alias,
@@ -275,11 +278,11 @@ private fun AliasCard() {
                 singleLine = true,
                 isError = emptyError,
                 supportingText = when {
-                    emptyError -> ({ Text("别名不能为空") })
-                    saved -> ({ Text("已保存", color = successColor) })
+                    emptyError -> ({ Text(strings.aliasEmpty) })
+                    saved -> ({ Text(strings.saved, color = successColor) })
                     else -> null
                 },
-                label = { Text("别名") },
+                label = { Text(strings.alias) },
                 modifier = Modifier.fillMaxWidth(),
                 trailingIcon = {
                     IconButton(onClick = {
@@ -296,7 +299,7 @@ private fun AliasCard() {
                     }) {
                         Icon(
                             Icons.Filled.Done,
-                            contentDescription = "保存别名",
+                            contentDescription = strings.saveAlias,
                             tint = iconTint,
                             modifier = Modifier.graphicsLayer {
                                 scaleX = iconScale.value
@@ -308,13 +311,4 @@ private fun AliasCard() {
             )
         }
     }
-}
-
-private fun deviceTypeLabel(type: String?): String = when (type) {
-    "mobile" -> "手机"
-    "desktop" -> "电脑"
-    "web" -> "网页"
-    "headless" -> "终端"
-    "server" -> "服务器"
-    else -> type ?: "设备"
 }

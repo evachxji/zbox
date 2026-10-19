@@ -31,10 +31,12 @@ from PySide6.QtWidgets import QApplication, QFileDialog
 import app as ui
 import boxes as bx
 import calendar_data as cd
+import i18n
 import installer
 import screenshot as shotmod
 import sysutil
 import transfer
+from i18n import t
 
 IPC_KEY = sysutil.IPC_KEY
 
@@ -65,13 +67,13 @@ class _HolidayWorker(QThread):
                 try:
                     o, w = self._fetch(name, url)
                 except Exception as e:
-                    errs.append('%s：%s' % (name, e))
+                    errs.append('%s: %s' % (name, e))
                     continue
                 off.update(o)
                 work |= w
                 hit.append(name)
                 break
-        self.done.emit({'off': off, 'work': work, 'hit': hit, 'err': '；'.join(errs)})
+        self.done.emit({'off': off, 'work': work, 'hit': hit, 'err': '; '.join(errs)})
 
     def _fetch(self, name, url):
         """有存档目录时抓原文、解析通过后再存（存失败不挡导入）；否则抓了直接解析。"""
@@ -150,15 +152,15 @@ def start_holiday_update(hstore, cfg, panel, groups, manual=True, fallback_url=N
         if not manual:
             return
         if n:
-            ui._dbg('节假日更新成功：%s 共 %d 条' % ('、'.join(res['hit']), n))
-            show('节假日更新成功，共 %d 条' % n)
+            ui._dbg('holiday update ok: %s (%d entries)' % (', '.join(res['hit']), n))
+            show(t('holiday.update_ok', count=n))
         else:
-            ui._dbg('联网更新失败：%s' % res['err'][:220])
+            ui._dbg('holiday update failed: %s' % res['err'][:220])
             if fallback_url:
                 QDesktopServices.openUrl(QUrl(fallback_url))
-                show('联网更新失败，已打开下载页，可另存后导入', ok=False, hold_ms=2600)
+                show(t('holiday.update_failed_fallback'), ok=False, hold_ms=2600)
             else:
-                show('联网更新失败，请检查网络后重试', ok=False, hold_ms=2200)
+                show(t('holiday.update_failed'), ok=False, hold_ms=2200)
 
     w.done.connect(on_done)
     w.start()
@@ -208,6 +210,10 @@ def main():
     sys.excepthook = _debug_excepthook
     shot_dir = os.environ.get('ZBOX_SHOT')
     if shot_dir:
+        # 截图自检与正在运行的用户实例完全隔离：改用独立 IPC 名（既不连接、也不删除
+        # 用户实例的 server），下面同时跳过单实例转发与右键菜单同步——绝不动用户的运行态。
+        global IPC_KEY
+        IPC_KEY = sysutil.IPC_KEY + '-shot'
         # 截图自检：冻结时间源（日历时钟/倒计时/「今天」高亮/待办日期 tag），
         # 让同机两次运行出图逐像素可比；必须在 FloatingPanel 构造之前冻结
         import selfshot
@@ -232,17 +238,32 @@ def main():
     QApplication.setQuitOnLastWindowClosed(False)
     qapp = QApplication(sys.argv)
     qapp.setApplicationName(sysutil.APP_NAME)
-    # Qt 自带控件文案中文化：QLineEdit 右键菜单（Undo/Redo/Cut/Copy...）来自 qtbase 翻译，
-    # Qt 不会自动加载，需手动装；源码与打包后路径都由 QLibraryInfo 给出（PyInstaller 会收进 qt/qtbase 全系 .qm）
-    _tr = QTranslator(qapp)
-    if _tr.load('qtbase_zh_CN', QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)):
-        qapp.installTranslator(_tr)
     # 通知归属独立应用身份：Windows 按进程/AUMID 缓存气泡图标，
     # 旧版「黄底日期」图标就是这么残留在通知里的；独立 AUMID 绕开旧缓存
     try:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('Zbox')
     except Exception:
         pass
+
+    # 语言必须在 maybe_install（frozen --uninstall 会直接 return）与 --pick-folder
+    # 弹目录框之前解析：卸载向导与目录框标题都要用目标语言。cfg 只读取不写盘，
+    # 后面建面板复用同一个对象；ZBOX_SHOT_LANG 只在截图自检态生效，且不写回配置。
+    # 优先级：截图自检语言 → 用户设置 → 安装时记录的机器语言 → 系统界面语言。
+    data_dir = sysutil.appdata_dir()
+    cfg = ui.Config(os.path.join(data_dir, 'config.json'))
+    language = i18n.resolve_language(
+        os.environ.get('ZBOX_SHOT_LANG') if shot_dir else None,
+        cfg.data.get('language'),
+        sysutil.installed_language(),
+        i18n.detect_system_language(),
+    )
+    i18n.set_language(language)
+    # Qt 自带控件文案（QLineEdit 右键菜单等）：英文用 Qt 默认文案，中文需手动装 qtbase 翻译；
+    # 源码与打包后路径都由 QLibraryInfo 给出（PyInstaller 会收进 qt/qtbase 全系 .qm）
+    _tr = QTranslator(qapp)
+    if language == i18n.ZH and _tr.load(
+            'qtbase_zh_CN', QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)):
+        qapp.installTranslator(_tr)
 
     if installer.maybe_install():
         return 0  # --uninstall 卸载向导结束后退出（安装包是独立的 setup exe）
@@ -252,7 +273,7 @@ def main():
         # ① 面板全程不阻塞，选目录期间设置窗等照常可用；
         # ② 面板自身全是 Tool/挂带窗口且无活动窗口，原生框在面板进程里开不出可见窗口（实测隐形）。
         # 选中的路径经 IPC 发回面板建格子。
-        path = QFileDialog.getExistingDirectory(None, '选择要映射的文件夹')
+        path = QFileDialog.getExistingDirectory(None, t('boxes.pick_folder'))
         if path:
             notify_existing(b'folder:' + os.path.normpath(path).encode('utf-8'))
         return 0
@@ -273,17 +294,16 @@ def main():
         return 0
 
     cli_arg = next((a for a in sys.argv[1:] if a in IPC_ACTIONS), None)
-    if notify_existing(IPC_ACTIONS.get(cli_arg, b'toggle')):
-        return 0  # 已有实例在运行，转发动作后退出
-    if cli_arg == '--quit':
-        return 0  # 没有运行中的实例可退出
+    if not shot_dir:
+        if notify_existing(IPC_ACTIONS.get(cli_arg, b'toggle')):
+            return 0  # 已有实例在运行，转发动作后退出
+        if cli_arg == '--quit':
+            return 0  # 没有运行中的实例可退出
 
-    # 清旧安装的菜单残留。必须在 IPC 转发之后：源码模式没有安装记录，
-    # 转发进程跑这里会把运行中面板刚注入的级联菜单当残留删掉（真实 bug）
-    installer.sync_context_menu()
+        # 清旧安装的菜单残留。必须在 IPC 转发之后：源码模式没有安装记录，
+        # 转发进程跑这里会把运行中面板刚注入的级联菜单当残留删掉（真实 bug）
+        installer.sync_context_menu()
 
-    data_dir = sysutil.appdata_dir()
-    cfg = ui.Config(os.path.join(data_dir, 'config.json'))
     hstore = cd.HolidayStore(os.path.join(data_dir, 'holidays.json'))
     tstore = ui.TodoStore(os.path.join(data_dir, 'todos.json'))
 
@@ -315,6 +335,9 @@ def main():
     server = QLocalServer(qapp)
     QLocalServer.removeServer(IPC_KEY)
     server.listen(IPC_KEY)
+    # 切换语言后 restart_application() 要在启动新进程前先关掉它，
+    # 否则新进程会连上尚未退出的旧实例、转发一次 toggle 就退出
+    qapp._zbox_ipc_server = server
 
     # 无系统托盘图标：显隐/设置/退出等入口全在桌面右键菜单（运行中注入级联菜单）
     def _quit_cleanup():
@@ -337,7 +360,7 @@ def main():
     # ② 收到文件请求——唤起面板切到传输 tab（接收确认卡片就弹在那里，不唤起用户
     #   根本看不到，会拖到对端 180s 超时）；「传输完成」等纯通知在传输页记录区可见，不打扰
     def _transfer_notify(title, msg):
-        if title != '收到文件':
+        if title != t('transfer.recv.title'):
             return
         try:
             panel.set_tab(2, save=False)   # tabs：日历 0 / 待办 1 / 传输 2
@@ -462,18 +485,18 @@ def _import_holidays(hstore, panel, on_download):
     """先弹引导窗口（三个数据源各一行 URL，可点「下载并导入」），
     也可以自己另存文件后走「选择文件导入」。"""
     def pick():
-        path, _ = QFileDialog.getOpenFileName(None, '选择节假日 JSON（数据源页面另存的文件）', '',
-                                              'JSON 文件 (*.json)')
+        path, _ = QFileDialog.getOpenFileName(None, t('holiday.pick_title'), '',
+                                              t('holiday.json_filter'))
         if not path:
             return
         try:
             n = hstore.import_file(path)
             panel.refresh_holidays()
-            ui._dbg('节假日导入成功，共 %d 条' % n)
-            _pick_toast('节假日导入成功，共 %d 条' % n)
+            ui._dbg('holiday import ok: %d entries' % n)
+            _pick_toast(t('holiday.import_ok', count=n))
         except Exception as e:
-            ui._dbg('节假日导入失败：%s' % e)
-            _pick_toast('节假日导入失败：文件格式无法识别', ok=False)
+            ui._dbg('holiday import failed: %s' % e)
+            _pick_toast(t('holiday.import_failed'), ok=False)
 
     def _pick_toast(text, **kw):
         win = None

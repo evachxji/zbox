@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.documentfile.provider.DocumentFile
+import com.zbox.transfer.AppStrings
 import com.zbox.transfer.IncomingState
 import com.zbox.transfer.Settings
 
@@ -32,6 +33,7 @@ import com.zbox.transfer.Settings
 @Composable
 fun ReceiveDialogHost() {
     val pending = IncomingState.pending ?: return
+    val strings = AppStrings.current
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
 
@@ -60,13 +62,13 @@ fun ReceiveDialogHost() {
 
     AlertDialog(
         onDismissRequest = { pending.onReject() },
-        title = { Text("接收文件") },
+        title = { Text(strings.receiveFiles) },
         text = {
             Column {
-                Text("来自：" + pending.fromAlias, style = MaterialTheme.typography.bodyLarge)
+                Text(strings.fromAlias(pending.fromAlias), style = MaterialTheme.typography.bodyLarge)
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    "共 " + pending.files.size + " 个文件 · " + fmtSize(pending.totalSize),
+                    strings.fileCountSummary(pending.files.size, fmtSize(pending.totalSize)),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -74,7 +76,7 @@ fun ReceiveDialogHost() {
                 LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
                     items(pending.files, key = { it.id }) { file ->
                         Text(
-                            text = file.fileName + "（" + fmtSize(file.size) + "）",
+                            text = strings.fileWithSize(file.fileName, fmtSize(file.size)),
                             style = MaterialTheme.typography.bodySmall,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -86,7 +88,7 @@ fun ReceiveDialogHost() {
                     onClick = { dirPicker.launch(defaultTreeUri()) },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    val label = pending.dirUri?.let { "保存到：" + dirName(it) } ?: "保存到：Download/Zbox（系统默认，点我更改）"
+                    val label = pending.dirUri?.let { strings.saveTo(dirName(it)) } ?: strings.saveToDefault
                     Text(text = label, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
@@ -99,7 +101,7 @@ fun ReceiveDialogHost() {
                     pending.onAccept(pending.dirUri)
                 },
             ) {
-                Text("接受")
+                Text(strings.accept)
             }
         },
         dismissButton = {
@@ -107,7 +109,7 @@ fun ReceiveDialogHost() {
                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                 pending.onReject()
             }) {
-                Text("拒绝")
+                Text(strings.reject)
             }
         },
     )

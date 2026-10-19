@@ -43,10 +43,14 @@ Windows 桌面整理工具：桌面格子 + 悬浮面板（日历 / 待办 / 传
    - **视频解析**：粘贴网址下载视频，多清晰度、断点续传
    - 卡片四边/四角拖拽自由缩放，大小自动记忆
 3. **截图**：全局热键框选标注，支持矩形、椭圆、QQ 风格箭头、自动伸缩并可换行的黑色说明框序号标注和文字，兼容钉图与滚动长图；各工具的尺寸滑杆会记住上次位置，说明框可拖拽并可再次编辑，点击或拖拽钉图可在固定于图片底部的托盘工具条中继续标注、保存或复制，点击别处自动收起
+4. **语言**：PC 端与 Android 端均支持**简体中文 / English**。PC 端在 **设置 → 语言** 中切换（重启生效）；
+   安装向导首屏也可以直接选择安装语言。Android 端在底部「设置」tab 中切换，即时生效。
 
 ## 快速开始
 
-到 [Releases](https://github.com/evachxji/zbox/releases) 下载 `zbox-Setup-v<版本>-x64.exe`，双击打开安装向导即可（仅当前用户安装免管理员）。
+到 [Releases](https://github.com/evachxji/zbox/releases) 下载 `zbox-Setup-v<版本>-x64.exe`，双击打开安装向导。
+安装始终按所有用户装到 `Program Files`（Windows 会请求管理员权限），安装前会清理旧版 Zbox 程序文件，
+`%APPDATA%\zbox` 里的个人数据（待办、格子、配置）一律保留。
 
 升级：设置窗右下角「检查更新」会自动比对 GitHub 最新 release，有新版本可一键下载安装包并引导安装。
 
@@ -57,6 +61,15 @@ Windows 桌面整理工具：桌面格子 + 悬浮面板（日历 / 待办 / 传
 - 一键三端：双击 `build.cmd`，启动后选 1-7 构建单端或组合（默认 7 全量：Windows exe 安装包 + Android APK + 鸿蒙 HAP），产物汇总在 `dist\release\`（文件名带版本号）
   - 依赖：PC 需 PySide6 + PyInstaller（缺了会提示自动装）；Android 需 JDK 17 与 Android SDK；鸿蒙需 DevEco Studio 与 `devecocli`（`npm i -g @deveco/deveco-cli@stable`）
   - hap 是免签名调试包，只能装模拟器/开发者调试设备；分发真机需签名或上架（见 `harmony\README.md`）
+
+## 验证
+
+- `python -m unittest discover -s tests -v` — Python/UI 回归测试
+- `python transfer_selftest.py` — 传输协议自检（`SELFTEST OK`）
+- `cd android && gradlew.bat testDebugUnitTest` — Android 语言规则单元测试
+- 双语截图自检（导出全界面场景后自动退出）：
+  `set ZBOX_SHOT=designs\verify-en` + `set ZBOX_SHOT_LANG=en-US` + `python main.pyw`（中文用 `zh-CN`）。
+  截图进程使用独立 IPC 名，不会干扰正在运行的面板。
 
 ## 兼容性
 

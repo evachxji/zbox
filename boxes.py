@@ -49,12 +49,13 @@ from PySide6.QtWidgets import (QWidget, QDialog, QListWidget, QListWidgetItem, Q
                              QPushButton, QStackedLayout, QMenu,
                              QFileDialog, QLineEdit,
                              QAbstractItemView, QApplication, QStyle,
-                             QGraphicsOpacityEffect)
+                             QGraphicsOpacityEffect, QSizePolicy)
 
 import app as ui   # sc / _PROG_FAMILY / _class_name / _is_desktop_surface
 from snapping import (SNAP_ENGAGE, SNAP_RELEASE, SnapGuideOverlay,
                       guide_segments, snap_move, snap_resize)
 import sysutil
+from i18n import t
 
 # 64 位安全的 ctypes 签名（windll 默认按 32 位 int 截断，句柄/指针高位会丢）
 _h32 = ctypes.windll.user32
@@ -212,12 +213,14 @@ _STAGE_NAME = '.zbox'
 _BOX_DRAG_MIME = 'application/x-zbox-box-drag'
 
 
-def _drop_verb(e):
-    """拖拽落点文案的动词：默认移动，按住 Ctrl 复制。"""
-    return '复制到' if e.modifiers() & Qt.ControlModifier else '移动到'
+def _drop_text(e, name):
+    """拖拽落点文案：默认移动，按住 Ctrl 复制；文案在运行时按当前语言取。"""
+    key = 'boxes.drop.copy' if e.modifiers() & Qt.ControlModifier else 'boxes.drop.move'
+    return t(key, name=name)
 
-SORT_CHOICES = [('name', '按名称'), ('type', '按类型'), ('mtime', '按修改时间')]
-VIEW_CHOICES = [('list', '按列表查看'), ('icon', '按图标查看')]
+SORT_CHOICES = [('name', 'boxes.sort.name'), ('type', 'boxes.sort.type'),
+                ('mtime', 'boxes.sort.mtime')]
+VIEW_CHOICES = [('list', 'boxes.view.list'), ('icon', 'boxes.view.icon')]
 
 TITLE_H = 30        # 标题栏高（设计像素，运行时过 sc()）
 EDGE = 10           # 边缘缩放命中宽度
@@ -536,7 +539,7 @@ class BoxList(QListWidget):
             e.accept()
             return
         if self._menu_press_ts and time.time() - self._menu_press_ts < 0.6:
-            ui._dbg('★ 菜单关闭后 %.2fs 内的双击，不打开'
+            ui._dbg('★ double-click %.2fs after menu close ignored'
                     % (time.time() - self._menu_press_ts))
             e.accept()
             return
@@ -671,18 +674,18 @@ class BoxList(QListWidget):
                 # 外部拖入落在无语义区：保持旧行为，照常收进格子根
                 e.setDropAction(self.box.drag_effect(e))
                 e.accept()
-                self.box.mgr.badge.show_text(_drop_verb(e) + ' ' + self.box.rec['name'])
+                self.box.mgr.badge.show_text(_drop_text(e, self.box.rec['name']))
             return
         self._set_guide(loc)
         e.setDropAction(self.box.drag_effect(e))
         e.accept()
         kind, row = loc
         if kind == 'folder':
-            text = _drop_verb(e) + ' ' + os.path.basename(self.item(row).data(Qt.UserRole))
+            text = _drop_text(e, os.path.basename(self.item(row).data(Qt.UserRole)))
         elif kind == 'open':
-            text = '用 %s 打开' % self.item(row).text()
+            text = t('boxes.drop.open_with', name=self.item(row).text())
         elif internal:
-            text = '排序'
+            text = t('boxes.drop.reorder')
         else:
             # 外部拖到引导线：白线本身就是落点反馈，系统气泡（Explorer 画的「→ 移动」）
             # 已说明移动语义，不再叠一行「移动到 格子名」徽标
@@ -908,7 +911,7 @@ class BoxList(QListWidget):
             r = shell_context_menu(int(self.winId()), paths,
                                    _pt.x, _pt.y,
                                    on_rename=_do_rename)
-            ui._dbg('ctxmenu: 接管结果 r=%r' % (r,))
+            ui._dbg('ctxmenu: takeover result r=%r' % (r,))
             if r == 'rename':
                 self._rename_item(it)
                 return
@@ -916,21 +919,21 @@ class BoxList(QListWidget):
                 return
             # ★ Qt 兜底菜单：**只有宿主与 ctypes 两条路都没接管才会走到这**。它弹在
             # 光标处、第一项是「打开」，而右键之后按键可能还按着——松开就会被当成选中它。
-            ui._dbg('★ 走了 Qt 兜底菜单（宿主/ctypes 都没接管）it=%s' % it.text())
+            ui._dbg('★ using Qt fallback menu (host/ctypes did not take over) it=%s' % it.text())
         menu = QMenu(self)
         if it:
             path = it.data(Qt.UserRole)
-            menu.addAction('打开', lambda: self.box.open_path(path))
-            menu.addAction('在资源管理器中显示', lambda: self.box.reveal_path(path))
+            menu.addAction(t('boxes.menu.open'), lambda: self.box.open_path(path))
+            menu.addAction(t('boxes.menu.reveal'), lambda: self.box.reveal_path(path))
             menu.addSeparator()
-            menu.addAction('删除', lambda: self.box.delete_items(self.selectedItems()))
+            menu.addAction(t('common.delete'), lambda: self.box.delete_items(self.selectedItems()))
         else:
-            menu.addAction('刷新', self.box.refresh)
-            menu.addAction('在资源管理器中打开',
+            menu.addAction(t('common.refresh'), self.box.refresh)
+            menu.addAction(t('boxes.menu.open_folder'),
                            lambda: self.box.open_path(self.box.display_dir()))
         if menu.actions():
             act = menu.exec(QCursor.pos())
-            ui._dbg('★ Qt 兜底菜单选择: %s' % (act.text() if act else None))
+            ui._dbg('★ Qt fallback menu choice: %s' % (act.text() if act else None))
 
 
 class BoxConfirmDialog(QDialog):
@@ -953,14 +956,14 @@ class BoxConfirmDialog(QDialog):
         self.titlebar.setFixedHeight(ui.sc(TITLE_H))
         tb = QHBoxLayout(self.titlebar)
         tb.setContentsMargins(ui.sc(10), 0, ui.sc(6), 0)
-        t = QLabel(title)
-        t.setObjectName('boxName')
-        tb.addWidget(t)
+        title_lbl = QLabel(title)
+        title_lbl.setObjectName('boxName')
+        tb.addWidget(title_lbl)
         tb.addStretch(1)
         close = QToolButton()
         close.setText('✕')
         close.setFixedSize(ui.sc(22), ui.sc(20))
-        close.setToolTip('关闭')
+        close.setToolTip(t('common.close'))
         close.clicked.connect(self.reject)
         tb.addWidget(close)
         root.addWidget(self.titlebar)
@@ -984,7 +987,7 @@ class BoxConfirmDialog(QDialog):
         ok.setDefault(True)
         ok.clicked.connect(self.accept)
         btns.addWidget(ok)
-        cancel = QPushButton('取消')
+        cancel = QPushButton(t('common.cancel'))
         cancel.setCursor(Qt.PointingHandCursor)
         cancel.clicked.connect(self.reject)
         btns.addWidget(cancel)
@@ -1022,6 +1025,31 @@ class BoxConfirmDialog(QDialog):
     def mouseReleaseEvent(self, e):
         self._drag = None
         super(BoxConfirmDialog, self).mouseReleaseEvent(e)
+
+
+class _BoxTitle(QLabel):
+    """格子标题标签：按可用宽度尾部省略。英文默认名 / 长名称比中文宽，
+    最小宽度下会被右侧操作按钮挤压，普通 QLabel 不参与布局收缩、只会被裁掉。"""
+
+    def __init__(self, text=''):
+        super(_BoxTitle, self).__init__()
+        self._full = text or ''
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self._relide()
+
+    def setText(self, text):
+        self._full = text or ''
+        self._relide()
+
+    def resizeEvent(self, e):
+        super(_BoxTitle, self).resizeEvent(e)
+        self._relide()
+
+    def _relide(self):
+        text = self.fontMetrics().elidedText(self._full, Qt.ElideRight,
+                                             max(self.width(), 0))
+        super(_BoxTitle, self).setText(text)
+        self.setToolTip(self._full if text != self._full else '')
 
 
 class BoxWindow(QWidget):
@@ -1068,13 +1096,13 @@ class BoxWindow(QWidget):
         if rec['kind'] == 'folder':
             # 映射格子：点图标打开所在文件夹
             self.icon.setCursor(Qt.PointingHandCursor)
-            self.icon.setToolTip('打开所在文件夹')
+            self.icon.setToolTip(t('boxes.tooltip.open_folder'))
         else:
             # 空白格子不显示图标——它背后没有对应的文件夹，图标只是个无意义的点缀，
             # 隐藏后布局不占位（QHBoxLayout 跳过隐藏控件），标题栏只留名称
             self.icon.hide()
         tb.addWidget(self.icon)
-        self.name = QLabel(rec['name'])
+        self.name = _BoxTitle(rec['name'])
         self.name.setObjectName('boxName')
         tb.addWidget(self.name, 1)
         # 双击名称后原地替换成的重命名输入框
@@ -1129,7 +1157,7 @@ class BoxWindow(QWidget):
         gl.setContentsMargins(ui.sc(4), 0, ui.sc(4), ui.sc(4))
         self.list = BoxList(self)
         gl.addWidget(self.list, 0, 0)
-        self.hint = QLabel('拖动文件到格子中\n分类整理你的文件吧')
+        self.hint = QLabel(t('boxes.empty_hint'))
         self.hint.setObjectName('boxHint')
         self.hint.setAlignment(Qt.AlignCenter)
         self.hint.setAttribute(Qt.WA_TransparentForMouseEvents)
@@ -1142,19 +1170,19 @@ class BoxWindow(QWidget):
         pix = QLabel()
         pix.setAlignment(Qt.AlignCenter)
         pix.setPixmap(self._invalid_pm())
-        t1 = QLabel('无法显示在桌面')
+        t1 = QLabel(t('boxes.invalid.title'))
         t1.setObjectName('boxInvalid1')
         t1.setAlignment(Qt.AlignCenter)
-        t2 = QLabel('文件夹路径已经失效')
+        t2 = QLabel(t('boxes.invalid.detail'))
         t2.setObjectName('boxInvalid2')
         t2.setAlignment(Qt.AlignCenter)
-        btn_refresh = QPushButton('刷新')
+        btn_refresh = QPushButton(t('common.refresh'))
         btn_refresh.setObjectName('boxRefresh')
         btn_refresh.setCursor(Qt.PointingHandCursor)
-        btn_refresh.setToolTip('重新检测文件夹是否存在')
+        btn_refresh.setToolTip(t('boxes.invalid.retry'))
         # 文件夹回来了 refresh 自己会扫目录切回列表页，没回来就停在失效页
         btn_refresh.clicked.connect(self.refresh)
-        btn = QPushButton('解散格子')
+        btn = QPushButton(t('boxes.dissolve'))
         btn.setCursor(Qt.PointingHandCursor)
         btn.clicked.connect(self.dissolve)
         il.addWidget(pix)
@@ -1408,7 +1436,7 @@ class BoxWindow(QWidget):
                 attrs.pop(p, None)
                 dirty = True
                 if not self._collect(p):
-                    ui._dbg('box: 无法收起 %s，移出格子' % os.path.basename(p))
+                    ui._dbg('box: cannot hide %s; removed from box' % os.path.basename(p))
                     continue
                 actual = moved.get(p, p)
                 if actual != p:
@@ -1675,7 +1703,7 @@ class BoxWindow(QWidget):
                 added.append(p)
             else:
                 # 藏不了也搬不动（占用/权限）：不收，免得同一图标桌面格子里各一份
-                ui._dbg('box: 无法收起 %s，未收进格子' % os.path.basename(p))
+                ui._dbg('box: cannot hide %s; not added to box' % os.path.basename(p))
                 refused = True
         if refused:
             self.flash()
@@ -1703,7 +1731,7 @@ class BoxWindow(QWidget):
         if paths:
             e.setDropAction(self.drag_effect(e))
             e.accept()
-            self.mgr.badge.show_text(_drop_verb(e) + ' ' + self.rec['name'])
+            self.mgr.badge.show_text(_drop_text(e, self.rec['name']))
         else:
             super(BoxWindow, self).dragMoveEvent(e)
 
@@ -1797,7 +1825,7 @@ class BoxWindow(QWidget):
         self.rec['collapsed'] = on
         self.pages.currentWidget().setVisible(not on)
         self.btn_collapse.setText('▼' if on else '▲')
-        self.btn_collapse.setToolTip('展开' if on else '收起')
+        self.btn_collapse.setToolTip(t('boxes.expand') if on else t('boxes.collapse'))
         if on:
             self.setFixedHeight(ui.sc(TITLE_H))
         else:
@@ -1847,7 +1875,7 @@ class BoxWindow(QWidget):
     def set_locked(self, on, save=True):
         self.rec['locked'] = on
         self.btn_lock.setText('🔒' if on else '🔓')
-        self.btn_lock.setToolTip('解锁' if on else '锁定')
+        self.btn_lock.setToolTip(t('boxes.unlock') if on else t('boxes.lock'))
         if save:
             self.mgr.save_rec(self)
 
@@ -1874,11 +1902,12 @@ class BoxWindow(QWidget):
     def _dissolve_confirm_dialog(self):
         """构造解散确认弹窗（截图自检也走这里，保证弹的就是真实弹窗）。"""
         if self.rec['kind'] == 'blank':
-            detail = '里面的文件会回到桌面（还原图标隐藏，托管文件搬回原位）。'
+            detail = t('boxes.dissolve.blank_detail')
         else:
-            detail = '只移除格子，不影响文件夹本身。'
-        return BoxConfirmDialog(self, '解散格子',
-                                '解散格子「%s」？%s' % (self.rec['name'], detail), '解散')
+            detail = t('boxes.dissolve.folder_detail')
+        return BoxConfirmDialog(self, t('boxes.dissolve'),
+                                t('boxes.dissolve.confirm', name=self.rec['name'], detail=detail),
+                                t('boxes.dissolve.ok'))
 
     def _confirm_dissolve(self):
         """解散二次确认：空白格子提示文件会回到桌面，映射格子提示不影响原文件夹。"""
@@ -1898,7 +1927,7 @@ class BoxWindow(QWidget):
         menu = QMenu(self)
         grp = QActionGroup(menu)
         for key, label in VIEW_CHOICES:
-            act = menu.addAction(label)
+            act = menu.addAction(t(label))
             act.setCheckable(True)
             act.setChecked(self.rec.get('view', 'list') == key)
             grp.addAction(act)
@@ -1906,16 +1935,17 @@ class BoxWindow(QWidget):
         menu.addSeparator()
         grp = QActionGroup(menu)
         for key, label in SORT_CHOICES:
-            act = menu.addAction(label)
+            act = menu.addAction(t(label))
             act.setCheckable(True)
             act.setChecked(self.rec.get('sort', 'name') == key)
             grp.addAction(act)
             act.triggered.connect(lambda _c=False, k=key: self._set_sort(k))
         menu.addSeparator()
-        menu.addAction('重命名', self._start_rename)
+        menu.addAction(t('boxes.rename'), self._start_rename)
         if self.rec['kind'] == 'folder':
-            menu.addAction('打开所在目录', lambda: self.open_path(self.rec['path']))
-        menu.addAction('解散格子', self.dissolve)
+            menu.addAction(t('boxes.tooltip.open_folder'),
+                           lambda: self.open_path(self.rec['path']))
+        menu.addAction(t('boxes.dissolve'), self.dissolve)
         return menu
 
     def _show_menu(self):
@@ -2629,8 +2659,8 @@ def _progid_verbs(path):
                 except OSError:
                     label = None
                 if not label:
-                    label = {'open': '打开(&O)', 'edit': '编辑(&E)',
-                             'print': '打印(&P)'}.get(v, v)
+                    label = {'open': t('boxes.verb.open'), 'edit': t('boxes.verb.edit'),
+                             'print': t('boxes.verb.print')}.get(v, v)
                 verbs.append((v, label, cmd))
     except OSError:
         pass
@@ -2820,7 +2850,7 @@ class _HostDaemon(QObject):
         try:
             mt = time.strftime('%m-%d %H:%M:%S',
                                time.localtime(os.path.getmtime(host)))
-            ui._dbg('host 启动 pid=%s exe_mtime=%s path=%s'
+            ui._dbg('host started pid=%s exe_mtime=%s path=%s'
                     % (self.proc.pid, mt, host))
         except OSError:
             pass
@@ -2847,7 +2877,7 @@ class _HostDaemon(QObject):
                 # （菜单开着时用户再点右键会先经 TPM_RECURSE 取消旧菜单，
                 # R 必然已回，所以在途 15s+ 还有新请求不可能是正常弹窗）。
                 # 杀掉重启自愈——宿主与它弹的菜单一起消失，前台与输入随即释放。
-                ui._dbg('ctxmenu: 宿主 15s 无响应，杀掉重启')
+                ui._dbg('ctxmenu: host unresponsive for 15s; killing and restarting')
                 try:
                     self.proc.kill()
                 except (OSError, AttributeError):
@@ -2894,7 +2924,7 @@ class _HostDaemon(QObject):
         item = self.callbacks.pop(0) if self.callbacks else None
         cb, sent_at = item if item else (None, 0.0)
         if sent_at:
-            ui._dbg('ctxmenu: R=%d 用时=%.2fs 在途=%d'
+            ui._dbg('ctxmenu: R=%d elapsed=%.2fs in-flight=%d'
                     % (rc, time.time() - sent_at, len(self.callbacks)))
         if rc == 2 and cb:
             cb()
@@ -2944,7 +2974,7 @@ def shell_context_menu(hwnd, paths, x, y, on_rename=None):
     返回 True=已接管；'rename'=ctypes 路径选了重命名；False=回退内置菜单。"""
     if not paths:
         return False
-    ui._dbg('ctxmenu: %d 项, 首个=%s' % (len(paths), os.path.basename(paths[0])))
+    ui._dbg('ctxmenu: %d item(s), first=%s' % (len(paths), os.path.basename(paths[0])))
     # 置前台权限在 _HostDaemon.request 里授（只给宿主自己的 pid）：不授权的话，
     # 焦点刚变过（Win+D 回桌面 / 切过别的程序）的首次右键，宿主 SetForegroundWindow
     # 失败，菜单弹出即被取消——表现为首次右键无效。
@@ -3408,7 +3438,7 @@ class _DesktopDropOverlay(QWidget):
         self.winId()   # 强制建原生句柄再挂带
         self.pin_ok = ui.pin_to_desktop(self)
         if not self.pin_ok:
-            ui._dbg('box: 桌面落放层挂带失败，落桌面退回 Explorer 处理')
+            ui._dbg('box: failed to pin drop overlay; desktop drops fall back to Explorer')
 
     def begin(self):
         """拖出开始时显示。每次重摆几何（桌面图标区大小），并把格子/面板抬回自己之上
@@ -3487,8 +3517,8 @@ class _DesktopDropOverlay(QWidget):
         self.dragEnterEvent(e)   # 悬停与进入同一套判定
         if e.mimeData().hasFormat(_BOX_DRAG_MIME):
             folder = self._folder_zone(self.mapToGlobal(e.position().toPoint()))
-            name = os.path.basename(folder) if folder else '桌面'
-            self.mgr.badge.show_text(_drop_verb(e) + ' ' + name)
+            name = os.path.basename(folder) if folder else t('boxes.desktop')
+            self.mgr.badge.show_text(_drop_text(e, name))
 
     def dragLeaveEvent(self, e):
         self.mgr.badge.done()
@@ -3617,9 +3647,9 @@ class BoxManager(object):
 
     def _note_drag_enter_own(self):
         """拖进我们的格子/落放层：取消延迟放图标（落放层落点会自己放）。"""
-        t = self._unhide_timer
-        if t is not None:
-            t.stop()
+        timer = self._unhide_timer
+        if timer is not None:
+            timer.stop()
             self._unhide_timer = None
 
     def _note_drag_leave_own(self):
@@ -3630,12 +3660,12 @@ class BoxManager(object):
         窗口时文件随即被搬走，图标只闪现一瞬；取消/拖回则由 startDrag 收尾藏回。"""
         if self._drag_src is None or self._unhide_timer is not None:
             return
-        t = QTimer(self.panel)
-        t.setSingleShot(True)
-        t.setInterval(150)
-        t.timeout.connect(self._unhide_dragged_now)
-        self._unhide_timer = t
-        t.start()
+        timer = QTimer(self.panel)
+        timer.setSingleShot(True)
+        timer.setInterval(150)
+        timer.timeout.connect(self._unhide_dragged_now)
+        self._unhide_timer = timer
+        timer.start()
 
     def _cancel_unhide(self):
         self._note_drag_enter_own()
@@ -3648,7 +3678,7 @@ class BoxManager(object):
         for p in self._drag_paths:
             box._show_icon(p)
         _shell_refresh(desktop_dir())
-        ui._dbg('box: 拖到外部窗口，提前放出图标（隐藏属性不能跟过去）')
+        ui._dbg('box: dropped on external window; revealing icons early')
 
     def box_by_id(self, bid):
         for w in self.windows:
@@ -3702,7 +3732,7 @@ class BoxManager(object):
                             shutil.copy2(p, dst)
                         _strip_hidden(dst)   # 副本不能带隐藏位（copystat 会把属性拷过去）
                     except OSError as e:
-                        ui._dbg('box: 复制到桌面失败 %s: %s' % (p, e))
+                        ui._dbg('box: copy to desktop failed %s: %s' % (p, e))
             else:
                 _shell_op(0x2 if copy else 0x1, op_paths, target, hwnd=int(box.winId()))
         if box.rec['kind'] == 'blank' and not copy and stay:
@@ -3799,7 +3829,7 @@ class BoxManager(object):
     def new_blank(self):
         """新建空白格子：只是桌面文件的收纳视图（items 记账 + 隐藏桌面图标）。"""
         n = len([r for r in self.store.data['boxes'] if r['kind'] == 'blank'])
-        name = '新建格子' if n == 0 else '新建格子 %d' % (n + 1)
+        name = t('menu.new_box') if n == 0 else t('boxes.new_blank_n', n=n + 1)
         rec = self._new_rec('blank', name, None)
         rec['items'] = []
         rec['attrs'] = {}
@@ -3837,7 +3867,7 @@ class BoxManager(object):
             # 两个坑：① 必须用静态方法——QFileDialog 实例 + exec_() 在这套环境会开出
             # 隐形对话框；② GUI 线程必须是 STA（main() 入口已初始化），否则原生壳对话框
             # 在 Qt 默认的 MTA 下抛 RPC_E_WRONG_THREAD（0x8001010e）致命错误
-            path = QFileDialog.getExistingDirectory(self.panel, '选择要映射的文件夹')
+            path = QFileDialog.getExistingDirectory(self.panel, t('boxes.pick_folder'))
         if not path:
             return
         path = os.path.normpath(path)
@@ -3990,7 +4020,7 @@ class BoxManager(object):
         self.rhook.menu_open = True
         m = QMenu(self.panel)
         self._menu = m
-        m.addAction(sysutil.SHOW_ICONS_TEXT, self.show_all)
+        m.addAction(sysutil.show_icons_text(), self.show_all)
         m.exec(QCursor.pos())
         self._menu = None
         self.rhook.menu_open = False

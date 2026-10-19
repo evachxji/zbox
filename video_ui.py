@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (QWidget, QFrame, QLabel, QToolButton, QPushButton
 import app as ui            # 仅运行期用 ui.sc()；import 期无依赖（app 也 import 本模块）
 import glow
 import video_dl
+from i18n import t
 
 
 def _fmt_mb(n):
@@ -207,7 +208,7 @@ class _VideoTask(glow.GlowCard):
         self.close_btn.setObjectName('cardCloseBtn')
         self.close_btn.setText('✕')
         self.close_btn.setCursor(Qt.PointingHandCursor)
-        self.close_btn.setToolTip('移除该任务')
+        self.close_btn.setToolTip(t('video.task.remove'))
         self.close_btn.clicked.connect(self._close_clicked)
         self.close_btn.hide()            # 仅 parsed / done 态显示
         title_row.addWidget(self.close_btn, 0, Qt.AlignTop)
@@ -236,12 +237,12 @@ class _VideoTask(glow.GlowCard):
         self.quality_menu = QMenu(self.quality_btn)
         self.quality_btn.setMenu(self.quality_menu)
         meta_row.addWidget(self.quality_btn)
-        self.dl_btn = QPushButton('下载')
+        self.dl_btn = QPushButton(t('video.task.download'))
         self.dl_btn.setObjectName('sendBtn')
         self.dl_btn.setCursor(Qt.PointingHandCursor)
         self.dl_btn.clicked.connect(self._start_download)
         meta_row.addWidget(self.dl_btn)
-        self.open_btn = QPushButton('打开')
+        self.open_btn = QPushButton(t('video.open'))
         self.open_btn.setObjectName('sendBtn')
         self.open_btn.setCursor(Qt.PointingHandCursor)
         self.open_btn.clicked.connect(self._open_done_file)
@@ -273,7 +274,7 @@ class _VideoTask(glow.GlowCard):
         dl_prog_row.addWidget(self.spinner, 0, Qt.AlignVCenter)
         self.pause_btn = QToolButton()
         self.pause_btn.setObjectName('cancelBtn')
-        self.pause_btn.setText('暂停')
+        self.pause_btn.setText(t('video.task.pause'))
         self.pause_btn.setCursor(Qt.PointingHandCursor)
         self.pause_btn.clicked.connect(self._toggle_pause)
         dl_prog_row.addWidget(self.pause_btn, 0, Qt.AlignVCenter)
@@ -340,7 +341,7 @@ class _VideoTask(glow.GlowCard):
         self.close_btn.setVisible(mode in ('parse', 'done'))
         self.parse_spin.stop()
         if mode == 'parsing':
-            self.parse_lab.setText('正在解析…')
+            self.parse_lab.setText(t('video.task.parsing'))
             self.parse_lab.show()
             self.parse_spin.start()
         elif mode == 'parse':
@@ -381,12 +382,12 @@ class _VideoTask(glow.GlowCard):
                 self.set_glow('')
                 if video_dl.is_cookie_error(info):
                     if video_dl.has_cookies():
-                        self._show_meta_text('fail', '解析失败：抖音风控升级，cookie 暂时无效')
+                        self._show_meta_text('fail', t('video.parse.fail_cookie_blocked'))
                     else:
-                        self._show_meta_text('fail', '解析失败：该站点要求浏览器 cookie')
+                        self._show_meta_text('fail', t('video.parse.fail_cookie_required'))
                     self.owner.cookie_link.show()
                 else:
-                    self._show_meta_text('fail', '解析失败：%s' % info)
+                    self._show_meta_text('fail', t('video.parse.fail', reason=info))
                 return
             self.state = 'parsed'
             self._parsed = info
@@ -394,7 +395,7 @@ class _VideoTask(glow.GlowCard):
             self.title_lab.setToolTip(info['title'] or '')
             self._elide_title()
             dur = _fmt_dur(info['duration'])
-            self.dur_lab.setText(('时长 ' + dur) if dur else '')
+            self.dur_lab.setText(t('video.task.duration', time=dur) if dur else '')
             self._rebuild_quality_menu(info['heights'])
             self.set_glow('breath')
             self._show_meta('parse')
@@ -408,7 +409,7 @@ class _VideoTask(glow.GlowCard):
 
     def _elide_title(self):
         try:
-            title = (self._parsed or {}).get('title') or '（无标题）'
+            title = (self._parsed or {}).get('title') or t('video.task.untitled')
             w = ui.sc(172) if self.thumb_lab.isVisible() else ui.sc(244)
             self.title_lab.setText(
                 self.title_lab.fontMetrics().elidedText(title, Qt.ElideRight, w))
@@ -439,7 +440,7 @@ class _VideoTask(glow.GlowCard):
         self.quality_menu.clear()
         group = QActionGroup(self)
         group.setExclusive(True)
-        options = [('%dP' % h, h) for h in heights] or [('自动', None)]
+        options = [('%dP' % h, h) for h in heights] or [(t('video.task.auto'), None)]
         m = re.match(r'(\\d+)', self.cfg.data.get('video_quality') or '1080P')
         prefer = int(m.group(1)) if m else 1080
         default_h = None
@@ -457,7 +458,8 @@ class _VideoTask(glow.GlowCard):
             group.addAction(act)
             self.quality_menu.addAction(act)
         self._parsed['height'] = default_h
-        self.quality_btn.setText('%s ▾' % (('%dP' % default_h) if default_h else '自动'))
+        self.quality_btn.setText('%s ▾' % (('%dP' % default_h) if default_h
+                                           else t('video.task.auto')))
 
     def _set_quality(self, height, name):
         try:
@@ -478,7 +480,7 @@ class _VideoTask(glow.GlowCard):
             try:
                 os.makedirs(self.owner.save_dir, exist_ok=True)
             except OSError:
-                self._show_meta_text('fail', '保存目录不可用，请重新选择')
+                self._show_meta_text('fail', t('video.task.save_dir_invalid'))
                 return
             h = self._parsed.get('height')
             self._dl = video_dl.Download(self._parsed['url'], h, self.owner.save_dir,
@@ -541,28 +543,30 @@ class _VideoTask(glow.GlowCard):
                     self._done_file = msg
                     self.set_glow('')   # 完成态不加轮廓灯
                     dur = _fmt_dur((self._parsed or {}).get('duration'))
-                    head = ('时长 ' + dur + ' · ') if dur else ''
+                    head = t('video.task.duration_sep', time=dur) if dur else ''
                     self.dur_lab.setText(head + _fmt_size(os.path.getsize(msg)))
                     self._show_meta('done')
                 else:
                     self.state = 'failed'
                     self.set_glow('')
-                    self._show_meta_text('done', '已完成' if not msg else msg)
-            elif '未重复下载' in (msg or ''):
+                    self._show_meta_text('done',
+                                         t('video.task.completed') if not msg else msg)
+            elif msg == video_dl.DUPLICATE_SKIPPED:
                 self.state = 'failed'
                 self.set_glow('')
-                self._show_meta_text('', msg)   # 同名跳过是提示而非失败，不用红色
+                # 同名跳过是提示而非失败，不用红色
+                self._show_meta_text('', t('video.download.duplicate_skipped'))
             else:
                 self.state = 'failed'
                 self.set_glow('')
                 if video_dl.is_cookie_error(msg):
                     if video_dl.has_cookies():
-                        self._show_meta_text('fail', '下载失败：抖音风控升级，cookie 暂时无效')
+                        self._show_meta_text('fail', t('video.download.fail_cookie_blocked'))
                     else:
-                        self._show_meta_text('fail', '下载失败：该站点要求浏览器 cookie')
+                        self._show_meta_text('fail', t('video.download.fail_cookie_required'))
                     self.owner.cookie_link.show()
                 else:
-                    self._show_meta_text('fail', '下载失败：%s' % msg)
+                    self._show_meta_text('fail', t('video.download.fail', reason=msg))
         except Exception:
             pass
 
@@ -570,7 +574,7 @@ class _VideoTask(glow.GlowCard):
         """下载进度区与 meta 行互换显隐；握手期右侧转圈顶替「暂停」。"""
         if busy:
             self._dl_paused = False
-            self.pause_btn.setText('暂停')
+            self.pause_btn.setText(t('video.task.pause'))
             self.pause_btn.hide()
             self.spinner.start()
             self.meta_box.hide()
@@ -586,10 +590,9 @@ class _VideoTask(glow.GlowCard):
         terminate 后 start() 收尾的 _cleanup_parts 会删掉下载到一半的缓存文件。"""
         try:
             if self._dl is not None:
-                if _ConfirmDialog(self, '删除任务',
-                                  '该任务正在下载，确定要删除吗？'
-                                  '下载到一半的缓存文件会一并删除。',
-                                  '确认删除').exec() != QDialog.Accepted:
+                if _ConfirmDialog(self, t('video.task.delete_title'),
+                                  t('video.task.delete_text'),
+                                  t('video.task.delete_ok')).exec() != QDialog.Accepted:
                     return
                 self._cancel_requested = True
                 self._dl.terminate()
@@ -608,13 +611,13 @@ class _VideoTask(glow.GlowCard):
                 return
             if self._dl_paused:
                 self._dl_paused = False
-                self.pause_btn.setText('暂停')
-                self.eta_lab.setText('继续下载…')
+                self.pause_btn.setText(t('video.task.pause'))
+                self.eta_lab.setText(t('video.task.resuming'))
                 self._dl.resume()
             else:
                 self._dl_paused = True
-                self.pause_btn.setText('继续')
-                self.eta_lab.setText('已暂停')
+                self.pause_btn.setText(t('video.task.resume'))
+                self.eta_lab.setText(t('video.task.paused'))
                 self._dl.pause()
         except Exception:
             pass
@@ -624,7 +627,7 @@ class _VideoTask(glow.GlowCard):
         try:
             if self._dl is None and self._done_file and os.path.isfile(self._done_file):
                 menu = QMenu(self)
-                act = menu.addAction('打开所在目录')
+                act = menu.addAction(t('video.task.reveal'))
                 if menu.exec_(self.mapToGlobal(pos)) == act:
                     self._open_done_dir()
         except Exception:
@@ -653,7 +656,7 @@ class VideoInfoDialog(QDialog):
     def __init__(self, parent=None):
         super(VideoInfoDialog, self).__init__(parent)
         self.setObjectName('settingsDlg')
-        self.setWindowTitle('关于视频解析')
+        self.setWindowTitle(t('video.info.title'))
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
 
         root = QVBoxLayout(self)
@@ -667,7 +670,7 @@ class VideoInfoDialog(QDialog):
 
         tb = QHBoxLayout()
         tb.setContentsMargins(0, 0, 0, 0)
-        title = QLabel('关于「视频解析」')
+        title = QLabel(t('video.info.heading'))
         title.setObjectName('setTitle')
         tb.addWidget(title)
         tb.addStretch(1)
@@ -675,7 +678,7 @@ class VideoInfoDialog(QDialog):
         close.setObjectName('closeBtn')
         close.setText('✕')
         close.setFixedSize(ui.sc(28), ui.sc(24))
-        close.setToolTip('关闭')
+        close.setToolTip(t('common.close'))
         close.clicked.connect(self.reject)
         tb.addWidget(close)
         lay.addLayout(tb)
@@ -687,18 +690,15 @@ class VideoInfoDialog(QDialog):
             lay.addWidget(lb)
             return lb
 
-        para('粘贴视频网址，点「解析」读取标题与实际清晰度档位，'
-             '选好档位后点「下载视频」。支持 YouTube、Bilibili 等国内外主流视频平台'
-             '（由开源项目 yt-dlp 提供支持），音视频由 ffmpeg 自动合并为 mp4。')
-        para('开启后会发生什么', 'transferTitle')
-        para('· 首次开启时自动下载解析所需的组件，存放在程序目录的 tools 文件夹内；\n'
-             '· 本页底部可随时检查组件更新或卸载。')
-        para('版权提示', 'transferTitle')
-        para('下载内容仅供个人学习使用，请遵守各平台条款与著作权相关法律。')
+        para(t('video.info.desc'))
+        para(t('common.what_happens'), 'transferTitle')
+        para(t('video.info.what'))
+        para(t('video.info.copyright_title'), 'transferTitle')
+        para(t('video.info.copyright'))
 
         btn_row = QHBoxLayout()
         btn_row.addStretch(1)
-        ok = QPushButton('我知道了')
+        ok = QPushButton(t('common.got_it'))
         ok.setObjectName('setSave')
         ok.setCursor(Qt.PointingHandCursor)
         ok.setDefault(True)
@@ -706,7 +706,7 @@ class VideoInfoDialog(QDialog):
         btn_row.addWidget(ok)
         lay.addLayout(btn_row)
 
-        para('可随时在「设置 → 视频解析」中关闭此功能。', 'transferHint')
+        para(t('video.info.footer'), 'transferHint')
 
         self.setFixedWidth(ui.sc(320))
         self.adjustSize()
@@ -715,11 +715,17 @@ class VideoInfoDialog(QDialog):
 class _ConfirmDialog(QDialog):
     """危险操作二次确认弹窗：样式复用设置窗。"""
 
-    def __init__(self, parent=None, title='卸载组件',
-                 text='将删除视频解析所需的组件文件与已导入的 cookie，本功能随之关闭。'
-                      '下次启用时会自动重新下载，已下载的视频不受影响。',
-                 ok_text='确认卸载'):
+    def __init__(self, parent=None, title=None, text=None, ok_text=None, cancel_text=None):
         super(_ConfirmDialog, self).__init__(parent)
+        # 默认文案在构造时取词典（不能写成默认参数：import 期就会固定语言）
+        if title is None:
+            title = t('video.uninstall.title')
+        if text is None:
+            text = t('video.uninstall.text')
+        if ok_text is None:
+            ok_text = t('video.uninstall.ok')
+        if cancel_text is None:
+            cancel_text = t('common.cancel')
         self.setObjectName('settingsDlg')
         self.setWindowTitle(title)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
@@ -743,7 +749,7 @@ class _ConfirmDialog(QDialog):
         close.setObjectName('closeBtn')
         close.setText('✕')
         close.setFixedSize(ui.sc(28), ui.sc(24))
-        close.setToolTip('关闭')
+        close.setToolTip(t('common.close'))
         close.clicked.connect(self.reject)
         tb.addWidget(close)
         lay.addLayout(tb)
@@ -755,7 +761,7 @@ class _ConfirmDialog(QDialog):
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(ui.sc(8))
-        cancel = QPushButton('取消')
+        cancel = QPushButton(cancel_text)
         cancel.setObjectName('setBtn')
         cancel.setCursor(Qt.PointingHandCursor)
         cancel.clicked.connect(self.reject)
@@ -787,7 +793,7 @@ class CookieGuideDialog(QDialog):
         theme = getattr(parent, 'theme_key', 'nocturne')
         accent = '#0067c0' if theme == 'mica' else '#e8a33d'   # 同关于窗链接配色（QSS 管不到 <a>）
         self.setObjectName('settingsDlg')
-        self.setWindowTitle('抖音需要 cookie')
+        self.setWindowTitle(t('video.cookie.title'))
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
 
         root = QVBoxLayout(self)
@@ -801,7 +807,7 @@ class CookieGuideDialog(QDialog):
 
         tb = QHBoxLayout()
         tb.setContentsMargins(0, 0, 0, 0)
-        title = QLabel('抖音需要 cookie')
+        title = QLabel(t('video.cookie.title'))
         title.setObjectName('setTitle')
         tb.addWidget(title)
         tb.addStretch(1)
@@ -809,7 +815,7 @@ class CookieGuideDialog(QDialog):
         close.setObjectName('closeBtn')
         close.setText('✕')
         close.setFixedSize(ui.sc(28), ui.sc(24))
-        close.setToolTip('关闭')
+        close.setToolTip(t('common.close'))
         close.clicked.connect(self.reject)
         tb.addWidget(close)
         lay.addLayout(tb)
@@ -827,26 +833,17 @@ class CookieGuideDialog(QDialog):
             lb.setCursor(Qt.PointingHandCursor)
             return lb
 
-        para('抖音限制了匿名访问：解析前要给 Zbox 一份浏览器 cookie'
-             '（访客 cookie 即可，<b>不需要登录抖音账号</b>）。按下面四步操作；'
-             'cookie 大约几周后过期，届时抖音再次解析失败，重走第 2～4 步即可。')
-        warn = para('<b>注意：</b>2026 年 9 月起抖音升级了风控，即使导入 cookie，'
-                    'yt-dlp 也暂时无法解析抖音（需等 yt-dlp 更新支持）；'
-                    'cookie 对其它要求登录的站点仍然有效。')
+        para(t('video.cookie.intro'))
+        warn = para(t('video.cookie.warn'))
         warn.setStyleSheet('color:%s;' % accent)
-        para('第 1 步：安装 cookie 导出扩展', 'transferTitle')
-        link_para('在浏览器扩展商店安装「Get cookies.txt LOCALLY」：'
-                  '<a href="%s" style="color:%s;">Edge 外接程序商店（国内直连）</a>　'
-                  '<a href="%s" style="color:%s;">Chrome 应用商店（需科学上网）</a>'
-                  % (self.EDGE_STORE, accent, self.CHROME_STORE, accent))
-        para('第 2 步：让浏览器拿到新鲜 cookie', 'transferTitle')
-        link_para('用装了扩展的浏览器打开 '
-                  '<a href="https://www.douyin.com" style="color:%s;">douyin.com</a>，'
-                  '随便点开一两个视频（或刷新几下页面），不用登录。' % accent)
-        para('第 3 步：导出 cookies.txt', 'transferTitle')
-        para('点浏览器工具栏上的扩展图标 →「Export」，得到一个 cookies.txt 文件'
-             '（通常在「下载」文件夹里）。')
-        para('第 4 步：导入 Zbox', 'transferTitle')
+        para(t('video.cookie.step1_title'), 'transferTitle')
+        link_para(t('video.cookie.step1_text', edge=self.EDGE_STORE,
+                    accent=accent, chrome=self.CHROME_STORE))
+        para(t('video.cookie.step2_title'), 'transferTitle')
+        link_para(t('video.cookie.step2_text', accent=accent))
+        para(t('video.cookie.step3_title'), 'transferTitle')
+        para(t('video.cookie.step3_text'))
+        para(t('video.cookie.step4_title'), 'transferTitle')
         self.status_lab = para('')
 
         self.result_lab = QLabel('')
@@ -857,13 +854,13 @@ class CookieGuideDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(ui.sc(8))
         btn_row.addStretch(1)
-        self.imp_btn = QPushButton('导入 cookies.txt')
+        self.imp_btn = QPushButton(t('video.cookie.import_btn'))
         self.imp_btn.setObjectName('setSave')
         self.imp_btn.setCursor(Qt.PointingHandCursor)
         self.imp_btn.setDefault(True)
         self.imp_btn.clicked.connect(self._on_main_btn)
         btn_row.addWidget(self.imp_btn)
-        self.rm_btn = QPushButton('完成')
+        self.rm_btn = QPushButton(t('video.cookie.done'))
         self.rm_btn.setObjectName('setSave')
         self.rm_btn.setCursor(Qt.PointingHandCursor)
         self.rm_btn.clicked.connect(self.accept)
@@ -879,13 +876,13 @@ class CookieGuideDialog(QDialog):
             if video_dl.has_cookies():
                 ts = time.strftime('%Y-%m-%d',
                                    time.localtime(os.path.getmtime(video_dl.cookies_path())))
-                self.status_lab.setText('当前状态：<b>已导入</b>（%s）。' % ts)
-                self.imp_btn.setText('移除 cookies')
-                self.imp_btn.setToolTip('删除已导入的 cookies.txt')
+                self.status_lab.setText(t('video.cookie.status_imported', date=ts))
+                self.imp_btn.setText(t('video.cookie.remove_btn'))
+                self.imp_btn.setToolTip(t('video.cookie.remove_tooltip'))
                 self.rm_btn.show()
             else:
-                self.status_lab.setText('当前状态：未导入。点下面按钮选择刚导出的 cookies.txt。')
-                self.imp_btn.setText('导入 cookies.txt')
+                self.status_lab.setText(t('video.cookie.status_none'))
+                self.imp_btn.setText(t('video.cookie.import_btn'))
                 self.imp_btn.setToolTip('')
                 self.rm_btn.hide()
         except Exception:
@@ -901,12 +898,12 @@ class CookieGuideDialog(QDialog):
         try:
             dl_dir = os.path.join(os.path.expanduser('~'), 'Downloads')
             src, _ = QFileDialog.getOpenFileName(
-                self, '选择 cookies.txt', dl_dir,
-                'cookie 文件 (cookies.txt *.txt);;所有文件 (*)')
+                self, t('video.cookie.pick_title'), dl_dir,
+                t('video.cookie.pick_filter'))
             if not src:
                 return
             ok, msg = video_dl.import_cookies(src)
-            self.result_lab.setText(msg if msg else '导入成功，回到面板重新点「解析」即可。')
+            self.result_lab.setText(msg if msg else t('video.cookie.import_ok'))
             self._refresh_status()
             self.adjustSize()
         except Exception:
@@ -915,7 +912,7 @@ class CookieGuideDialog(QDialog):
     def _remove(self):
         try:
             video_dl.remove_cookies()
-            self.result_lab.setText('已移除。')
+            self.result_lab.setText(t('video.cookie.removed'))
             self._refresh_status()
             self.adjustSize()
         except Exception:
@@ -967,13 +964,13 @@ class VideoWidget(QWidget):
         url_row.setSpacing(ui.sc(6))
         self.url_edit = QLineEdit()
         self.url_edit.setObjectName('urlEdit')
-        self.url_edit.setPlaceholderText('粘贴视频网址（YouTube / Bilibili 等）')
+        self.url_edit.setPlaceholderText(t('video.url.placeholder'))
         self.url_edit.setClearButtonEnabled(True)
         self.url_edit.returnPressed.connect(self._start_parse)
         url_row.addWidget(self.url_edit, 1)
         self.parse_btn = QToolButton()
         self.parse_btn.setObjectName('parseBtn')
-        self.parse_btn.setText('解 析')
+        self.parse_btn.setText(t('video.parse'))
         self.parse_btn.setCursor(Qt.PointingHandCursor)
         self.parse_btn.clicked.connect(self._start_parse)
         url_row.addWidget(self.parse_btn)
@@ -1005,9 +1002,9 @@ class VideoWidget(QWidget):
         state_row.addWidget(self.state_lab)
         self.cookie_link = QToolButton()
         self.cookie_link.setObjectName('linkBtn')
-        self.cookie_link.setText('查看解决办法')
+        self.cookie_link.setText(t('video.cookie.help_link'))
         self.cookie_link.setCursor(Qt.PointingHandCursor)
-        self.cookie_link.setToolTip('抖音等站点要求浏览器 cookie，点这里看导入步骤')
+        self.cookie_link.setToolTip(t('video.cookie.help_tooltip'))
         self.cookie_link.clicked.connect(lambda: CookieGuideDialog(self).exec())
         self.cookie_link.hide()          # 只在 cookie 类报错时出现
         state_row.addWidget(self.cookie_link)
@@ -1018,7 +1015,7 @@ class VideoWidget(QWidget):
         dir_row = QHBoxLayout()
         dir_row.setContentsMargins(ui.sc(10), 0, ui.sc(10), 0)
         dir_row.setSpacing(ui.sc(6))
-        dir_t = QLabel('保存到')
+        dir_t = QLabel(t('video.save_to'))
         dir_t.setObjectName('videoLabel')
         dir_row.addWidget(dir_t)
         self.dir_lab = QLabel()
@@ -1027,13 +1024,13 @@ class VideoWidget(QWidget):
         dir_row.addWidget(self.dir_lab, 1)
         pick = QToolButton()
         pick.setObjectName('linkBtn')
-        pick.setText('更改')
+        pick.setText(t('video.change'))
         pick.setCursor(Qt.PointingHandCursor)
         pick.clicked.connect(self._pick_dir)
         dir_row.addWidget(pick)
         open_btn = QToolButton()
         open_btn.setObjectName('linkBtn')
-        open_btn.setText('打开')
+        open_btn.setText(t('video.open'))
         open_btn.setCursor(Qt.PointingHandCursor)
         open_btn.clicked.connect(self._open_dir)
         dir_row.addWidget(open_btn)
@@ -1049,20 +1046,20 @@ class VideoWidget(QWidget):
         ver_row = QHBoxLayout()
         ver_row.setContentsMargins(ui.sc(10), 0, ui.sc(10), 0)
         ver_row.setSpacing(ui.sc(6))
-        self.ver_lab = QLabel('组件 —')
+        self.ver_lab = QLabel(t('video.ver.none'))
         self.ver_lab.setObjectName('videoVer')
         ver_row.addWidget(self.ver_lab, 1)
         self.update_btn = QToolButton()
         self.update_btn.setObjectName('linkBtn')
-        self.update_btn.setText('检查更新')
+        self.update_btn.setText(t('update.check'))
         self.update_btn.setCursor(Qt.PointingHandCursor)
         self.update_btn.clicked.connect(self._ver_clicked)
         ver_row.addWidget(self.update_btn)
         self.uninst_btn = QToolButton()
         self.uninst_btn.setObjectName('linkBtn')
-        self.uninst_btn.setText('卸载组件')
+        self.uninst_btn.setText(t('video.uninstall.btn'))
         self.uninst_btn.setCursor(Qt.PointingHandCursor)
-        self.uninst_btn.setToolTip('删除视频解析组件，关闭本功能')
+        self.uninst_btn.setToolTip(t('video.uninstall.tooltip'))
         self.uninst_btn.clicked.connect(self._uninstall_clicked)
         ver_row.addWidget(self.uninst_btn)
         pl.addLayout(ver_row)
@@ -1111,7 +1108,7 @@ class VideoWidget(QWidget):
             if on:
                 if self._on:
                     return True
-                self.gate_msg.setText('正在检查组件…')
+                self.gate_msg.setText(t('video.gate.checking'))
                 self._show_gate('prep')
                 self._prep_seq += 1
                 threading.Thread(target=self._prep_work,
@@ -1137,9 +1134,11 @@ class VideoWidget(QWidget):
     def _prep_progress(self, what, done, total):
         try:
             if total:
-                self.sig_prep.emit('正在下载 %s… %d%%' % (what, done * 100 // total))
+                self.sig_prep.emit(t('video.prep.progress', name=what,
+                                     percent=done * 100 // total))
             else:
-                self.sig_prep.emit('正在下载 %s… %s' % (what, _fmt_mb(done)))
+                self.sig_prep.emit(t('video.prep.progress_size', name=what,
+                                     size=_fmt_mb(done)))
         except Exception:
             pass
 
@@ -1163,7 +1162,7 @@ class VideoWidget(QWidget):
             else:
                 self._on = False
                 self.cfg.set('video_enabled', False)
-                self.gate_msg.setText('组件下载失败，请检查网络后重试\n%s' % (err or '')[:80])
+                self.gate_msg.setText(t('video.prep.fail', error=(err or '')[:80]))
                 self._show_gate('unavailable')
                 self.enabled_changed.emit(False)
         except Exception:
@@ -1193,17 +1192,17 @@ class VideoWidget(QWidget):
             self._ff_new = bool(ff_latest) and bool(ffver) and \
                     video_dl.version_key(ff_latest) != video_dl.version_key(ffver)
             if not local or not ffver:
-                self.ver_lab.setText('组件异常')
-                self.update_btn.setText('重试')
+                self.ver_lab.setText(t('video.ver.error'))
+                self.update_btn.setText(t('common.retry'))
             elif self._yt_new or self._ff_new:
-                self.ver_lab.setText('组件有新版可更新')
-                self.update_btn.setText('更新')
+                self.ver_lab.setText(t('video.ver.update_available'))
+                self.update_btn.setText(t('video.ver.update'))
             elif latest and ff_latest:
-                self.ver_lab.setText('组件已是最新')
-                self.update_btn.setText('检查更新')
+                self.ver_lab.setText(t('video.ver.latest'))
+                self.update_btn.setText(t('update.check'))
             else:
-                self.ver_lab.setText('更新检查失败')
-                self.update_btn.setText('重试')
+                self.ver_lab.setText(t('video.ver.check_failed'))
+                self.update_btn.setText(t('common.retry'))
         except Exception:
             pass
 
@@ -1215,10 +1214,10 @@ class VideoWidget(QWidget):
             self._updating = True
             self.update_btn.setEnabled(False)
             if has_new:
-                self._set_state('busy', '正在更新 yt-dlp…')
+                self._set_state('busy', t('video.ver.updating'))
                 threading.Thread(target=self._update_work, daemon=True).start()
             else:
-                self.ver_lab.setText('检查中…')
+                self.ver_lab.setText(t('video.ver.checking'))
                 threading.Thread(target=self._check_work, daemon=True).start()
         except Exception:
             pass
@@ -1249,12 +1248,12 @@ class VideoWidget(QWidget):
         self._updating = False
         self.sig_ver.emit(local, latest, ffver, ff_latest)
         self.sig_msg.emit('done' if ok else 'fail',
-                          '组件已更新到最新' if ok else '组件更新失败，请稍后重试')
+                          t('video.ver.updated') if ok else t('video.ver.update_failed'))
 
     def _uninstall_clicked(self):
         try:
             if self._any_busy() or self._updating:
-                self._set_state('fail', '当前有任务进行中，无法卸载')
+                self._set_state('fail', t('video.uninstall.busy'))
                 return
             if _ConfirmDialog(self).exec() != QDialog.Accepted:
                 return
@@ -1273,10 +1272,10 @@ class VideoWidget(QWidget):
                 return
             url = self.url_edit.text().strip()
             if not url:
-                self._set_state('fail', '请先粘贴视频网址')
+                self._set_state('fail', t('video.url.empty'))
                 return
             if any(t.url == url for t in self.tasks):
-                self._set_state('', '该网址已在列表中')
+                self._set_state('', t('video.url.duplicate'))
                 return
             self._set_state('', '')
             task = _VideoTask(self, url)
@@ -1320,7 +1319,7 @@ class VideoWidget(QWidget):
 
     def _pick_dir(self):
         try:
-            d = QFileDialog.getExistingDirectory(self, '选择保存目录', self.save_dir)
+            d = QFileDialog.getExistingDirectory(self, t('video.pick_dir'), self.save_dir)
             if d:
                 self.save_dir = os.path.normpath(d)
                 self.cfg.set('video_dir', self.save_dir)
@@ -1351,7 +1350,7 @@ class VideoWidget(QWidget):
         self.gate_msg.setObjectName('transferHint')
         self.gate_msg.setAlignment(Qt.AlignCenter)
         gl.addWidget(self.gate_msg)
-        self.gate_ok = QPushButton('启用视频解析')
+        self.gate_ok = QPushButton(t('video.gate.enable'))
         self.gate_ok.setObjectName('setSave')           # 复用设置窗主按钮样式
         self.gate_ok.setCursor(Qt.PointingHandCursor)
         self.gate_ok.clicked.connect(self._gate_ok_clicked)
@@ -1362,7 +1361,7 @@ class VideoWidget(QWidget):
         self.gate_help.setText('?')
         self.gate_help.setFixedSize(ui.sc(20), ui.sc(20))
         self.gate_help.setCursor(Qt.PointingHandCursor)
-        self.gate_help.setToolTip('什么是视频解析')
+        self.gate_help.setToolTip(t('settings.video.help'))
         self.gate_help.clicked.connect(lambda: VideoInfoDialog(self).exec())
         gl.addWidget(self.gate_help, 0, Qt.AlignCenter)
         gl.addStretch(1)
@@ -1374,9 +1373,9 @@ class VideoWidget(QWidget):
         try:
             self._gate_mode = mode
             self.gate_msg.setVisible(mode != 'enable')
-            self.gate_ok.setText({'enable': '启用视频解析',
-                                  'prep': '准备中…',
-                                  'unavailable': '确定'}[mode])
+            self.gate_ok.setText({'enable': t('video.gate.enable'),
+                                  'prep': t('video.gate.preparing'),
+                                  'unavailable': t('common.ok')}[mode])
             self.gate_ok.setEnabled(mode != 'prep')
             self.gate_help.setVisible(mode == 'enable')
             if self._blur is None:
