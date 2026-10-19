@@ -35,6 +35,7 @@ import installer
 import screenshot as shotmod
 import sysutil
 import transfer
+from i18n import t
 
 IPC_KEY = sysutil.IPC_KEY
 
@@ -65,13 +66,13 @@ class _HolidayWorker(QThread):
                 try:
                     o, w = self._fetch(name, url)
                 except Exception as e:
-                    errs.append('%s：%s' % (name, e))
+                    errs.append('%s: %s' % (name, e))
                     continue
                 off.update(o)
                 work |= w
                 hit.append(name)
                 break
-        self.done.emit({'off': off, 'work': work, 'hit': hit, 'err': '；'.join(errs)})
+        self.done.emit({'off': off, 'work': work, 'hit': hit, 'err': '; '.join(errs)})
 
     def _fetch(self, name, url):
         """有存档目录时抓原文、解析通过后再存（存失败不挡导入）；否则抓了直接解析。"""
@@ -150,15 +151,15 @@ def start_holiday_update(hstore, cfg, panel, groups, manual=True, fallback_url=N
         if not manual:
             return
         if n:
-            ui._dbg('节假日更新成功：%s 共 %d 条' % ('、'.join(res['hit']), n))
-            show('节假日更新成功，共 %d 条' % n)
+            ui._dbg('holiday update ok: %s (%d entries)' % (', '.join(res['hit']), n))
+            show(t('holiday.update_ok', count=n))
         else:
-            ui._dbg('联网更新失败：%s' % res['err'][:220])
+            ui._dbg('holiday update failed: %s' % res['err'][:220])
             if fallback_url:
                 QDesktopServices.openUrl(QUrl(fallback_url))
-                show('联网更新失败，已打开下载页，可另存后导入', ok=False, hold_ms=2600)
+                show(t('holiday.update_failed_fallback'), ok=False, hold_ms=2600)
             else:
-                show('联网更新失败，请检查网络后重试', ok=False, hold_ms=2200)
+                show(t('holiday.update_failed'), ok=False, hold_ms=2200)
 
     w.done.connect(on_done)
     w.start()
@@ -252,7 +253,7 @@ def main():
         # ① 面板全程不阻塞，选目录期间设置窗等照常可用；
         # ② 面板自身全是 Tool/挂带窗口且无活动窗口，原生框在面板进程里开不出可见窗口（实测隐形）。
         # 选中的路径经 IPC 发回面板建格子。
-        path = QFileDialog.getExistingDirectory(None, '选择要映射的文件夹')
+        path = QFileDialog.getExistingDirectory(None, t('boxes.pick_folder'))
         if path:
             notify_existing(b'folder:' + os.path.normpath(path).encode('utf-8'))
         return 0
@@ -337,7 +338,7 @@ def main():
     # ② 收到文件请求——唤起面板切到传输 tab（接收确认卡片就弹在那里，不唤起用户
     #   根本看不到，会拖到对端 180s 超时）；「传输完成」等纯通知在传输页记录区可见，不打扰
     def _transfer_notify(title, msg):
-        if title != '收到文件':
+        if title != t('transfer.recv.title'):
             return
         try:
             panel.set_tab(2, save=False)   # tabs：日历 0 / 待办 1 / 传输 2
@@ -462,18 +463,18 @@ def _import_holidays(hstore, panel, on_download):
     """先弹引导窗口（三个数据源各一行 URL，可点「下载并导入」），
     也可以自己另存文件后走「选择文件导入」。"""
     def pick():
-        path, _ = QFileDialog.getOpenFileName(None, '选择节假日 JSON（数据源页面另存的文件）', '',
-                                              'JSON 文件 (*.json)')
+        path, _ = QFileDialog.getOpenFileName(None, t('holiday.pick_title'), '',
+                                              t('holiday.json_filter'))
         if not path:
             return
         try:
             n = hstore.import_file(path)
             panel.refresh_holidays()
-            ui._dbg('节假日导入成功，共 %d 条' % n)
-            _pick_toast('节假日导入成功，共 %d 条' % n)
+            ui._dbg('holiday import ok: %d entries' % n)
+            _pick_toast(t('holiday.import_ok', count=n))
         except Exception as e:
-            ui._dbg('节假日导入失败：%s' % e)
-            _pick_toast('节假日导入失败：文件格式无法识别', ok=False)
+            ui._dbg('holiday import failed: %s' % e)
+            _pick_toast(t('holiday.import_failed'), ok=False)
 
     def _pick_toast(text, **kw):
         win = None

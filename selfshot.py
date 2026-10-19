@@ -520,7 +520,7 @@ class _Runner(object):
     # ---- 全隐藏单项菜单 ----
     def _make_icons_menu(self):
         m = QMenu(self.panel)
-        m.addAction(sysutil.SHOW_ICONS_TEXT, lambda: None)
+        m.addAction(sysutil.show_icons_text(), lambda: None)
         m.adjustSize()
         return m
 
