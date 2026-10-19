@@ -235,17 +235,41 @@ class TodoActionsTest(unittest.TestCase):
         widget._menu(pos)
         self.qapp.processEvents()
         self.assertEqual(self.store.items, [])
-        self.assertTrue(widget._undo_toast.isVisible())
-        self.assertTrue(widget._undo_toast._timer.isActive())
-        self.assertEqual(widget._undo_toast._timer.interval(), 5000)
-        self.assertEqual(len(widget._undo_toast._show_anims), 2)
-        self.assertEqual(widget._undo_toast._countdown_anim.state(),
+        toast = widget._undo_toasts[0]
+        self.assertTrue(toast.isVisible())
+        self.assertTrue(toast._timer.isActive())
+        self.assertEqual(toast._timer.interval(), 5000)
+        self.assertEqual(len(toast._show_anims), 2)
+        self.assertEqual(toast._countdown_anim.state(),
                          QAbstractAnimation.State.Running)
 
-        widget._undo_toast.undo_btn.click()
+        toast.undo_btn.click()
         self.qapp.processEvents()
         self.assertEqual(self.store.items[0]['text'], 'keep me\nline two')
-        self.assertFalse(widget._undo_toast.isVisible())
+        self.assertEqual(widget._undo_toasts, [])
+
+    def test_multiple_deletes_stack_toasts_and_undo_independently(self):
+        self.store.add('older')
+        self.store.add('newer')
+        widget = self._widget()
+        older_id = next(i['id'] for i in self.store.items if i['text'] == 'older')
+        newer_id = next(i['id'] for i in self.store.items if i['text'] == 'newer')
+
+        widget._delete_item(older_id)
+        self.qapp.processEvents()
+        widget._delete_item(newer_id)
+        self.qapp.processEvents()
+        QTest.qWait(420)
+        self.assertEqual(len(widget._undo_toasts), 2)
+        newer_toast, older_toast = widget._undo_toasts
+        self.assertGreater(newer_toast.y(), older_toast.y())
+        self.assertTrue(newer_toast.isVisible())
+        self.assertTrue(older_toast.isVisible())
+
+        newer_toast.undo_btn.click()
+        self.qapp.processEvents()
+        self.assertEqual(len(widget._undo_toasts), 1)
+        self.assertEqual([i['text'] for i in self.store.items], ['newer'])
 
 
 if __name__ == '__main__':

@@ -231,7 +231,8 @@ class _Runner(object):
                      teardown=lambda: p.todo.rebuild())
             self.job('%s_todo_undo' % theme, 400,
                      lambda: (p.set_tab(1, save=False),
-                              p.todo._undo_toast.show_undo(lambda: None)),
+                              p.todo._add_undo_toast(lambda: None),
+                              p.todo._add_undo_toast(lambda: None)),
                      lambda: p, teardown=self._hide_todo_undo)
             self.job('%s_toast_ok' % theme, 500,
                      lambda: ui.show_toast_on(p, '节假日数据已更新', ok=True,
@@ -416,9 +417,15 @@ class _Runner(object):
         p._toast_op.setOpacity(0.0)
 
     def _hide_todo_undo(self):
-        toast = self.panel.todo._undo_toast
-        toast._timer.stop()
-        toast.hide()
+        todo = self.panel.todo
+        for toast in list(todo._undo_toasts):
+            toast._timer.stop()
+            toast._countdown_anim.stop()
+            for anim in toast._show_anims:
+                anim.stop()
+            toast.hide()
+            toast.deleteLater()
+        todo._undo_toasts = []
 
     def _make_settings(self):
         return ui.SettingsDialog(self.panel, lambda **kw: False, lambda: None,

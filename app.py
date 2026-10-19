@@ -1077,6 +1077,8 @@ class _UndoCountdownLine(QWidget):
 
 class TodoUndoToast(QFrame):
     """删除成功提示：右下角停留 5 秒，可撤销最近一次删除。"""
+    closed = Signal(object)
+
     def __init__(self, parent=None):
         super(TodoUndoToast, self).__init__(parent)
         self.setObjectName('todoUndoToast')
@@ -1104,13 +1106,14 @@ class TodoUndoToast(QFrame):
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(5000)
-        self._timer.timeout.connect(self.hide)
+        self._timer.timeout.connect(self._expire)
         self._countdown_anim = QVariantAnimation(self)
         self._countdown_anim.setDuration(5000)
         self._countdown_anim.setStartValue(1.0)
         self._countdown_anim.setEndValue(0.0)
         self._countdown_anim.valueChanged.connect(self.countdown.set_progress)
         self._show_anims = []
+        self._closed = False
         self._opacity = QGraphicsOpacityEffect(self)
         self._opacity.setOpacity(0.0)
         self.setGraphicsEffect(self._opacity)
@@ -1121,11 +1124,11 @@ class TodoUndoToast(QFrame):
 
     def show_undo(self, callback):
         self._undo_cb = callback
+        self._closed = False
         for anim in self._show_anims:
             anim.stop()
         self._countdown_anim.stop()
         self.adjustSize()
-        self.reposition()
         end_pos = self.pos()
         self.move(end_pos + QPoint(0, sc(10)))
         self._opacity.setOpacity(0.0)
@@ -1148,22 +1151,25 @@ class TodoUndoToast(QFrame):
         self._countdown_anim.start()
         self._timer.start()
 
-    def reposition(self):
-        p = self.parentWidget()
-        if p is None:
-            return
-        self.move(max(0, p.width() - self.width() - sc(12)),
-                  max(0, p.height() - self.height() - sc(12)))
-
     def _undo(self):
         callback, self._undo_cb = self._undo_cb, None
+        self._finish()
+        if callback:
+            callback()
+
+    def _expire(self):
+        self._finish()
+
+    def _finish(self):
+        if self._closed:
+            return
+        self._closed = True
         self._timer.stop()
         self._countdown_anim.stop()
         for anim in self._show_anims:
             anim.stop()
         self.hide()
-        if callback:
-            callback()
+        self.closed.emit(self)
 
 
 class TodoWidget(QWidget):
@@ -1172,9 +1178,7 @@ class TodoWidget(QWidget):
         self.store = store
         self.theme_key = THEME_ORDER[0]
         self._editing = False
-        self._undo_item = None
-        self._undo_index = None
-        self._undo_toast = TodoUndoToast(self)
+        self._undo_toasts = []
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -1221,12 +1225,13 @@ class TodoWidget(QWidget):
 
     def set_theme(self, key):
         self.theme_key = key
-        self._undo_toast.set_theme(key)
+        for toast in self._undo_toasts:
+            toast.set_theme(key)
         self._update_count()
 
     def resizeEvent(self, e):
         super(TodoWidget, self).resizeEvent(e)
-        self._undo_toast.reposition()
+        self._layout_undo_toasts()
 
     def _update_count(self):
         self.count.setText(THEMES[self.theme_key].get('count_fmt', '{:d} 未完成').format(self.store.pending_count()))
@@ -1510,17 +1515,53 @@ class TodoWidget(QWidget):
                 QApplication.clipboard().setText(text)
 
     def _delete_item(self, item_id):
-        self._undo_item, self._undo_index = self.store.take(item_id)
+        item, index = self.store.take(item_id)
         self.rebuild()
-        if self._undo_item is not None:
-            self._undo_toast.show_undo(self._restore_deleted)
+        if item is not None:
+            self._add_undo_toast(
+                lambda removed=item, pos=index: self._restore_deleted(removed, pos))
 
-    def _restore_deleted(self):
-        if self._undo_item is None:
-            return
-        self.store.restore(self._undo_item, self._undo_index)
-        self._undo_item = None
-        self._undo_index = None
+    def _add_undo_toast(self, callback):
+        toast = TodoUndoToast(self)
+        toast.set_theme(self.theme_key)
+        toast.closed.connect(self._remove_undo_toast)
+        self._undo_toasts.insert(0, toast)
+        toast.adjustSize()
+        self._layout_undo_toasts(animate=True, skip=toast)
+        toast.show_undo(callback)
+        return toast
+
+    def _remove_undo_toast(self, toast):
+        if toast in self._undo_toasts:
+            self._undo_toasts.remove(toast)
+        toast.deleteLater()
+        self._layout_undo_toasts(animate=True)
+
+    def _layout_undo_toasts(self, animate=False, skip=None):
+        bottom = self.height() - sc(12)
+        for toast in self._undo_toasts:
+            target = QPoint(self.width() - toast.width() - sc(12),
+                            bottom - toast.height())
+            if toast is skip or not animate or toast.pos() == target:
+                old_anim = getattr(toast, '_move_anim', None)
+                if old_anim is not None:
+                    old_anim.stop()
+                toast.move(target)
+            else:
+                old_anim = getattr(toast, '_move_anim', None)
+                if old_anim is not None:
+                    old_anim.stop()
+                anim = QPropertyAnimation(toast, b'pos', self)
+                anim.setDuration(220)
+                anim.setStartValue(toast.pos())
+                anim.setEndValue(target)
+                anim.setEasingCurve(QEasingCurve.OutCubic)
+                toast._move_anim = anim
+                anim.start()
+            bottom = target.y() - sc(6)
+
+    def _restore_deleted(self, item, index):
+        self.store.restore(item, index)
         self.rebuild()
 
 

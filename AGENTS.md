@@ -334,7 +334,8 @@ ClearType，文字发灰），圆角统一走遮罩（`round_corners`，SetWindo
 
 右键菜单顺序是「编辑 / 复制 / 删除」；删除文案用透明 `QWidgetAction` 承载红色 label（QSS 无法
 按 QAction 单独上色），删除记录由 `TodoStore.take/restore` 保留内容与状态，恢复后按排序规则归位，右下角
-`TodoUndoToast` 停留 5 秒供撤销。删除项的自绘 widget 必须主动设置 `QMenu.activeAction` 并处理
+`TodoUndoToast` 实例停留 5 秒供撤销。每条删除提示独立计时、独立撤销；连续删除时新实例在最下方，
+旧实例平滑向上堆叠，任意一条撤销或超时只移除自身并让其余提示回落。删除项的自绘 widget 必须主动设置 `QMenu.activeAction` 并处理
 鼠标点击，否则透明 `QWidgetAction` 会吞掉悬停、导致没有选中反馈；其左内边距按标准菜单项对齐。
 toast 用 360ms 位置 + 透明度入场动画，底部 `_UndoCountdownLine` 在 5 秒内线性缩短。输入框无
 placeholder，Enter 保存、Shift+Enter 换行；从列表
