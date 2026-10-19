@@ -44,13 +44,48 @@ enum class AppError {
     UNKNOWN,
 }
 
-/** 界面文案接口：中英两套实现覆盖全部用户可见状态与错误 */
+/** 界面文案接口：中英两套实现覆盖全部用户可见文案 */
 interface AppStrings {
     val transferTab: String
     val settingsTab: String
+    val settingsTitle: String
     val language: String
     val nearbyDevices: String
+    val refresh: String
+    val cancel: String
+    val noDevices: String
+    val online: String
+    val thisDevice: String
+    val alias: String
+    val aliasEmpty: String
+    val saved: String
+    val saveAlias: String
+    val sourcePrompt: String
+    val fromGallery: String
+    val fromFiles: String
+    val transferRecords: String
+    val noRecords: String
+    val sent: String
+    val received: String
+    val cancelTransfer: String
+    val openContainingFolder: String
+    val unknownSize: String
+    val receiveFiles: String
+    val accept: String
+    val reject: String
+    val saveToDefault: String
 
+    fun sendTo(alias: String): String
+    fun pendingFiles(count: Int): String
+    fun deviceType(type: String?): String
+    fun fileCountSummary(count: Int, size: String): String
+    fun fromAlias(alias: String): String
+    fun fromPeer(alias: String): String
+    fun toAlias(alias: String): String
+    fun saveTo(name: String): String
+    fun fileWithSize(name: String, size: String): String
+    fun multiFiles(firstName: String, count: Int): String
+    fun remaining(seconds: Long): String
     fun status(status: TransferStatus): String
     fun error(error: AppError): String
 
@@ -69,8 +104,57 @@ object AppLocale {
 object ChineseStrings : AppStrings {
     override val transferTab = "传输"
     override val settingsTab = "设置"
+    override val settingsTitle = "设置"
     override val language = "语言"
-    override val nearbyDevices = "附近的设备"
+    override val nearbyDevices = "附近设备"
+    override val refresh = "刷新"
+    override val cancel = "取消"
+    override val noDevices = "未发现设备\n请确认对方在同一局域网并已打开应用，或点右上角刷新扫描"
+    override val online = "在线"
+    override val thisDevice = "本机"
+    override val alias = "别名"
+    override val aliasEmpty = "别名不能为空"
+    override val saved = "已保存"
+    override val saveAlias = "保存别名"
+    override val sourcePrompt = "选择要发送的内容来源"
+    override val fromGallery = "从相册选择"
+    override val fromFiles = "从文件选择"
+    override val transferRecords = "传输记录"
+    override val noRecords = "暂无记录"
+    override val sent = "发送"
+    override val received = "接收"
+    override val cancelTransfer = "取消传输"
+    override val openContainingFolder = "打开文件所在目录"
+    override val unknownSize = "未知大小"
+    override val receiveFiles = "接收文件"
+    override val accept = "接受"
+    override val reject = "拒绝"
+    override val saveToDefault = "保存到：Download/Zbox（系统默认，点我更改）"
+
+    override fun sendTo(alias: String) = "发送到 $alias"
+    override fun pendingFiles(count: Int) = "待发送 $count 个文件，点选下方设备发送"
+    override fun deviceType(type: String?): String = when (type) {
+        "mobile" -> "手机"
+        "desktop" -> "电脑"
+        "web" -> "网页"
+        "headless" -> "终端"
+        "server" -> "服务器"
+        else -> type ?: "设备"
+    }
+
+    override fun fileCountSummary(count: Int, size: String) = "共 $count 个文件 · $size"
+    override fun fromAlias(alias: String) = "来自：$alias"
+    override fun fromPeer(alias: String) = "来自 $alias"
+    override fun toAlias(alias: String) = "发往 $alias"
+    override fun saveTo(name: String) = "保存到：$name"
+    override fun fileWithSize(name: String, size: String) = "$name（$size）"
+    override fun multiFiles(firstName: String, count: Int) = "$firstName 等 $count 个文件"
+
+    override fun remaining(seconds: Long): String = when {
+        seconds < 60 -> "剩 $seconds 秒"
+        seconds < 3600 -> "剩 ${seconds / 60} 分 ${seconds % 60} 秒"
+        else -> "剩 ${seconds / 3600} 小时"
+    }
 
     override fun status(status: TransferStatus): String = when (status) {
         TransferStatus.WAITING -> "等待确认"
@@ -104,8 +188,62 @@ object ChineseStrings : AppStrings {
 object EnglishStrings : AppStrings {
     override val transferTab = "Transfer"
     override val settingsTab = "Settings"
+    override val settingsTitle = "Settings"
     override val language = "Language"
     override val nearbyDevices = "Nearby devices"
+    override val refresh = "Refresh"
+    override val cancel = "Cancel"
+    override val noDevices = "No devices found\nMake sure the other device is on the same network with the app open, or tap refresh to scan again"
+    override val online = "Online"
+    override val thisDevice = "This device"
+    override val alias = "Device name"
+    override val aliasEmpty = "Device name cannot be empty"
+    override val saved = "Saved"
+    override val saveAlias = "Save device name"
+    override val sourcePrompt = "Choose what to send"
+    override val fromGallery = "Choose from photos"
+    override val fromFiles = "Choose files"
+    override val transferRecords = "Transfers"
+    override val noRecords = "No transfers yet"
+    override val sent = "Sent"
+    override val received = "Received"
+    override val cancelTransfer = "Cancel transfer"
+    override val openContainingFolder = "Open containing folder"
+    override val unknownSize = "Unknown size"
+    override val receiveFiles = "Receive files"
+    override val accept = "Accept"
+    override val reject = "Decline"
+    override val saveToDefault = "Save to: Download/Zbox (default, tap to change)"
+
+    override fun sendTo(alias: String) = "Send to $alias"
+    override fun pendingFiles(count: Int) =
+        if (count == 1) "1 file pending — tap a device below to send"
+        else "$count files pending — tap a device below to send"
+
+    override fun deviceType(type: String?): String = when (type) {
+        "mobile" -> "Phone"
+        "desktop" -> "Desktop"
+        "web" -> "Web"
+        "headless" -> "Terminal"
+        "server" -> "Server"
+        else -> type ?: "Device"
+    }
+
+    override fun fileCountSummary(count: Int, size: String) =
+        if (count == 1) "1 file · $size" else "$count files · $size"
+
+    override fun fromAlias(alias: String) = "From: $alias"
+    override fun fromPeer(alias: String) = "From $alias"
+    override fun toAlias(alias: String) = "To $alias"
+    override fun saveTo(name: String) = "Save to: $name"
+    override fun fileWithSize(name: String, size: String) = "$name ($size)"
+    override fun multiFiles(firstName: String, count: Int) = "$firstName and ${count - 1} more"
+
+    override fun remaining(seconds: Long): String = when {
+        seconds < 60 -> "${seconds}s left"
+        seconds < 3600 -> "${seconds / 60}m ${seconds % 60}s left"
+        else -> "${seconds / 3600}h left"
+    }
 
     override fun status(status: TransferStatus): String = when (status) {
         TransferStatus.WAITING -> "Waiting for confirmation"

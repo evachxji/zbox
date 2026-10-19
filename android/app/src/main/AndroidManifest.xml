@@ -13,7 +13,7 @@
     <application
         android:usesCleartextTraffic="true"
         android:icon="@mipmap/ic_launcher"
-        android:label="Zbox 传输"
+        android:label="Zbox"
         android:supportsRtl="true"
         android:theme="@style/Theme.ZboxTransfer">
         <activity

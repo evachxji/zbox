@@ -108,6 +108,9 @@ class TransferRecord(
     val peerAlias: String,
     val fileName: String,
     val size: Long,
+    // 接收会话聚合记录：多文件数 / 共同顶层文件夹名（显示名按当前语言动态生成）
+    val multiCount: Int = 0,
+    val folderName: String? = null,
 ) {
     var progress by mutableStateOf(0L)
     var status by mutableStateOf(TransferStatus.WAITING)

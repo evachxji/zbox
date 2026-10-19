@@ -12,17 +12,27 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Settings as SettingsGlyph
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.ui.Modifier
 import androidx.core.content.IntentCompat
 import androidx.lifecycle.lifecycleScope
 import com.zbox.transfer.ui.HomeScreen
 import com.zbox.transfer.ui.ReceiveDialogHost
+import com.zbox.transfer.ui.SettingsScreen
 import fi.iki.elonen.NanoHTTPD
 import java.security.SecureRandom
 import java.util.Locale
@@ -169,11 +179,29 @@ class MainActivity : ComponentActivity() {
 
 @androidx.compose.runtime.Composable
 fun ZboxApp(discovery: Discovery) {
-    // 单页布局：设备 + 记录同屏，不再需要底部 tab
+    var currentTab by rememberSaveable { mutableIntStateOf(0) }
+    val strings = AppStrings.current
     MaterialTheme(colorScheme = darkColorScheme()) {
-        Scaffold { padding ->
+        Scaffold(
+            bottomBar = {
+                NavigationBar {
+                    NavigationBarItem(
+                        selected = currentTab == 0,
+                        onClick = { currentTab = 0 },
+                        icon = { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null) },
+                        label = { Text(strings.transferTab) },
+                    )
+                    NavigationBarItem(
+                        selected = currentTab == 1,
+                        onClick = { currentTab = 1 },
+                        icon = { Icon(Icons.Filled.SettingsGlyph, contentDescription = null) },
+                        label = { Text(strings.settingsTab) },
+                    )
+                }
+            },
+        ) { padding ->
             Box(modifier = Modifier.padding(padding)) {
-                HomeScreen(discovery)
+                if (currentTab == 0) HomeScreen(discovery) else SettingsScreen()
                 ReceiveDialogHost()
             }
         }

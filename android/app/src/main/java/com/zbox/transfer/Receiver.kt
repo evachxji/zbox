@@ -120,12 +120,18 @@ class Receiver(private val context: Context) {
         val sessionId = UUID.randomUUID().toString()
         val tokens = request.files.keys.associateWith { randomToken() }
         val files = request.files.values.toList()
+        val top = commonTopFolder(files)
+        val first = files.first()
         val record = TransferRecord(
             id = sessionId,
             outgoing = false,
             peerAlias = request.info.alias,
-            fileName = sessionDisplayName(files),
+            fileName = top
+                ?: if (files.size == 1) (first.path?.takeIf { it.isNotBlank() } ?: first.fileName)
+                else first.fileName,
             size = files.sumOf { it.size },
+            multiCount = files.size,
+            folderName = top,
         ).also { TransferStore.add(it) }
         val decision = CompletableDeferred<Uri?>()
         val session = Session(sessionId, request.info, files, tokens, decision, record, ip)
@@ -251,7 +257,7 @@ class Receiver(private val context: Context) {
             return TransferServer.error(Status.BAD_REQUEST, "cancelled")
         } catch (e: Exception) {
             target.deleter()
-            return fail(record, friendlyNetError(e), "写入文件失败")
+            return fail(record, friendlyNetError(e), "write failed")
         } finally {
             session.currentTarget = null
         }
@@ -356,15 +362,12 @@ class Receiver(private val context: Context) {
     private fun sanitizeName(name: String): String =
         name.substringAfterLast('/').substringAfterLast('\\').ifEmpty { "file" }
 
-    /** 会话记录显示名：整会话一个文件夹时显示顶层文件夹名；单文件显示文件名；多文件显示「x 等 N 个文件」 */
-    private fun sessionDisplayName(files: List<FileMeta>): String {
-        val first = files.first()
-        val top = first.path?.split('/')?.firstOrNull()
-        if (!top.isNullOrEmpty() && files.all { it.path?.split('/')?.firstOrNull() == top }) {
-            return top
-        }
-        if (files.size == 1) return first.path?.takeIf { it.isNotBlank() } ?: first.fileName
-        return first.fileName + " 等 " + files.size + " 个文件"
+    /** 会话共同顶层文件夹名：全部文件同属一个顶层目录时返回它，否则 null */
+    private fun commonTopFolder(files: List<FileMeta>): String? {
+        val top = files.first().path?.split('/')?.firstOrNull()
+        if (top.isNullOrEmpty()) return null
+        if (files.any { it.path?.split('/')?.firstOrNull() != top }) return null
+        return top
     }
 
     /** 把发送方声明的 path 相对路径清洗成安全分段（与 PC 端 _safe_rel_parts 同语义） */

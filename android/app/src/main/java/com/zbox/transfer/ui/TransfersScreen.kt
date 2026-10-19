@@ -69,13 +69,14 @@ import kotlinx.coroutines.delay
 fun ColumnScope.RecordsSection() {
     val haptics = LocalHapticFeedback.current
     val context = LocalContext.current
+    val strings = AppStrings.current
     val records = TransferStore.records
     Column(modifier = Modifier.weight(1f)) {
-        Text("传输记录", style = MaterialTheme.typography.titleMedium)
+        Text(strings.transferRecords, style = MaterialTheme.typography.titleMedium)
         Spacer(modifier = Modifier.height(8.dp))
         if (records.isEmpty()) {
             Text(
-                text = "暂无记录",
+                text = strings.noRecords,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -114,7 +115,7 @@ fun ColumnScope.RecordsSection() {
                         Icon(
                             imageVector = if (record.outgoing) Icons.Filled.KeyboardArrowUp
                             else Icons.Filled.KeyboardArrowDown,
-                            contentDescription = if (record.outgoing) "发送" else "接收",
+                            contentDescription = if (record.outgoing) strings.sent else strings.received,
                             tint = dirColor,
                             modifier = Modifier
                                 .size(26.dp)
@@ -122,7 +123,7 @@ fun ColumnScope.RecordsSection() {
                                 .padding(4.dp),
                         )
                         Text(
-                            text = record.fileName,
+                            text = recordDisplayName(record, strings),
                             style = MaterialTheme.typography.bodyLarge,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -152,13 +153,13 @@ fun ColumnScope.RecordsSection() {
                                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                 Sender.cancel(record.id)
                             }) {
-                                Text("取消")
+                                Text(strings.cancel)
                             }
                         }
                     }
                     val metaText = StringBuilder()
-                        .append(if (record.outgoing) "发往 " else "来自 ")
-                        .append(record.peerAlias).append(" · ").append(fmtSize(record.size))
+                        .append(if (record.outgoing) strings.toAlias(record.peerAlias) else strings.fromPeer(record.peerAlias))
+                        .append(" · ").append(fmtSize(record.size))
                     Text(
                         text = metaText.toString(),
                         style = MaterialTheme.typography.bodySmall,
@@ -204,7 +205,7 @@ fun ColumnScope.RecordsSection() {
                                 val eta = (record.size - snapProgress) / snapSpeed
                                 if (eta > 0) {
                                     Text(
-                                        text = "剩 " + fmtEta(eta),
+                                        text = strings.remaining(eta),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.primary,
                                     )
@@ -231,7 +232,7 @@ fun ColumnScope.RecordsSection() {
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     if (canCancel) {
                         DropdownMenuItem(
-                            text = { Text("取消传输") },
+                            text = { Text(strings.cancelTransfer) },
                             onClick = {
                                 menuOpen = false
                                 if (record.outgoing) Sender.cancel(record.id)
@@ -241,7 +242,7 @@ fun ColumnScope.RecordsSection() {
                     }
                     if (canOpenDir) {
                         DropdownMenuItem(
-                            text = { Text("打开文件所在目录") },
+                            text = { Text(strings.openContainingFolder) },
                             onClick = {
                                 menuOpen = false
                                 openRecordLocation(context, record, forceDir = true)
@@ -255,9 +256,15 @@ fun ColumnScope.RecordsSection() {
     }
 }
 
+/** 记录显示名：多文件会话按当前语言动态生成（顶层文件夹名 / 「首个文件 等 N 个文件」） */
+private fun recordDisplayName(record: TransferRecord, strings: AppStrings): String =
+    record.folderName
+        ?: if (record.multiCount > 1) strings.multiFiles(record.fileName, record.multiCount)
+        else record.fileName
+
 /** 文件大小格式化 */
 internal fun fmtSize(bytes: Long): String {
-    if (bytes < 0) return "未知大小"
+    if (bytes < 0) return AppStrings.current.unknownSize
     if (bytes < 1024) return bytes.toString() + " B"
     val kb = bytes / 1024.0
     if (kb < 1024) return "%.1f KB".format(kb)
@@ -359,11 +366,4 @@ private fun mimeFromName(fileName: String): String {
         MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext.lowercase())?.let { return it }
     }
     return "application/octet-stream"
-}
-
-/** 剩余秒数格式化 */
-internal fun fmtEta(seconds: Long): String {
-    if (seconds < 60) return seconds.toString() + " 秒"
-    if (seconds < 3600) return (seconds / 60).toString() + " 分 " + (seconds % 60) + " 秒"
-    return (seconds / 3600).toString() + " 小时"
 }
