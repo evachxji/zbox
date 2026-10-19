@@ -51,6 +51,8 @@ from PySide6.QtWidgets import (QWidget, QDialog, QListWidget, QListWidgetItem, Q
                              QAbstractItemView, QApplication, QStyle)
 
 import app as ui   # sc / _PROG_FAMILY / _class_name / _is_desktop_surface
+from snapping import (SNAP_ENGAGE, SNAP_RELEASE, SnapGuideOverlay,
+                      guide_segments, snap_move, snap_resize)
 import sysutil
 
 # 64 位安全的 ctypes 签名（windll 默认按 32 位 int 截断，句柄/指针高位会丢）
@@ -1033,6 +1035,8 @@ class BoxWindow(QWidget):
         self._op = None          # ('move', 起点全局坐标, 起始几何) 或 ('resize', 边缘掩码, ...)
         self._press_pos = None   # 拖拽起点（全局坐标），用于区分点击与拖动
         self._last_drag_ts = 0.0   # 最近一次发生位移的拖拽结束时间（抑制拖拽连带的双击收起）
+        self._snap_sticky = (None, None)  # 当前拖拽在横/纵轴已吸附的位置
+        self._snap_guide = None   # 当前拖拽的跨卡片辅助线覆盖层
         self._hover_peek = False   # 收起态悬停预览中（临时展开，不改 rec、不落盘）
         self._peek_timer = QTimer(self)   # 移开后延迟收回：菜单/拖拽进行中由 _peek_tick 推迟
         self._peek_timer.setInterval(120)
@@ -2008,6 +2012,9 @@ class BoxWindow(QWidget):
                 if edges:
                     self._op = ('resize', edges, e.globalPos(), self.geometry())
                     self._press_pos = e.globalPos()
+                    self._snap_sticky = (None, None)
+                    if self._snap_guide is not None:
+                        self._snap_guide.hide()
                     return True
             if self._op and self._op[0] == 'resize':
                 if e.type() == QEvent.MouseMove:
@@ -2037,6 +2044,8 @@ class BoxWindow(QWidget):
     def hideEvent(self, e):
         # 双击桌面全隐藏等整体隐藏路径：预览态直接收回，恢复显示时保持收起形态
         self._peek_collapse()
+        if self._snap_guide is not None:
+            self._snap_guide.hide()
         super(BoxWindow, self).hideEvent(e)
 
     def mousePressEvent(self, e):
@@ -2052,6 +2061,9 @@ class BoxWindow(QWidget):
             super(BoxWindow, self).mousePressEvent(e)
         if self._op:
             self._press_pos = e.globalPos()
+            self._snap_sticky = (None, None)
+            if self._snap_guide is not None:
+                self._snap_guide.hide()
 
     def mouseMoveEvent(self, e):
         if not self._op:
@@ -2060,10 +2072,27 @@ class BoxWindow(QWidget):
             return
         kind, edges, start_pos, start_geo = self._op
         if kind == 'move':
-            self.move(start_geo.topLeft() + (e.globalPos() - start_pos))
+            proposed = QRect(start_geo)
+            proposed.moveTopLeft(start_geo.topLeft() + (e.globalPos() - start_pos))
+            targets = self.mgr.snap_card_rects(exclude=self)
+            snapped, self._snap_sticky = snap_move(
+                proposed, targets, engage=ui.sc(SNAP_ENGAGE),
+                release=ui.sc(SNAP_RELEASE), sticky=self._snap_sticky)
+            self.move(snapped.topLeft())
+            self._update_snap_guide(snapped, targets, self._snap_sticky)
             self.activateWindow()
         else:
             self._apply_resize(e.globalPos())
+
+    def _update_snap_guide(self, source, targets, matches):
+        segments = guide_segments(source, targets, matches, cap=ui.sc(8))
+        if segments:
+            if self._snap_guide is None:
+                self._snap_guide = SnapGuideOverlay(
+                    self, scale=ui.ui_scale())
+            self._snap_guide.show_segments(segments)
+        elif self._snap_guide is not None:
+            self._snap_guide.hide()
 
     def _apply_resize(self, global_pos):
         """按当前 _op 的边缘掩码应用缩放（mouseMoveEvent 与视口事件过滤器共用）。"""
@@ -2079,7 +2108,22 @@ class BoxWindow(QWidget):
         if edges & 8:
             r.setBottom(start_geo.bottom() + delta.y())
         if r.width() >= self.minimumWidth() and r.height() >= self.minimumHeight():
-            self.setGeometry(r)
+            targets = self.mgr.snap_card_rects(exclude=self)
+            snapped, self._snap_sticky = snap_resize(
+                r, edges, targets, engage=ui.sc(SNAP_ENGAGE),
+                release=ui.sc(SNAP_RELEASE), sticky=self._snap_sticky)
+            if snapped.width() >= self.minimumWidth() and \
+                    snapped.height() >= self.minimumHeight():
+                self.setGeometry(snapped)
+                self._update_snap_guide(snapped, targets, self._snap_sticky)
+            else:
+                self._snap_sticky = (None, None)
+                self.setGeometry(r)
+                self._update_snap_guide(r, targets, self._snap_sticky)
+        else:
+            self._snap_sticky = (None, None)
+            if self._snap_guide is not None:
+                self._snap_guide.hide()
 
     def mouseReleaseEvent(self, e):
         if self._op:
@@ -2089,6 +2133,9 @@ class BoxWindow(QWidget):
     def _finish_op(self, global_pos):
         """拖动/缩放收尾（mouseReleaseEvent 与视口事件过滤器共用）。"""
         self._op = None
+        self._snap_sticky = (None, None)
+        if self._snap_guide is not None:
+            self._snap_guide.hide()
         if self._press_pos is not None and \
                 (global_pos - self._press_pos).manhattanLength() > 4:
             self._last_drag_ts = time.time()
@@ -3408,6 +3455,7 @@ class BoxManager(object):
             self.hook.start()
         self.restore()
         self._refresh_own_hwnds()
+        self.panel.card_rects_provider = self.snap_card_rects
         # 运行期间定时记桌面图标位置（没进格子的文件），崩溃重启后也能摆回
         self._icon_pos_timer = QTimer(self.panel)
         self._icon_pos_timer.setInterval(60 * 1000)
@@ -3519,6 +3567,14 @@ class BoxManager(object):
             if w.rec.get('id') == bid:
                 return w
         return None
+
+    def snap_card_rects(self, exclude=None):
+        """当前可见、可参与吸附的格子与悬浮面板几何。"""
+        rects = [w.geometry() for w in self.windows
+                 if w is not exclude and w.isVisible()]
+        if self.panel is not exclude and self.panel.isVisible():
+            rects.append(self.panel.geometry())
+        return rects
 
     # ---------- 桌面落放层（格子拖出落到桌面，内部处理不走 Explorer） ----------
     def overlay_drop(self, box, paths, copy, gpos, folder=None):
