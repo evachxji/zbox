@@ -34,6 +34,7 @@ A Windows desktop organizer: desktop boxes + a floating panel (calendar / todo /
 
 1. **Desktop organization**: drag files into a box to tidy them away — icons are hidden and restored automatically, and the positions of icons that never entered a box are remembered and put back on launch.
    Inside a box, drop onto the white guide line between items for a custom order, onto a folder to move files into it, or onto an app/shortcut to open the dragged files with it.
+   The collapse, lock, and menu icons stay hidden until the pointer enters the title bar, then fade in and fade out after it leaves.
 2. **Floating panel**:
    - **Calendar**: clock with countdowns, public holidays and lunar calendar, scroll to flip months
    - **Todo**: check items off (grayed out), overdue reminders (pick a date, then confirm), dated items first and sorted by due date, undated items after them, and completed items last; editing or checking does not jump the list, and the editor has a check button to save. Right-click to edit/copy/delete with stacked 5-second undo toasts, each with its own countdown; new inputs start at the list tail, and the editor grows to show all content (Enter saves, Shift+Enter adds a line)
