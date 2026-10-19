@@ -67,9 +67,9 @@ MASK_COLOR = QColor(0, 0, 0, 120)          # 灰罩
 DOT_COLORS = ['#ff4d4f', '#ff9f1a', '#ffd54a', '#35c759', '#2f9bff', '#ffffff']
 STROKE_RANGE = (1, 10)     # 矩形/椭圆线宽滑动条量程（逻辑 px）
 TEXT_RANGE = (10, 32)        # 文字字号滑动条量程（逻辑 px）
-MARKER_DOT_SIZE = 20         # 序号数字圆点固定尺寸（逻辑 px）
+MARKER_DOT_SIZE = 24         # 序号数字圆点固定尺寸（逻辑 px）
 MARKER_TEXT_MIN_W = 64
-MARKER_TEXT_MAX_W = 220
+MARKER_EDGE_RESERVE_W = 140
 TOOL_SIZE_DEFAULTS = {'rect': 4, 'ellipse': 4, 'arrow': 4, 'text': 16, 'marker': 16}
 ANNOTATION_TOOLS = ('rect', 'ellipse', 'arrow', 'text', 'marker')
 HANDLES = ('nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w')
@@ -139,12 +139,12 @@ def _icon(kind, color):
         p.drawPolygon(QPolygonF([QPointF(19, 5), QPointF(14.5, 6.5),
                                  QPointF(17.5, 9.5)]))
     elif kind == 'marker':
-        p.drawRoundedRect(QRectF(6, 5, 12, 14), 2, 2)
+        p.drawEllipse(QRectF(5, 5, 14, 14))
         f = QFont('Segoe UI')
         f.setPixelSize(10)
         f.setBold(True)
         p.setFont(f)
-        p.drawText(QRectF(6, 5, 12, 14), Qt.AlignCenter, '1')
+        p.drawText(QRectF(5, 5, 14, 14), Qt.AlignCenter, '1')
     elif kind == 'long':
         p.drawRoundedRect(QRectF(8, 3.5, 8, 6), 1, 1)
         p.drawRoundedRect(QRectF(8, 14.5, 8, 6), 1, 1)
@@ -1108,24 +1108,41 @@ class ShotOverlay(QWidget):
         f.setPixelSize(sh.get('text_size', self._marker_text_size))
         return f
 
+    def _marker_layout_text(self, sh):
+        """编辑期把输入法预输入串计入排版，提交后立即回落到正式文本。"""
+        return sh.get('_ime_text', sh.get('text', ''))
+
+    def _marker_text_natural_width(self, sh):
+        f = self._marker_text_font(sh)
+        fm = QFontMetrics(f)
+        text = self._marker_layout_text(sh)
+        lines = text.split('\n') if text else ['']
+        natural = max(fm.horizontalAdvance(ln) for ln in lines)
+        return max(natural + ui.sc(14), ui.sc(MARKER_TEXT_MIN_W))
+
     def _marker_text_rect(self, sh):
         badge = self._marker_badge_rect(sh)
         f = self._marker_text_font(sh)
         fm = QFontMetrics(f)
         pad_x, pad_y = ui.sc(7), ui.sc(4)
-        text = sh.get('text', '')
+        text = self._marker_layout_text(sh)
         lines = text.split('\n') if text else ['']
-        natural = max(fm.horizontalAdvance(ln) for ln in lines)
-        w = min(max(natural + pad_x * 2, ui.sc(MARKER_TEXT_MIN_W)),
-                ui.sc(MARKER_TEXT_MAX_W))
-        inner_w = max(1, int(w - pad_x * 2))
-        bounds = fm.boundingRect(QRect(0, 0, inner_w, 100000),
-                                 int(Qt.TextWordWrap), text)
-        h = max(fm.height(), bounds.height()) + pad_y * 2
         x = badge.right() + ui.sc(5)
+        available = (self._sel.right() - x if self._sel.isValid()
+                     else self._marker_text_natural_width(sh))
+        available = max(1, available)
+        wanted = self._marker_text_natural_width(sh)
+        w = min(wanted, available)
+        inner_w = max(1, int(w - pad_x * 2))
+        if wanted <= available:
+            h = fm.height() * max(1, len(lines)) + pad_y * 2
+        else:
+            bounds = fm.boundingRect(QRect(0, 0, inner_w, 100000),
+                                     int(Qt.TextWordWrap), text)
+            h = max(fm.height(), bounds.height()) + pad_y * 2
         y = badge.center().y() - h / 2
         if self._sel.isValid():
-            x = min(max(x, self._sel.left()), self._sel.right() - w)
+            h = min(h, self._sel.height())
             y = min(max(y, self._sel.top()), self._sel.bottom() - h)
         return QRectF(x, y, w, h)
 
@@ -1138,23 +1155,25 @@ class ShotOverlay(QWidget):
     def _clamp_marker(self, sh):
         if not self._sel.isValid():
             return
-        bounds = self._marker_bounds(sh)
+        badge = self._marker_badge_rect(sh)
+        reserve = min(ui.sc(MARKER_EDGE_RESERVE_W),
+                      self._marker_text_natural_width(sh)) + ui.sc(5)
         dx = dy = 0
-        if bounds.left() < self._sel.left():
-            dx = self._sel.left() - bounds.left()
-        elif bounds.right() > self._sel.right():
-            dx = self._sel.right() - bounds.right()
-        if bounds.top() < self._sel.top():
-            dy = self._sel.top() - bounds.top()
-        elif bounds.bottom() > self._sel.bottom():
-            dy = self._sel.bottom() - bounds.bottom()
+        if badge.left() < self._sel.left():
+            dx = self._sel.left() - badge.left()
+        elif badge.right() + reserve > self._sel.right():
+            dx = self._sel.right() - reserve - badge.right()
+        if badge.top() < self._sel.top():
+            dy = self._sel.top() - badge.top()
+        elif badge.bottom() > self._sel.bottom():
+            dy = self._sel.bottom() - badge.bottom()
         sh['pos'] += QPointF(dx, dy)
 
     def _place_marker(self, pos):
         size = MARKER_DOT_SIZE
         half = size / 2.0
         x = min(max(float(pos.x()), self._sel.left() + half),
-                self._sel.right() - half)
+                self._sel.right() - half - ui.sc(MARKER_TEXT_MIN_W) - ui.sc(5))
         y = min(max(float(pos.y()), self._sel.top() + half),
                 self._sel.bottom() - half)
         sh = {
@@ -1169,9 +1188,10 @@ class ShotOverlay(QWidget):
     def _open_marker_editor(self, sh):
         if self._marker_edit is not None:
             self._commit_marker_editor()
+        sh.pop('_ime_active', None)
+        sh.pop('_ime_text', None)
         ed = QPlainTextEdit(self)
         ed.setPlainText(sh.get('text', ''))
-        ed.setPlaceholderText(t('shot.marker.placeholder'))
         ed.setFrameShape(QFrame.NoFrame)
         ed.setLineWrapMode(QPlainTextEdit.WidgetWidth)
         ed.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -1195,6 +1215,8 @@ class ShotOverlay(QWidget):
         if not self._marker_edit or ed is not self._marker_edit[0]:
             return
         sh['text'] = ed.toPlainText()
+        if not sh.get('_ime_active'):
+            sh.pop('_ime_text', None)
         ed.setGeometry(self._marker_text_rect(sh).toRect())
         self.update()
 
@@ -1203,6 +1225,8 @@ class ShotOverlay(QWidget):
             return
         ed, sh = self._marker_edit
         self._marker_edit = None
+        sh.pop('_ime_active', None)
+        sh.pop('_ime_text', None)
         sh['text'] = ed.toPlainText().strip()
         ed.removeEventFilter(self)
         ed.close()
@@ -1300,7 +1324,9 @@ class ShotOverlay(QWidget):
             p.setFont(f)
             p.drawText(r, Qt.AlignCenter, label)
             text = sh.get('text', '')
-            if text:
+            editing = (self._marker_edit is not None
+                       and self._marker_edit[1] is sh)
+            if text and not editing:
                 tr = self._marker_text_rect(sh)
                 sh['text_rect'] = tr
                 p.setPen(QPen(QColor('#000000'), 1))
@@ -1829,6 +1855,22 @@ class ShotOverlay(QWidget):
 
     def eventFilter(self, obj, ev):
         if self._marker_edit and obj is self._marker_edit[0]:
+            if ev.type() == QEvent.InputMethod:
+                ed, sh = self._marker_edit
+                preedit = ev.preeditString()
+                if preedit:
+                    sh['_ime_active'] = True
+                    base = ed.toPlainText()
+                    cursor = ed.textCursor()
+                    start = min(cursor.selectionStart(), cursor.selectionEnd())
+                    end = max(cursor.selectionStart(), cursor.selectionEnd())
+                    sh['_ime_text'] = base[:start] + preedit + base[end:]
+                else:
+                    sh.pop('_ime_active', None)
+                    sh.pop('_ime_text', None)
+                ed.setGeometry(self._marker_text_rect(sh).toRect())
+                self.update()
+                return False
             if (ev.type() == QEvent.KeyPress
                     and ev.key() in (Qt.Key_Return, Qt.Key_Enter)
                     and ev.modifiers() & Qt.ControlModifier):

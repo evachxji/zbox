@@ -6,10 +6,11 @@ import unittest
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 from PySide6.QtCore import QPoint, QPointF, Qt
-from PySide6.QtGui import QColor, QImage
+from PySide6.QtGui import QColor, QImage, QInputMethodEvent, QPainter
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
 
+import i18n
 from pinshot import PinWindow
 
 
@@ -61,6 +62,27 @@ class PinToolbarTest(unittest.TestCase):
              'long', 'pin', 'save', 'close', 'confirm'])
         self.assertEqual(
             set(screenshot.PIN_TOOLBAR_EXCLUDED), {'pin', 'long'})
+
+    def test_toolbar_copy_follows_current_language(self):
+        import screenshot
+
+        old_language = i18n.get_language()
+        self.addCleanup(i18n.set_language, old_language)
+        i18n.set_language(i18n.EN)
+        win = self._pin()
+        QTest.mouseClick(win, Qt.LeftButton, pos=win.rect().center())
+        self.qapp.processEvents()
+
+        for group in screenshot.SHOT_TOOLBAR_GROUPS:
+            for kind, tip_key in group:
+                if kind in screenshot.PIN_TOOLBAR_EXCLUDED:
+                    continue
+                if kind == 'confirm':
+                    self.assertEqual(win._toolbar_btns[kind].text(),
+                                     i18n.t('shot.done'))
+                else:
+                    self.assertEqual(win._toolbar_btns[kind].toolTip(),
+                                     i18n.t(tip_key))
 
     def test_pin_toolbar_automatically_includes_a_new_screenshot_action(self):
         import screenshot
@@ -187,6 +209,7 @@ class PinToolbarTest(unittest.TestCase):
 
         self.assertIsNotNone(editor._marker_edit)
         text_edit = editor._marker_edit[0]
+        self.assertEqual(text_edit.placeholderText(), '')
         text_edit.setPlainText('说明文字')
         editor._commit_marker_editor()
         self.qapp.processEvents()
@@ -256,7 +279,7 @@ class PinToolbarTest(unittest.TestCase):
         self.qapp.processEvents()
 
         marker = [sh for sh in editor._shapes if sh['kind'] == 'marker'][0]
-        self.assertEqual(marker['dot_size'], 20)
+        self.assertEqual(marker['dot_size'], 24)
         self.assertEqual(marker['text_size'], 30)
         self.assertEqual(editor._marker_edit[0].font().pixelSize(), 30)
 
@@ -305,6 +328,85 @@ class PinToolbarTest(unittest.TestCase):
         self.qapp.processEvents()
         self.assertIsNotNone(editor._marker_edit)
         self.assertEqual(editor._marker_edit[0].toPlainText(), '可拖动说明')
+
+    def test_marker_editor_preedit_expands_without_committing_text(self):
+        win = self._pin()
+        QTest.mouseClick(win, Qt.LeftButton, pos=win.rect().center())
+        self.qapp.processEvents()
+
+        win._toolbar_btns['marker'].click()
+        editor = win._editor
+        QTest.mouseClick(editor, Qt.LeftButton, pos=QPoint(50, 50))
+        self.qapp.processEvents()
+        editor._marker_edit[0].setPlainText('已有文字')
+        editor._commit_marker_editor()
+        marker = [sh for sh in editor._shapes if sh['kind'] == 'marker'][0]
+
+        QTest.mouseClick(editor, Qt.LeftButton,
+                         pos=editor._marker_text_rect(marker).center().toPoint())
+        self.qapp.processEvents()
+        text_edit = editor._marker_edit[0]
+        old_width = text_edit.width()
+        QApplication.sendEvent(text_edit, QInputMethodEvent('wo', []))
+        self.qapp.processEvents()
+
+        self.assertGreater(text_edit.width(), old_width)
+        self.assertEqual(text_edit.toPlainText(), '已有文字')
+        self.assertEqual(marker['text'], '已有文字')
+
+    def test_editing_marker_label_is_not_painted_under_editor(self):
+        win = self._pin()
+        QTest.mouseClick(win, Qt.LeftButton, pos=win.rect().center())
+        self.qapp.processEvents()
+
+        win._toolbar_btns['marker'].click()
+        editor = win._editor
+        QTest.mouseClick(editor, Qt.LeftButton, pos=QPoint(50, 50))
+        self.qapp.processEvents()
+        editor._marker_edit[0].setPlainText('已有文字')
+        editor._commit_marker_editor()
+        marker = [sh for sh in editor._shapes if sh['kind'] == 'marker'][0]
+
+        QTest.mouseClick(editor, Qt.LeftButton,
+                         pos=editor._marker_text_rect(marker).center().toPoint())
+        self.qapp.processEvents()
+        image = QImage(editor.size(), QImage.Format_ARGB32)
+        image.fill(Qt.transparent)
+        painter = QPainter(image)
+        editor._draw_shape(painter, marker)
+        painter.end()
+
+        center = editor._marker_text_rect(marker).center().toPoint()
+        self.assertEqual(image.pixelColor(center).alpha(), 0)
+
+    def test_marker_text_wraps_at_boundary_without_covering_dot(self):
+        win = self._pin()
+        QTest.mouseClick(win, Qt.LeftButton, pos=win.rect().center())
+        self.qapp.processEvents()
+
+        win._toolbar_btns['marker'].click()
+        editor = win._editor
+        QTest.mouseClick(editor, Qt.LeftButton, pos=QPoint(60, 80))
+        self.qapp.processEvents()
+        editor._marker_edit[0].setPlainText('一段需要自动换行的长说明文字')
+        editor._commit_marker_editor()
+        marker = [sh for sh in editor._shapes if sh['kind'] == 'marker'][0]
+
+        start = editor._marker_badge_rect(marker).center().toPoint()
+        target = QPoint(editor._sel.right() - 2, start.y())
+        QTest.mousePress(editor, Qt.LeftButton, pos=start)
+        QTest.mouseMove(editor, target, 10)
+        QTest.mouseRelease(editor, Qt.LeftButton, pos=target)
+        self.qapp.processEvents()
+
+        badge = editor._marker_badge_rect(marker)
+        text_rect = editor._marker_text_rect(marker)
+        self.assertLessEqual(badge.right(), editor._sel.right())
+        self.assertLess(badge.right(), text_rect.left())
+        self.assertLessEqual(text_rect.right(), editor._sel.right())
+        self.assertGreater(
+            text_rect.height(),
+            editor._marker_text_font(marker).pixelSize() + 8)
 
     def test_tool_slider_sizes_persist_for_reopened_editor(self):
         import screenshot
