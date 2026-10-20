@@ -1,0 +1,269 @@
+{
+  "marks": [
+    {
+      "stage": "import main 完成",
+      "ms": 176.5
+    },
+    {
+      "stage": "QApplication() 前",
+      "ms": 230.8
+    },
+    {
+      "stage": "QApplication() 后",
+      "ms": 256.5
+    },
+    {
+      "stage": "Config() 前",
+      "ms": 256.7
+    },
+    {
+      "stage": "Config() 后",
+      "ms": 259.9
+    },
+    {
+      "stage": "HolidayStore() 前",
+      "ms": 261.8
+    },
+    {
+      "stage": "HolidayStore() 后",
+      "ms": 262.0
+    },
+    {
+      "stage": "TodoStore() 前",
+      "ms": 262.0
+    },
+    {
+      "stage": "TodoStore() 后",
+      "ms": 262.1
+    },
+    {
+      "stage": "FloatingPanel() 前",
+      "ms": 321.7
+    },
+    {
+      "stage": "FloatingPanel() 后",
+      "ms": 2071.1
+    },
+    {
+      "stage": "BoxManager() 前",
+      "ms": 2071.1
+    },
+    {
+      "stage": "BoxManager() 后",
+      "ms": 5824.0
+    },
+    {
+      "stage": "panel.show() 前",
+      "ms": 5830.7
+    },
+    {
+      "stage": "panel.show() 后",
+      "ms": 5885.3
+    },
+    {
+      "stage": "qapp.exec() 入口",
+      "ms": 5885.3
+    },
+    {
+      "stage": "事件循环首拍（可交互）",
+      "ms": 5897.1
+    },
+    {
+      "stage": "面板已可见=True",
+      "ms": 5897.2
+    },
+    {
+      "stage": "事件循环运行中（+2.5s）",
+      "ms": 8384.5
+    }
+  ],
+  "accumulated": {
+    "boxes:BoxManager.restore": {
+      "calls": 1,
+      "ms": 3737.9
+    },
+    "boxes:BoxWindow.__init__": {
+      "calls": 3,
+      "ms": 3599.0
+    },
+    "transfer:TransferWidget.__init__": {
+      "calls": 1,
+      "ms": 1261.3
+    },
+    "transfer:enable_service": {
+      "calls": 1,
+      "ms": 1259.0
+    },
+    "app:TodoWidget.__init__": {
+      "calls": 1,
+      "ms": 381.8
+    },
+    "app:TodoWidget.rebuild": {
+      "calls": 1,
+      "ms": 381.4
+    },
+    "boxes:BoxWindow.refresh": {
+      "calls": 4,
+      "ms": 157.5
+    },
+    "boxes:_baked_icon": {
+      "calls": 48,
+      "ms": 151.9
+    },
+    "boxes:BoxWindow.show": {
+      "calls": 3,
+      "ms": 116.1
+    },
+    "app:panel._ensure_band": {
+      "calls": 7,
+      "ms": 31.0
+    },
+    "app:CalendarWidget.__init__": {
+      "calls": 1,
+      "ms": 28.2
+    },
+    "boxes:_placeholder_icon": {
+      "calls": 44,
+      "ms": 27.4
+    },
+    "app:CalendarWidget.refresh": {
+      "calls": 1,
+      "ms": 27.4
+    },
+    "app:panel.apply_theme": {
+      "calls": 1,
+      "ms": 23.6
+    },
+    "boxes:hide_icons": {
+      "calls": 1,
+      "ms": 17.8
+    },
+    "video:VideoWidget.__init__": {
+      "calls": 1,
+      "ms": 15.0
+    },
+    "app:TodoWidget._sync_row_heights": {
+      "calls": 1,
+      "ms": 4.5
+    },
+    "boxes:_restore_desktop_icons": {
+      "calls": 1,
+      "ms": 3.9
+    },
+    "boxes:_DesktopIconLayout.restore_positions": {
+      "calls": 1,
+      "ms": 3.3
+    },
+    "boxes:_DesktopIconLayout.enum_icons": {
+      "calls": 1,
+      "ms": 3.3
+    },
+    "app:_indicator_icons": {
+      "calls": 1,
+      "ms": 3.0
+    },
+    "app:pick_fonts": {
+      "calls": 10,
+      "ms": 2.6
+    },
+    "boxes:_apply_rec_to_ui": {
+      "calls": 3,
+      "ms": 2.0
+    },
+    "boxes:BoxList.set_view": {
+      "calls": 3,
+      "ms": 1.5
+    },
+    "boxes:_upgrade_blank_boxes": {
+      "calls": 1,
+      "ms": 0.8
+    },
+    "app:TodoWidget._make_row": {
+      "calls": 6,
+      "ms": 0.6
+    },
+    "video:_refresh_versions": {
+      "calls": 1,
+      "ms": 0.5
+    },
+    "boxes:_request_icon": {
+      "calls": 44,
+      "ms": 0.4
+    },
+    "app:panel.set_tab": {
+      "calls": 1,
+      "ms": 0.4
+    },
+    "transfer:set_theme": {
+      "calls": 2,
+      "ms": 0.4
+    },
+    "transfer:_alias_icon": {
+      "calls": 3,
+      "ms": 0.3
+    },
+    "transfer:_refresh_icon": {
+      "calls": 3,
+      "ms": 0.3
+    },
+    "boxes:_box_qss": {
+      "calls": 3,
+      "ms": 0.3
+    },
+    "boxes:_icon_worker": {
+      "calls": 45,
+      "ms": 0.2
+    },
+    "transfer:_build_gate": {
+      "calls": 1,
+      "ms": 0.2
+    },
+    "boxes:set_collapsed": {
+      "calls": 3,
+      "ms": 0.2
+    },
+    "boxes:_scan_dir": {
+      "calls": 1,
+      "ms": 0.2
+    },
+    "transfer:_refresh_devices": {
+      "calls": 1,
+      "ms": 0.1
+    },
+    "boxes:set_locked": {
+      "calls": 3,
+      "ms": 0.1
+    },
+    "boxes:_icon_cache_put": {
+      "calls": 46,
+      "ms": 0.0
+    },
+    "boxes:BoxWindow.setStyleSheet": {
+      "calls": 3,
+      "ms": 0.0
+    },
+    "transfer:_default_save_dir": {
+      "calls": 1,
+      "ms": 0.0
+    },
+    "boxes:_save_desktop_icons": {
+      "calls": 0,
+      "ms": 0.0
+    },
+    "boxes:_DesktopIconLayout.snapshot": {
+      "calls": 0,
+      "ms": 0.0
+    },
+    "app:make_icon": {
+      "calls": 0,
+      "ms": 0.0
+    },
+    "transfer:_file_icon": {
+      "calls": 0,
+      "ms": 0.0
+    }
+  },
+  "working_set_mb": 168.3,
+  "private_mb": 87.2,
+  "peak_ws_mb": 168.3
+}

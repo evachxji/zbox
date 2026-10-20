@@ -1,0 +1,233 @@
+{
+  "tag": "p0-1",
+  "total_samples": 43,
+  "top_leaf": [
+    {
+      "frame": "<module> (stage_probe.py:301)",
+      "samples": 24,
+      "pct": 55.81
+    },
+    {
+      "frame": "_bootstrap (threading.py:1032)",
+      "samples": 12,
+      "pct": 27.91
+    },
+    {
+      "frame": "run (boxes.py:3451)",
+      "samples": 4,
+      "pct": 9.3
+    },
+    {
+      "frame": "",
+      "samples": 2,
+      "pct": 4.65
+    },
+    {
+      "frame": "run (boxes.py:3425)",
+      "samples": 1,
+      "pct": 2.33
+    }
+  ],
+  "top_inclusive": [
+    {
+      "frame": "main (stage_probe.py:285)",
+      "samples": 24,
+      "pct": 55.81
+    },
+    {
+      "frame": "<module> (stage_probe.py:301)",
+      "samples": 24,
+      "pct": 55.81
+    },
+    {
+      "frame": "new_init (stage_probe.py:120)",
+      "samples": 16,
+      "pct": 37.21
+    },
+    {
+      "frame": "new_m (stage_probe.py:155)",
+      "samples": 14,
+      "pct": 32.56
+    },
+    {
+      "frame": "run (threading.py:1012)",
+      "samples": 12,
+      "pct": 27.91
+    },
+    {
+      "frame": "_bootstrap (threading.py:1032)",
+      "samples": 12,
+      "pct": 27.91
+    },
+    {
+      "frame": "_bootstrap_inner (threading.py:1075)",
+      "samples": 12,
+      "pct": 27.91
+    },
+    {
+      "frame": "main (main.pyw:325)",
+      "samples": 10,
+      "pct": 23.26
+    },
+    {
+      "frame": "exec_ (stage_probe.py:75)",
+      "samples": 8,
+      "pct": 18.6
+    },
+    {
+      "frame": "main (main.pyw:459)",
+      "samples": 8,
+      "pct": 18.6
+    },
+    {
+      "frame": "main (main.pyw:331)",
+      "samples": 6,
+      "pct": 13.95
+    },
+    {
+      "frame": "_loop (boxes.py:260)",
+      "samples": 4,
+      "pct": 9.3
+    },
+    {
+      "frame": "__init__ (boxes.py:3766)",
+      "samples": 4,
+      "pct": 9.3
+    },
+    {
+      "frame": "pin_to_desktop (app.py:1777)",
+      "samples": 4,
+      "pct": 9.3
+    },
+    {
+      "frame": "__init__ (app.py:3140)",
+      "samples": 4,
+      "pct": 9.3
+    },
+    {
+      "frame": "__init__ (app.py:1325)",
+      "samples": 4,
+      "pct": 9.3
+    },
+    {
+      "frame": "run (boxes.py:3451)",
+      "samples": 4,
+      "pct": 9.3
+    },
+    {
+      "frame": "restore (boxes.py:3825)",
+      "samples": 3,
+      "pct": 6.98
+    },
+    {
+      "frame": "rebuild (app.py:1383)",
+      "samples": 3,
+      "pct": 6.98
+    },
+    {
+      "frame": "paintEvent (boxes.py:769)",
+      "samples": 3,
+      "pct": 6.98
+    },
+    {
+      "frame": "__init__ (app.py:3180)",
+      "samples": 2,
+      "pct": 4.65
+    },
+    {
+      "frame": "_ensure_band (app.py:3197)",
+      "samples": 2,
+      "pct": 4.65
+    },
+    {
+      "frame": "__init__ (app.py:3166)",
+      "samples": 2,
+      "pct": 4.65
+    },
+    {
+      "frame": "apply_theme (app.py:3283)",
+      "samples": 2,
+      "pct": 4.65
+    },
+    {
+      "frame": "_listen_loop (transfer.py:621)",
+      "samples": 2,
+      "pct": 4.65
+    },
+    {
+      "frame": "work (video_ui.py:1177)",
+      "samples": 2,
+      "pct": 4.65
+    },
+    {
+      "frame": "_readerthread (subprocess.py:1599)",
+      "samples": 2,
+      "pct": 4.65
+    },
+    {
+      "frame": "",
+      "samples": 2,
+      "pct": 4.65
+    },
+    {
+      "frame": "__init__ (boxes.py:3759)",
+      "samples": 2,
+      "pct": 4.65
+    },
+    {
+      "frame": "enum_icons (boxes.py:2601)",
+      "samples": 2,
+      "pct": 4.65
+    },
+    {
+      "frame": "makedirs (<frozen os>:213)",
+      "samples": 1,
+      "pct": 2.33
+    },
+    {
+      "frame": "ensure_tools (video_dl.py:257)",
+      "samples": 1,
+      "pct": 2.33
+    },
+    {
+      "frame": "tools_dir (video_dl.py:78)",
+      "samples": 1,
+      "pct": 2.33
+    },
+    {
+      "frame": "_writable (video_dl.py:61)",
+      "samples": 1,
+      "pct": 2.33
+    },
+    {
+      "frame": "ytdlp_path (video_dl.py:87)",
+      "samples": 1,
+      "pct": 2.33
+    },
+    {
+      "frame": "_prep_work (video_ui.py:1129)",
+      "samples": 1,
+      "pct": 2.33
+    },
+    {
+      "frame": "_elide_sub (app.py:330)",
+      "samples": 1,
+      "pct": 2.33
+    },
+    {
+      "frame": "eventFilter (app.py:321)",
+      "samples": 1,
+      "pct": 2.33
+    },
+    {
+      "frame": "load_default_certs (ssl.py:533)",
+      "samples": 1,
+      "pct": 2.33
+    },
+    {
+      "frame": "_create_https_context (http\\client.py:807)",
+      "samples": 1,
+      "pct": 2.33
+    }
+  ]
+}

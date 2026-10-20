@@ -169,6 +169,12 @@ def main():
     patch_acc(bx.BoxWindow, '_scan_dir', 'boxes:_scan_dir')
     patch_acc(bx.BoxWindow, 'hide_icons', 'boxes:hide_icons')
     patch_acc(bx.BoxWindow, 'show', 'boxes:BoxWindow.show')
+    patch_acc(bx.BoxWindow, '_apply_rec_to_ui', 'boxes:_apply_rec_to_ui')
+    patch_acc(bx.BoxWindow, '_request_icon', 'boxes:_request_icon')
+    patch_acc(bx.BoxWindow, 'set_collapsed', 'boxes:set_collapsed')
+    patch_acc(bx.BoxWindow, 'set_locked', 'boxes:set_locked')
+    patch_acc(bx.BoxWindow, 'setStyleSheet', 'boxes:BoxWindow.setStyleSheet')
+    patch_acc(bx.BoxList, 'set_view', 'boxes:BoxList.set_view')
     if hasattr(bx, '_DesktopIconLayout'):
         patch_acc(bx._DesktopIconLayout, 'snapshot', 'boxes:_DesktopIconLayout.snapshot')
         patch_acc(bx._DesktopIconLayout, 'enum_icons', 'boxes:_DesktopIconLayout.enum_icons')
@@ -216,6 +222,8 @@ def main():
     patch_func(M.ui, 'make_icon', 'app:make_icon')
     for fn in ('_file_icon', '_refresh_icon', '_alias_icon', '_default_save_dir'):
         patch_func(M.ui.transfer_ui, fn, 'transfer:%s' % fn)
+    for fn in ('_placeholder_icon', '_icon_worker', '_icon_cache_put', '_box_qss'):
+        patch_func(bx, fn, 'boxes:%s' % fn)
 
     # --- 事件循环真正跑起来后 dump 并退出 ---
     def _dump_and_quit():

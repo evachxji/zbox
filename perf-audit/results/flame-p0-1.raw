@@ -1,0 +1,26 @@
+_bootstrap (threading.py:1032);_bootstrap_inner (threading.py:1075);run (threading.py:1012);_prep_work (video_ui.py:1129);ensure_tools (video_dl.py:257);ytdlp_path (video_dl.py:87);tools_dir (video_dl.py:78);_writable (video_dl.py:61);makedirs (<frozen os>:213) 1
+_bootstrap (threading.py:1032);_bootstrap_inner (threading.py:1075);run (threading.py:1012);_loop (boxes.py:260) 4
+<module> (stage_probe.py:301);main (stage_probe.py:285);main (main.pyw:331);new_init (stage_probe.py:120);__init__ (boxes.py:3766);new_m (stage_probe.py:155);restore (boxes.py:3825);new_m (stage_probe.py:155) 2
+<module> (stage_probe.py:301);main (stage_probe.py:285);main (main.pyw:325);new_init (stage_probe.py:120);__init__ (app.py:3180);new_m (stage_probe.py:155);_ensure_band (app.py:3197);pin_to_desktop (app.py:1777) 2
+<module> (stage_probe.py:301);main (stage_probe.py:285);main (main.pyw:325);new_init (stage_probe.py:120);__init__ (app.py:3140);new_m (stage_probe.py:155);__init__ (app.py:1325);new_m (stage_probe.py:155);rebuild (app.py:1383) 3
+<module> (stage_probe.py:301);main (stage_probe.py:285);main (main.pyw:325);new_init (stage_probe.py:120);__init__ (app.py:3166);new_m (stage_probe.py:155);apply_theme (app.py:3283);eventFilter (app.py:321);_elide_sub (app.py:330) 1
+_bootstrap (threading.py:1032);_bootstrap_inner (threading.py:1075);run (threading.py:1012);_listen_loop (transfer.py:621) 2
+_bootstrap (threading.py:1032);_bootstrap_inner (threading.py:1075);run (threading.py:1012);work (video_ui.py:1177);latest_version (video_dl.py:293);urlopen (urllib\request.py:212);build_opener (urllib\request.py:593);__init__ (urllib\request.py:1386);_create_https_context (http\client.py:807);create_default_context (ssl.py:712);load_default_certs (ssl.py:533);_load_windows_store_certs (ssl.py:522) 1
+_bootstrap (threading.py:1032);_bootstrap_inner (threading.py:1075);run (threading.py:1012);_readerthread (subprocess.py:1599) 2
+<module> (stage_probe.py:301);main (stage_probe.py:285);main (main.pyw:459);exec_ (stage_probe.py:75);paintEvent (boxes.py:2258) 1
+ 2
+<module> (stage_probe.py:301);main (stage_probe.py:285);main (main.pyw:331);new_init (stage_probe.py:120);__init__ (boxes.py:3766);new_m (stage_probe.py:155);restore (boxes.py:3825);new_m (stage_probe.py:155);showEvent (boxes.py:2218);_ensure_band (boxes.py:2224);_repin (boxes.py:2230);pin_to_desktop (app.py:1777) 1
+run (boxes.py:3425) 1
+_bootstrap (threading.py:1032);_bootstrap_inner (threading.py:1075);run (threading.py:1012);serve_forever (socketserver.py:235);select (selectors.py:323);_select (selectors.py:314) 1
+<module> (stage_probe.py:301);main (stage_probe.py:285);main (main.pyw:325);new_init (stage_probe.py:120);__init__ (app.py:3142);new_m (stage_probe.py:155);__init__ (transfer_ui.py:668);new_m (stage_probe.py:155);_build_gate (transfer_ui.py:851) 1
+<module> (stage_probe.py:301);main (stage_probe.py:285);main (main.pyw:331);new_init (stage_probe.py:120);__init__ (boxes.py:3759);__init__ (boxes.py:3630) 1
+<module> (stage_probe.py:301);main (stage_probe.py:285);main (main.pyw:331);new_init (stage_probe.py:120);__init__ (boxes.py:3766);new_m (stage_probe.py:155);restore (boxes.py:3830);new_m (stage_probe.py:155);_restore_desktop_icons (boxes.py:3857);new_m (stage_probe.py:155);restore_positions (boxes.py:2696);new_m (stage_probe.py:155);enum_icons (boxes.py:2601) 1
+<module> (stage_probe.py:301);main (stage_probe.py:285);main (main.pyw:459);exec_ (stage_probe.py:75) 3
+<module> (stage_probe.py:301);main (stage_probe.py:285);main (main.pyw:459);exec_ (stage_probe.py:75);_dump_and_quit (stage_probe.py:249);_quit_cleanup (main.pyw:352);shutdown (boxes.py:4263);show_icons (boxes.py:1726);new_m (stage_probe.py:155);snapshot (boxes.py:2610);new_m (stage_probe.py:155);enum_icons (boxes.py:2601) 1
+<module> (stage_probe.py:301);main (stage_probe.py:285);main (main.pyw:325);new_init (stage_probe.py:120);__init__ (app.py:3153);addWidget (app.py:2901) 1
+<module> (stage_probe.py:301);main (stage_probe.py:285);main (main.pyw:325);new_init (stage_probe.py:120);__init__ (app.py:3140);new_m (stage_probe.py:155);__init__ (app.py:1325);new_m (stage_probe.py:155);rebuild (app.py:1384);new_m (stage_probe.py:155);_sync_row_heights (app.py:1393);__call__ (enum.py:758);_create_ (enum.py:911);__new__ (enum.py:657);__setattr__ (enum.py:855) 1
+run (boxes.py:3451) 4
+<module> (stage_probe.py:301);main (stage_probe.py:285);main (main.pyw:325);new_init (stage_probe.py:120);__init__ (app.py:3166);new_m (stage_probe.py:155);apply_theme (app.py:3283) 1
+<module> (stage_probe.py:301);main (stage_probe.py:285);main (main.pyw:331);new_init (stage_probe.py:120);__init__ (boxes.py:3759);__init__ (boxes.py:3631);pin_to_desktop (app.py:1777) 1
+<module> (stage_probe.py:301);main (stage_probe.py:285);main (main.pyw:459);exec_ (stage_probe.py:75);paintEvent (boxes.py:769) 3
+_bootstrap (threading.py:1032);_bootstrap_inner (threading.py:1075);run (threading.py:1012);work (video_ui.py:1177);latest_version (video_dl.py:294);read (http\client.py:495);_safe_read (http\client.py:640);readinto (socket.py:720);recv_into (ssl.py:1251);read (ssl.py:1103) 1

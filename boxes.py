@@ -30,6 +30,7 @@
   格子文字少且参考软件本身就是半透明的，这里接受这个取舍。
 """
 import ctypes
+import collections
 import json
 import os
 import shutil
@@ -140,6 +141,162 @@ def _hicon_to_image(hicon, size):
             data[i + 3] = 255 if (data[i] or data[i + 1] or data[i + 2]) else 0
     img = QImage(bytes(data), w, h, w * 4, QImage.Format_ARGB32)
     return img.copy()   # 脱离本地 buffer 生命周期
+
+
+# ---------------------------------------------------------------- 壳图标：后台取 + 进程内缓存
+# 2026-10 性能审计：QFileIconProvider 取图标要经壳解析目标（.lnk 要打开目标才能拿到
+# 目标程序的图标；.exe 要从 PE 资源提取），实测单条可达 5 秒（快捷键检测.exe 5006ms、
+# 暴雪战网.lnk 1534ms），而普通文件只要 0.006ms。启动时逐条目同步取 = 48 次共 4.0 秒
+# （占启动 65%）；且每次 refresh（文件监听事件）都要重付一遍。
+# 改法：① 慢的那步（provider.icon()）整个挪到后台线程；
+#        ② QIcon 回主线程后再烘焙（QPixmap 只能在 GUI 线程建），渲染路径与原先一致、
+#        像素不变；③ 未缓存的先给零成本的占位图标，真实图标取到后替换；
+#        ④ 进程内缓存 (path, is_dir, size, dpr) → QIcon，同一文件不再重复问壳。
+_icon_cache = {}           # (path, is_dir, size, dpr) -> QIcon（只在 GUI 线程读写）
+_ICON_CACHE_MAX = 1024
+_icon_pending = set()      # 已提交后台、尚未回填的 key（只在 GUI 线程读写）
+_placeholder_cache = {}    # (is_dir, size) -> QIcon 占位图标（零 shell 调用）
+
+
+def _icon_cache_put(key, icon):
+    """进程内图标缓存；超上限整体清空（图标不贵，重取只是几十毫秒）。"""
+    if len(_icon_cache) >= _ICON_CACHE_MAX:
+        _icon_cache.clear()
+    _icon_cache[key] = icon
+
+
+def _placeholder_icon(is_dir, size):
+    """零 shell 调用的通用占位图标（系统内置样式图标），真实图标取到后替换。"""
+    key = (is_dir, size)
+    ico = _placeholder_cache.get(key)
+    if ico is None:
+        sp = QStyle.StandardPixmap.SP_DirIcon if is_dir else QStyle.StandardPixmap.SP_FileIcon
+        ico = QApplication.style().standardIcon(sp)
+        _placeholder_cache[key] = ico
+    return ico
+
+
+# 这些类型的图标取起来慢（.lnk 要经壳解析目标；exe/dll 要从 PE 资源提取，
+# 实测 11.8MB 的 exe 提取一次要 3 秒），必须放后台线程。
+_ASYNC_ICON_EXT = ('.lnk', '.exe', '.dll', '.com', '.scr', '.msi', '.bat',
+                    '.cmd', '.jar', '.appref-ms')
+
+
+def _needs_async_icon(path, is_dir):
+    """该条目的图标要不要放后台线程取。"""
+    if is_dir:
+        return False
+    return path.lower().endswith(_ASYNC_ICON_EXT)
+
+
+_icon_tls = threading.local()
+
+
+def _shell_icon_image(path, is_dir, px):
+    """纯 ctypes 取壳图标 → QImage（工作线程安全，**不碰 Qt 的全局图标缓存**）。
+
+    为什么不用 QFileIconProvider 放到后台：它的图标引擎挂在 **全局 QPixmapCache**
+    （带 mutex）上——实测后台线程取图标时，主线程的 resize/paint 也要用同一把锁，
+    会被堵住 3.4 秒（启动从 2.0s 劣化到 5.4s）。纯 ctypes 路线完全不碰 Qt 缓存。
+
+    .lnk 要先解析目标：SHGetFileInfoW / ExtractIconExW 对 .lnk 返回的是
+    「快捷方式」默认图标（不解析目标），而资源管理器显示的是目标程序的图标。
+    故这里用 IShellLinkW 解析出目标路径，再对目标取图标。
+
+    ⚠️ 慢的那步是真的慢：从 PE 资源提取图标要扫完整个 exe（实测 11.8MB 的 exe
+    提取一次 3.0 秒）——正因如此才必须放在后台线程。
+    """
+    target = path
+    if path.lower().endswith('.lnk'):
+        t = _lnk_target_path(path)
+        if t:
+            target = t
+    h_big, h_small = ctypes.c_void_p(), ctypes.c_void_p()
+    _s32.ExtractIconExW.restype = wintypes.UINT
+    _s32.ExtractIconExW.argtypes = [wintypes.LPCWSTR, ctypes.c_int,
+                                    ctypes.c_void_p, ctypes.c_void_p, wintypes.UINT]
+    if _s32.ExtractIconExW(target, 0, ctypes.byref(h_big), ctypes.byref(h_small), 1) <= 0:
+        return None
+    u32 = ctypes.windll.user32
+    try:
+        h = int(h_big.value) if h_big.value else int(h_small.value)
+        if not h:
+            return None
+        # DrawIconEx 直接画成目标像素尺寸（shell 自己做缩放，质量比事后拉伸好）
+        return _hicon_to_image(h, px)
+    finally:
+        if h_big.value:
+            u32.DestroyIcon(int(h_big.value))
+        if h_small.value:
+            u32.DestroyIcon(int(h_small.value))
+
+
+class _IconThread(QObject):
+    """后台取壳图标：一个实例服务所有格子（不每格一线程）。
+
+    队列取任务 → 工作线程提取 → QImage 经信号回主线程。
+    ⚠️ sig_ready 从工作线程 emit，接收者必须是在**主线程**的 QObject，
+    AutoConnection 才会判成 QueuedConnection（否则直接在发射线程跑 UI 代码）。
+    故本类自己接一手（_deliver 是本 QObject 的方法 → 排队回主线程），
+    再由主线程回调转交给格子。
+    """
+
+    sig_ready = Signal(str, bool, int, float, object)   # path, is_dir, size, dpr, QImage
+
+    def __init__(self, parent=None):
+        super(_IconThread, self).__init__(parent)
+        self._q = collections.deque()
+        self._lock = threading.Lock()
+        self._wake = threading.Event()
+        self._cb = None
+        self.sig_ready.connect(self._deliver)
+        self._th = threading.Thread(target=self._loop, name='zbox-icon')
+        self._th.daemon = True
+        self._th.start()
+
+    def set_callback(self, cb):
+        self._cb = cb
+
+    def submit(self, path, is_dir, size, px, dpr):
+        with self._lock:
+            self._q.append((path, is_dir, size, px, dpr))
+        self._wake.set()
+
+    def _deliver(self, path, is_dir, size, dpr, img):
+        """已回到主线程：转交给订阅者。"""
+        cb = self._cb
+        if cb is not None:
+            try:
+                cb(path, is_dir, size, dpr, img)
+            except Exception:
+                pass
+
+    def _loop(self):
+        while True:
+            self._wake.wait(0.2)
+            self._wake.clear()
+            while True:
+                with self._lock:
+                    if not self._q:
+                        break
+                    path, is_dir, size, px, dpr = self._q.popleft()
+                try:
+                    img = _shell_icon_image(path, is_dir, px)
+                    self.sig_ready.emit(path, is_dir, size, dpr, img)
+                except Exception:
+                    self.sig_ready.emit(path, is_dir, size, dpr, None)
+
+
+_icon_thread = None
+
+
+def _icon_worker():
+    """进程内单例的后台图标线程。"""
+    global _icon_thread
+    if _icon_thread is None:
+        _icon_thread = _IconThread()
+    return _icon_thread
+
 _s32.SHParseDisplayName.restype = ctypes.c_long
 _s32.SHParseDisplayName.argtypes = [wintypes.LPCWSTR, ctypes.c_void_p,
                                     ctypes.POINTER(ctypes.c_void_p), wintypes.DWORD,
@@ -435,6 +592,7 @@ class BoxList(QListWidget):
         self._menu_press_ts = 0.0   # 最近一次「点掉外壳菜单」的那按下（见 mouseDoubleClickEvent）
         self._guide = None   # 拖拽落点反馈：('line'/'folder'/'open', 行号)，paintEvent 画引导线/高亮
         self._lnk_dir_cache = {}   # .lnk → 目标目录解析缓存（拖拽悬停每帧都问；refresh 清空）
+        self._icon_items = {}      # path → (item, 图标尺寸)：后台图标取回后回填到对应行
         # 滚轮平滑滚动（对齐资源管理器手感，见 wheelEvent）：动画驱动滚动条
         self._wheel_target = 0
         self._wheel_anim = QVariantAnimation(self)
@@ -473,11 +631,20 @@ class BoxList(QListWidget):
         st.polish(self)
         # 图标尺寸随视图变，按新尺寸重烘 pixmap（壳图标 paint 期现取是滚动卡顿根因，
         # 见 BoxWindow._baked_icon）
+        sz = self.iconSize()
+        szw = sz.width() if hasattr(sz, 'width') else int(sz)
         for i in range(self.count()):
             it = self.item(i)
             p = it.data(Qt.UserRole)
             if p:
-                it.setIcon(self.box._baked_icon(p, os.path.isdir(p), self.iconSize()))
+                self._icon_items[p] = (it, szw)
+                it.setIcon(self.box._baked_icon(p, os.path.isdir(p), sz))
+
+    def apply_icon(self, path, icon, size):
+        """后台取回的图标回填到对应行（期间切了视图、尺寸变了就跳过，等重取）。"""
+        rec = self._icon_items.get(path)
+        if rec is not None and rec[1] == size:
+            rec[0].setIcon(icon)
 
     def wheelEvent(self, e):
         """滚轮平滑滚动（对齐资源管理器手感）：Qt 默认每 notch 瞬跳 3 行，视觉上
@@ -1250,10 +1417,40 @@ class BoxWindow(QWidget):
         """取壳图标后烘成纯位图 QIcon。QFileIconProvider 返回的 QIcon 不在内存缓存
         pixmap，每次 paint 都重新经壳生成——实测滚动一帧 20+ 行、每行 ~1.3ms，
         整帧 30ms 级掉帧（2026-10 滚动卡顿根因）；烘焙后 paint 只读内存位图
-        （p50 30ms → 1.2ms）。DPR 按窗口取，高分屏不糊。"""
+        （p50 30ms → 1.2ms）。DPR 按窗口取，高分屏不糊。
+
+        2026-10 性能改造（启动瓶颈 #1）：按类型分流，不再一律在 GUI 线程同步问壳。
+        - 缓存命中（同路径同尺寸问过壳）直接返回；
+        - **快捷方式 / 可执行文件**（.lnk/.exe/…）：取图标要经壳解析 .lnk 目标，
+          或从 PE 资源提取（实测 11.8MB 的 exe 要 3 秒）→ 放后台线程，主线程先给
+          占位图标，真实图标取到后回填替换；
+        - **普通文件 / 目录 / .url**：取图标很快（实测 0.006ms），同步取，
+          渲染路径与原先完全一致（像素不变）。
+        """
+        dpr = self.devicePixelRatioF()
+        if hasattr(size, 'width'):     # 调用方传的是 QSize（list.iconSize()）
+            size = size.width()
+        key = (path, is_dir, size, dpr)
+        icon = _icon_cache.get(key)
+        if icon is not None:
+            return icon
+        if _needs_async_icon(path, is_dir):
+            self._request_icon(path, is_dir, size, dpr)
+            return _placeholder_icon(is_dir, size)
         icon = self._icon_for(path, is_dir)
-        pm = icon.pixmap(size, self.devicePixelRatioF())
-        return QIcon(pm) if not pm.isNull() else icon
+        pm = icon.pixmap(QSize(size, size), dpr)
+        out = QIcon(pm) if not pm.isNull() else icon
+        _icon_cache_put(key, out)
+        return out
+
+    def _request_icon(self, path, is_dir, size, dpr):
+        """把图标提取排给后台线程（同一 key 只排一次，避免重复问壳）。"""
+        key = (path, is_dir, size, dpr)
+        if key in _icon_pending:
+            return
+        _icon_pending.add(key)
+        px = max(1, int(round(size * dpr)))
+        _icon_worker().submit(path, is_dir, size, px, dpr)
 
     def _url_icon(self, path):
         """解析 .url 里的 IconFile/IconIndex，ExtractIconExW 取图标（同资源管理器）；没有就返回 None。"""
@@ -1361,18 +1558,36 @@ class BoxWindow(QWidget):
 
         self.list._lnk_dir_cache.clear()
         self.list.clear()
+        self.list._icon_items.clear()
+        size = self.list.iconSize()
+        szw = size.width() if hasattr(size, 'width') else int(size)
         for name, p, is_dir, st in entries:
             disp = name[:-4] if name.lower().endswith(('.lnk', '.url')) else name   # 快捷方式不显示 .lnk/.url 后缀
-            item = QListWidgetItem(self._baked_icon(p, is_dir, self.list.iconSize()), disp)
+            item = QListWidgetItem(self._baked_icon(p, is_dir, size), disp)
             item.setData(Qt.UserRole, p)
             item.setData(Qt.UserRole + 1, is_dir)   # 拖拽落点判定用：是否文件夹
             item.setToolTip(p)
             self.list.addItem(item)
+            self.list._icon_items[p] = (item, szw)
         self.hint.setVisible(not entries and self.rec['kind'] == 'blank')
         # 标题图标只有映射格子有（空白格子隐藏了图标，只显示名称，见 __init__）
         if self.rec['kind'] == 'folder':
-            pm = self._icon_for(self.rec['path'], True).pixmap(ui.sc(16), ui.sc(16))
-            self.icon.setPixmap(pm)
+            self._apply_title_icon()
+
+    def _apply_title_icon(self):
+        """标题栏的小文件夹图标：同样「缓存优先 + 后台取」，不在 GUI 线程等壳。"""
+        path = self.rec['path']
+        size = ui.sc(16)
+        dpr = self.devicePixelRatioF()
+        key = (path, True, size, dpr)
+        icon = _icon_cache.get(key)
+        if icon is not None:
+            self.icon.setPixmap(icon.pixmap(QSize(size, size), dpr))
+            return
+        self._request_icon(path, True, size, dpr)
+        ph = _placeholder_icon(True, size).pixmap(QSize(size, size), dpr)
+        if not ph.isNull():
+            self.icon.setPixmap(ph)
 
     _FLASH_PHASES = (0.35, 1.0, 0.35, 1.0)
 
@@ -2581,6 +2796,48 @@ _IID_IShellLinkW = _guid('{000214F9-0000-0000-C000-000000000046}')
 _IID_IPersistFile = _guid('{0000010B-0000-0000-C000-000000000046}')
 
 
+def _lnk_target_path(path):
+    """解析 .lnk 快捷方式的目标路径（不限于目录）；失败返回 None。
+
+    与 _lnk_target_dir 同源的 COM 代码，但取任意目标路径 —— 图标提取要用：
+    资源管理器显示快捷方式时显示的是**目标程序的图标**，而 SHGetFileInfoW /
+    ExtractIconExW 对 .lnk 只给「快捷方式」默认图标。
+    ⚠️ IShellLinkW 是 STA 类：在 MTA 线程创建会由 COM 安排到某个 STA 承载
+    （本进程 GUI 线程是 STA —— 见 main.pyw 的 CoInitializeEx(0x2)）。
+    这段只在**后台线程**调用，不能挪到 GUI 线程热路径上。
+    """
+    hr_init = _o32.CoInitializeEx(None, 0x2)   # COINIT_APARTMENTTHREADED
+    own_com = hr_init in (0, 1)   # S_OK / S_FALSE
+    psl = ctypes.c_void_p()
+    hr = _o32.CoCreateInstance(ctypes.byref(_CLSID_SHELL_LINK), None, 1,
+                               ctypes.byref(_IID_IShellLinkW), ctypes.byref(psl))
+    if hr or not psl.value:
+        if own_com:
+            _o32.CoUninitialize()
+        return None
+    ppf = ctypes.c_void_p()
+    try:
+        _com_fn(psl, 0, ctypes.HRESULT, ctypes.c_void_p, ctypes.c_void_p)(
+            psl, ctypes.byref(_IID_IPersistFile), ctypes.byref(ppf))
+        if not ppf.value:
+            return None
+        _com_fn(ppf, 5, ctypes.HRESULT,
+                wintypes.LPCWSTR, wintypes.DWORD)(ppf, path, 0)
+        buf = ctypes.create_unicode_buffer(1024)
+        _com_fn(psl, 3, ctypes.HRESULT,
+                wintypes.LPWSTR, ctypes.c_int,
+                ctypes.c_void_p, wintypes.DWORD)(psl, buf, 1024, None, 0)
+        return buf.value or None
+    except OSError:
+        return None
+    finally:
+        if ppf.value:
+            _com_fn(ppf, 2, wintypes.UINT)(ppf)
+        _com_fn(psl, 2, wintypes.UINT)(psl)
+        if own_com:
+            _o32.CoUninitialize()
+
+
 def _lnk_target_dir(path):
     """解析 .lnk 快捷方式的目标：目标是现存目录 → 返回其路径，否则 None。
     文件夹快捷方式的拖放语义与文件夹一致（落上去 = 移进目标目录，资源管理器同款）。
@@ -3580,6 +3837,52 @@ class BoxManager(object):
         self._icon_pos_timer.timeout.connect(self._save_desktop_icons)
         self._icon_pos_timer.start()
         _get_daemon().ensure()   # 面板启动就拉起菜单宿主并预热壳扩展，首个右键不等
+        # 壳图标后台提取的回调（图标取回后回填到各格子的列表）
+        _icon_worker().set_callback(self._on_icon_ready)
+
+    def _on_icon_ready(self, path, is_dir, size, dpr, img):
+        """后台图标取回（已在主线程）：烘成 QIcon → 进缓存 + 回填到等待中的行。
+
+        img 是后台线程用纯 ctypes（DrawIconEx）画的 QImage —— QImage 可跨线程读，
+        QPixmap 只能在 GUI 线程建，故 QImage → QPixmap 这一步留在这里。
+        img 为 None = 后台取不到（ExtractIconExW 对某些文件返回 0）→ 回落主线程
+        的 Qt 路线同步取一次，保证图标最终能显示（慢，但少见）。
+        """
+        try:
+            if img is None or img.isNull():
+                self._icon_fallback_sync(path, is_dir, size)
+                return
+            pm = QPixmap.fromImage(img)
+            pm.setDevicePixelRatio(dpr)
+            icon = QIcon(pm)
+            key = (path, is_dir, size, dpr)
+            _icon_pending.discard(key)
+            _icon_cache_put(key, icon)
+            for win in self.windows:
+                win.list.apply_icon(path, icon, size)
+                # 标题栏的文件夹图标与列表条目同源，回填时一并更新
+                if is_dir and win.rec.get('kind') == 'folder' and win.rec.get('path') == path:
+                    win.icon.setPixmap(pm)
+        except Exception:
+            pass
+
+    def _icon_fallback_sync(self, path, is_dir, size):
+        """后台取不到图标时的回落：主线程用 Qt 路线同步取一次。"""
+        for win in self.windows:
+            if path not in win.list._icon_items:
+                continue
+            dpr = win.devicePixelRatioF()
+            key = (path, is_dir, size, dpr)
+            _icon_pending.discard(key)
+            try:
+                qicon = win._icon_for(path, is_dir)
+                pm = qicon.pixmap(QSize(size, size), dpr)
+                icon = QIcon(pm) if not pm.isNull() else qicon
+                _icon_cache_put(key, icon)
+                win.list.apply_icon(path, icon, size)
+            except Exception:
+                pass
+            return
 
     def _refresh_own_hwnds(self):
         """重建本进程窗口句柄快照。只能在 GUI 线程调：winId() 可能现场创建原生窗口，
