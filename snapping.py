@@ -238,7 +238,10 @@ class SnapGuideOverlay(QWidget):
         screen = QApplication.primaryScreen()
         if screen is None:
             return
-        geometry = screen.virtualGeometry()
+        # 不能恰好占满整个虚拟屏幕：Win11 专注助手的「全屏应用」自动规则会把这种
+        # 无边框全屏置顶窗识别成全屏应用并自动打开勿扰（任务栏出现铃铛图标），
+        # 右/下各收 1px 避开判定，辅助线绘制不受影响
+        geometry = screen.virtualGeometry().adjusted(0, 0, -1, -1)
         if self.geometry() != geometry:
             self.setGeometry(geometry)
         if not self.isVisible():
