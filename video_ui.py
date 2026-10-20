@@ -944,6 +944,7 @@ class VideoWidget(QWidget):
         self._ff_latest = None       # ffmpeg 最新版本
         self._yt_new = False         # 有 yt-dlp 新版
         self._ff_new = False         # 有 ffmpeg 新版
+        self._versions_queried = False   # 是否已查过远端版本（首次打开视频页时）
         self._updating = False       # 正在更新 yt-dlp
         self._prep_seq = 0           # 组件准备批次：关功能后迟到的结果要丢弃
         self._prep_running = False   # 有组件下载线程在跑（防并发下载同一组件）
@@ -1173,7 +1174,9 @@ class VideoWidget(QWidget):
                 self.cfg.set('video_enabled', True)
                 self._hide_gate()
                 self.enabled_changed.emit(True)
-                self._refresh_versions()
+                # 版本查询**不**在这里做：它要联网（PyPI/GitHub + 加载 Windows 证书
+                # 存储，实测占启动后 2.5s 内 4.45% CPU）。改为首次打开视频页时才查
+                # （见 showEvent）——用户没打开视频页就不必知道远端版本。
             else:
                 self._on = False
                 self.cfg.set('video_enabled', False)
@@ -1184,6 +1187,18 @@ class VideoWidget(QWidget):
             pass
 
     # ---------------- 版本 / 更新 / 卸载（底栏） ----------------
+
+    def showEvent(self, e):
+        """首次显示时查一次远端版本（联网）。
+
+        2026-10 性能审计：原先在功能启用的瞬间就查，启动后 2.5 秒内要打
+        2~4 个 HTTPS 请求并加载 Windows 证书存储（实测占 4.45% CPU）。改成
+        「用户真的打开了视频页才查」——没打开过就完全不联网。
+        """
+        super(VideoWidget, self).showEvent(e)
+        if not self._versions_queried:
+            self._versions_queried = True
+            self._refresh_versions()
 
     def _refresh_versions(self):
         def work():
