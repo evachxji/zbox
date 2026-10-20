@@ -191,6 +191,7 @@ QPushButton#setBtn {
 }
 QPushButton#setBtn:hover { border-color: rgba(232,163,61,130); color: #e8a33d; }
 QPushButton#setBtn:pressed { background: rgba(232,163,61,30); }
+QPushButton#setBtn:disabled { color: rgba(232,230,225,90); }
 QPushButton#setSave {
     background: #e8a33d; border: none; border-radius: 8px;
     color: #1a1610; font: 600 12px "%CN%"; padding: 6px 20px;
@@ -306,6 +307,8 @@ QLabel#transferState[state="fail"], QLabel#transferState[state="rejected"],
 QLabel#transferState[state="cancelled"] { color: #e05252; }
 QFrame#transferRow QProgressBar { background: rgba(255,255,255,16); border: none; border-radius: 3px; }
 QFrame#transferRow QProgressBar::chunk { background: #e8a33d; border-radius: 3px; }
+QDialog#settingsDlg QProgressBar { background: rgba(255,255,255,16); border: none; border-radius: 3px; }
+QDialog#settingsDlg QProgressBar::chunk { background: #e8a33d; border-radius: 3px; }
 QDialog#recvDialog { background: #20222a; border: 1px solid rgba(255,255,255,30); border-radius: 10px; }
 QLabel#recvFromLine { color: #cfccc4; font: 12px "%CN%"; background: transparent; }
 QFrame#recvFileCard { background: transparent; border: 1px dashed rgba(255,255,255,58); border-radius: 8px; }
@@ -540,6 +543,7 @@ QPushButton#setBtn {
 }
 QPushButton#setBtn:hover { border-color: #0067c0; color: #0067c0; background: rgba(0,103,192,13); }
 QPushButton#setBtn:pressed { background: rgba(0,103,192,26); }
+QPushButton#setBtn:disabled { color: rgba(27,27,31,90); }
 QPushButton#setSave {
     background: #0067c0; border: none; border-radius: 8px;
     color: #ffffff; font: 600 12px "%CN%"; padding: 6px 20px;
@@ -576,6 +580,7 @@ QCalendarWidget QToolButton#qt_calendar_prevmonth, QCalendarWidget QToolButton#q
 QCalendarWidget QToolButton::menu-indicator { image: none; width: 0; }
 QCalendarWidget QSpinBox { color: #1b1b1f; background: transparent; font: 12px "%NUM%"; }
 QCalendarWidget QHeaderView::section { background: #ffffff; color: #8a8a90; border: none; font: 10px "%CN%"; }
+QToolTip { background-color: #ffffff; border: 1px solid rgba(0,0,0,30); padding: 4px 8px; }
 
 /* ---- 传输页 ---- */
 QFrame#transferRoot { background: transparent; }
@@ -649,6 +654,8 @@ QLabel#transferState[state="fail"], QLabel#transferState[state="rejected"],
 QLabel#transferState[state="cancelled"] { color: #c42b1c; }
 QFrame#transferRow QProgressBar { background: rgba(0,0,0,16); border: none; border-radius: 3px; }
 QFrame#transferRow QProgressBar::chunk { background: #0067c0; border-radius: 3px; }
+QDialog#settingsDlg QProgressBar { background: rgba(0,0,0,16); border: none; border-radius: 3px; }
+QDialog#settingsDlg QProgressBar::chunk { background: #0067c0; border-radius: 3px; }
 QDialog#recvDialog { background: #ffffff; border: 1px solid rgba(0,0,0,26); border-radius: 10px; }
 QLabel#recvFromLine { color: #5b5b60; font: 12px "%CN%"; background: transparent; }
 QFrame#recvFileCard { background: transparent; border: 1px dashed rgba(0,0,0,58); border-radius: 8px; }

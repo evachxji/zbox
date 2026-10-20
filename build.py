@@ -5,7 +5,7 @@
    产物 dist\\zbox-Setup-v<版本>-<架构>.exe——用户只拿到这一个 exe，双击弹安装向导。
 中间文件（图标、DPI 清单、spec、PyInstaller 工作目录、onedir 本体）一律收在 dist\\build\\ 下，
 根目录保持干净；dist 整个目录已在 .gitignore 里。
-用法：python build.py
+用法：python build.py（OCR 组件不再随安装包分发：v2 起改为运行时经 pip 镜像链安装，见 ocr_runtime）
 """
 import glob
 import os
@@ -86,8 +86,15 @@ def main():
     from version import APP_VERSION
 
     # 1) 程序本体：onedir（安装到用户机器的就是这份）
+    # OCR 组件 v2 安装器是纯标准库 mini wheel 安装器（ocr_helper.install），
+    # 冻结 exe 不需要内置 pip（pip 在 PyInstaller 里会因 distlib/certifi 数据文件
+    # 炸掉，实测）；WebEngine 已不用，钉死排除防回归。
+    excludes = []
+    for mod in ('PySide6.QtWebEngineWidgets', 'PySide6.QtWebEngineCore',
+                'PySide6.QtWebEngineQuick'):
+        excludes += ['--exclude-module', mod]
     r = run_pyinstaller('main.pyw', APP_NAME, '--onedir', APP_DIR,
-                        os.path.join(WORK, 'work_app'))
+                        os.path.join(WORK, 'work_app'), extra=excludes)
     if r:
         return r
 

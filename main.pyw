@@ -17,6 +17,12 @@ import sys
 import time
 from datetime import date, datetime, timedelta
 
+# OCR helper 子进程模式：zbox.exe --ocr-helper ...（截图翻译的识别/组件安装子进程，
+# 见 ocr_runtime）。必须在 PySide6 import 之前分派：helper 不起 Qt、不开面板。
+if sys.argv[1:2] == ['--ocr-helper']:
+    import ocr_helper
+    sys.exit(ocr_helper.cli(sys.argv[2:]))
+
 # 设计尺寸由 app.sc() 按系统 DPI 换算到物理像素；关闭 Qt 的坐标再缩放，
 # 避免 125%/150%/200% 下两套缩放叠加。必须在创建 QApplication 前设置。
 os.environ['QT_ENABLE_HIGHDPI_SCALING'] = '0'

@@ -48,7 +48,7 @@ class PinToolbarTest(unittest.TestCase):
         self.assertTrue(toolbar.isVisible())
         self.assertEqual(
             list(win._toolbar_btns),
-            ['rect', 'ellipse', 'arrow', 'text', 'marker',
+            ['rect', 'ellipse', 'arrow', 'text', 'marker', 'translate',
              'save', 'close', 'confirm'])
         self.assertGreater(
             toolbar.geometry().center().y(), win.geometry().center().y())
@@ -58,7 +58,7 @@ class PinToolbarTest(unittest.TestCase):
 
         self.assertEqual(
             list(screenshot.SHOT_TOOLBAR_KINDS),
-            ['rect', 'ellipse', 'arrow', 'text', 'marker',
+            ['rect', 'ellipse', 'arrow', 'text', 'marker', 'translate',
              'long', 'pin', 'save', 'close', 'confirm'])
         self.assertEqual(
             set(screenshot.PIN_TOOLBAR_EXCLUDED), {'pin', 'long'})

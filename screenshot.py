@@ -20,18 +20,22 @@ import traceback
 from ctypes import wintypes
 from datetime import datetime
 
-from PySide6.QtCore import (Qt, QRect, QRectF, QPoint, QPointF, QSize, QTimer, QEvent,
+from PySide6.QtCore import (Qt, QRect, QRectF, QPoint, QPointF, QSize, QTimer, QBuffer, QIODevice, QEvent,
                           Signal, QAbstractNativeEventFilter, QPropertyAnimation, QEasingCurve, Property)
 from PySide6.QtGui import (QPainter, QColor, QPen, QPixmap, QImage, QFont, QFontMetrics,
                          QKeySequence, QPainterPath, QCursor, QGuiApplication, QIcon,
                          QRegion, QPolygonF)
 from PySide6.QtWidgets import (QWidget, QApplication, QFrame, QHBoxLayout, QToolButton,
                              QLabel, QPlainTextEdit, QPushButton,
-                             QFileDialog, QSlider)
+                             QFileDialog, QSlider, QToolTip)
 
 import app as ui          # sc / ui_scale / pick_fonts / resolve_theme
+import i18n
+import ocr_runtime
 import pinshot
 import sysutil
+import translation_core
+import translation_render
 from i18n import t
 
 _u32 = ctypes.windll.user32
@@ -115,6 +119,7 @@ PALETTES = {
 SHOT_TOOLBAR_GROUPS = (
     (('rect', 'shot.tool.rect'), ('ellipse', 'shot.tool.ellipse'), ('arrow', 'shot.tool.arrow'),
      ('text', 'shot.tool.text'), ('marker', 'shot.tool.marker')),
+    (('translate', 'shot.tool.translate'),),
     (('long', 'shot.tool.long'), ('pin', 'shot.tool.pin'), ('save', 'shot.tool.save')),
     (('close', 'shot.tool.cancel'), ('confirm', 'shot.copy_tooltip')),
 )
@@ -153,6 +158,17 @@ def _icon(kind, color):
         f.setBold(True)
         p.setFont(f)
         p.drawText(QRectF(5, 5, 14, 14), Qt.AlignCenter, '1')
+    elif kind == 'translate':
+        f = QFont('Microsoft YaHei')
+        f.setPixelSize(10)
+        f.setBold(True)
+        p.setFont(f)
+        p.drawText(QRectF(3, 3, 12, 12), Qt.AlignCenter, '\u6587')
+        f2 = QFont('Segoe UI')
+        f2.setPixelSize(9)
+        f2.setBold(True)
+        p.setFont(f2)
+        p.drawText(QRectF(10, 10, 12, 12), Qt.AlignCenter, 'A')
     elif kind == 'long':
         p.drawRoundedRect(QRectF(8, 3.5, 8, 6), 1, 1)
         p.drawRoundedRect(QRectF(8, 14.5, 8, 6), 1, 1)
@@ -860,6 +876,7 @@ class ShotOverlay(QWidget):
 
     finished = Signal()   # 会话结束（无论结果），入口用来清引用
     pin_result = Signal(QImage)   # 钉图编辑完成：把带标注的图交回贴图窗
+    sig_tl8n = Signal(str, object)   # 翻译流水线（后台线程）→ 主线程的阶段通知
 
     def __init__(self, cfg, pin_image=None, pin_pos=None, initial_tool=None):
         super(ShotOverlay, self).__init__(None, Qt.FramelessWindowHint | Qt.Tool
@@ -925,6 +942,7 @@ class ShotOverlay(QWidget):
         self._hover_frame = None     # 空闲态鼠标下的程序窗口外框（本地坐标）
         self._press_window = None    # 本次按下命中的窗口外框，短点击时套选
         self._long = None          # 长图模式状态 dict
+        self._tl8n = None          # 翻译图层状态 dict（见「翻译」一节）
         if self._pin_mode:
             self._sel = self.rect()
             self._mode = 'ready'
@@ -933,6 +951,7 @@ class ShotOverlay(QWidget):
         self._idle_timer.setSingleShot(True)
         self._idle_timer.timeout.connect(self._cancel)
 
+        self.sig_tl8n.connect(self._on_tl8n)
         self._build_chrome()
         self._refresh_icons()
         self.setStyleSheet(_qss(self.pal, self._cn, self._num))
@@ -945,6 +964,8 @@ class ShotOverlay(QWidget):
         self._update_chrome()
         if self._pin_mode and initial_tool in ANNOTATION_TOOLS:
             self._set_tool(initial_tool)
+        elif self._pin_mode and initial_tool == 'translate':
+            self._toggle_translate()
 
     IDLE_TIMEOUT_MS = 20000
 
@@ -962,6 +983,9 @@ class ShotOverlay(QWidget):
         self.size_label = QLabel(self)
         self.size_label.setObjectName('shotSize')
         self.size_label.hide()
+        self.tl8n_label = QLabel(self)   # 翻译流水线状态：进行中/失败持续可见，不靠一闪而过的 tooltip
+        self.tl8n_label.setObjectName('shotSize')
+        self.tl8n_label.hide()
 
         callbacks = {
             'rect': lambda: self._set_tool('rect'),
@@ -969,6 +993,7 @@ class ShotOverlay(QWidget):
             'arrow': lambda: self._set_tool('arrow'),
             'text': lambda: self._set_tool('text'),
             'marker': lambda: self._set_tool('marker'),
+            'translate': self._toggle_translate,
             'long': self._start_long,
             'pin': self._finish_pin,
             'save': self._finish_save,
@@ -1322,6 +1347,7 @@ class ShotOverlay(QWidget):
             p.drawPixmap(rect, pm)
         if self._pin_mode:
             p.setRenderHint(QPainter.Antialiasing)
+            self._paint_tl8n(p)
             for sh in self._shapes:
                 self._draw_shape(p, sh)
             if self._cur:
@@ -1340,6 +1366,7 @@ class ShotOverlay(QWidget):
             for rect, pm, _d in self._screens:
                 p.drawPixmap(rect, pm)
             p.setRenderHint(QPainter.Antialiasing)
+            self._paint_tl8n(p)
             for sh in self._shapes:
                 self._draw_shape(p, sh)
             if self._cur:
@@ -2085,6 +2112,284 @@ class ShotOverlay(QWidget):
         else:
             self.sub.hide()
 
+    # ---------- 翻译 ----------
+
+    def _translate_sel_guard(self):
+        """选区变了（拖动调整/重新框选）就丢弃翻译层：译文框对应的是旧选区。"""
+        st = self._tl8n
+        if st is not None and st.get('sel') != self._sel:
+            self._cancel_tl8n()
+
+    def _cancel_tl8n(self):
+        st = self._tl8n
+        if st is not None:
+            if st.get('cancel') is not None:
+                st['cancel'].set()
+            if st.get('session') is not None:
+                st['session'].cancel()
+            if st.get('login_win') is not None:
+                st['login_win'].close()
+            self._tl8n = None
+
+    def _toggle_translate(self):
+        """翻译按钮：未翻译 → 跑流水线；已出译文 → 切换原文/译文；进行中 → 忽略。"""
+        if self._editor:
+            self._commit_editor()
+        if self._marker_edit:
+            self._commit_marker_editor()
+        if self._long is not None or not (self._mode == 'ready' and self._sel.isValid()):
+            return
+        self._translate_sel_guard()
+        st = self._tl8n
+        if st is not None and st['state'] in ('preparing', 'ocr', 'translating'):
+            return
+        if st is not None and st['state'] == 'ready':
+            st['visible'] = not st['visible']
+            self._update_tl8n_button()
+            self.update()
+            return
+        if not ocr_runtime.supported():
+            self._tl8n = {'state': 'unsupported', 'sel': QRect(self._sel),
+                          'cancel': None, 'session': None}
+            self._tl8n_hint('shot.translate.unsupported')
+            self._update_tl8n_button()
+            return
+        import doubao_web
+        if not doubao_web.supported():   # 系统没有 Edge（LTSC 精简版等）
+            self._tl8n = {'state': 'unsupported', 'sel': QRect(self._sel),
+                          'cancel': None, 'session': None,
+                          'msg': 'shot.translate.no_edge'}
+            self._tl8n_hint('shot.translate.no_edge')
+            self._update_tl8n_button()
+            return
+        if not ocr_runtime.ocr_ready():
+            # 首次使用：两步准备引导（下载识别组件 + 登录豆包），用户放弃就不进流水线
+            from translate_guide import TranslateGuideDialog
+            TranslateGuideDialog(self).exec_()
+            if not ocr_runtime.ocr_ready():
+                return
+        cancel = threading.Event()
+        self._tl8n = {'state': 'preparing', 'sel': QRect(self._sel), 'cancel': cancel,
+                      'session': None, 'login_win': None, 'base': None, 'paragraphs': None,
+                      'translations': None, 'visible': False, 'layer': None}
+        self._tl8n_hint('shot.translate.preparing')
+        self._update_tl8n_button()
+        base = self._shot_base_image()
+        self._run_ocr_job(lambda: self._tl8n_ocr_work(base, cancel))
+
+    def _run_ocr_job(self, job):
+        """OCR/组件下载放后台线程；测试注入同步替身。"""
+        threading.Thread(target=job, daemon=True).start()
+
+    def _ocr_recognize(self, png, cancel):
+        """真正的 OCR 调用（测试注入假货）；坐标按底图 dpr 换算回逻辑像素。"""
+        st = self._tl8n
+        dpr = (st.get('dpr') if st else 1.0) or 1.0
+        return ocr_runtime.run_ocr(png, scale=1.0 / dpr, cancel_event=cancel)
+
+    def _tl8n_ocr_work(self, base, cancel):
+        try:
+            if not ocr_runtime.ocr_ready():
+                self.sig_tl8n.emit('error', ocr_runtime.OcrRuntimeError(
+                    'ocr component not installed'))
+                return
+            self.sig_tl8n.emit('progress', 'shot.translate.recognizing')
+            self._tl8n['dpr'] = base.devicePixelRatio() or 1.0
+            buf = QBuffer()
+            buf.open(QIODevice.WriteOnly)
+            base.save(buf, 'PNG')
+            regions = self._ocr_recognize(bytes(buf.data()), cancel)
+            buf.close()
+            self.sig_tl8n.emit('ocr_done', (base, regions))
+        except ocr_runtime.OcrCancelled:
+            pass
+        except Exception as e:
+            self.sig_tl8n.emit('error', e)
+
+    def _on_tl8n(self, stage, payload):
+        """流水线阶段通知（主线程）：更新状态机并驱动豆包翻译。"""
+        st = self._tl8n
+        if st is None:
+            return
+        if stage == 'error':
+            if st.get('cancel') is not None and st['cancel'].is_set():
+                return
+            st['state'] = 'error'
+            st.pop('msg', None)
+            self._tl8n_hint('shot.translate.failed')
+            self._update_tl8n_button()
+            return
+        if stage == 'progress':
+            st['msg'] = payload   # payload = 词典键
+            self._update_tl8n_button()
+            return
+        if stage != 'ocr_done':
+            return
+        if st['cancel'].is_set() or st['sel'] != self._sel:
+            return
+        base, regions = payload
+        if not regions:
+            st['state'] = 'no_text'
+            st.pop('msg', None)
+            self._tl8n_hint('shot.translate.no_text')
+            self._update_tl8n_button()
+            return
+        paras = translation_core.cluster_paragraphs(regions)
+        source = translation_core.detect_lang('\n'.join(r.text for r in regions))
+        target = translation_core.target_language(i18n.get_language())
+        if not translation_core.should_translate(source, target):
+            st['state'] = 'same_lang'
+            st.pop('msg', None)
+            self._tl8n_hint('shot.translate.same_lang')
+            self._update_tl8n_button()
+            return
+        st['state'] = 'translating'
+        st['base'] = base
+        st['paragraphs'] = paras
+        st.pop('msg', None)
+        self._tl8n_hint('shot.translate.translating')
+        self._update_tl8n_button()
+        try:
+            session = self._make_translator()
+        except Exception:
+            st['state'] = 'error'
+            self._tl8n_hint('shot.translate.failed')
+            self._update_tl8n_button()
+            return
+        st['session'] = session
+        session.on_login_required = self._tl8n_show_login
+        session.translate([p.text for p in paras], target,
+                          self._tl8n_done, self._tl8n_error)
+
+    def _make_translator(self):
+        """生产豆包会话（延迟 import：WebEngine 到首次翻译才加载）。"""
+        import doubao_web
+        return doubao_web.DoubaoSession(doubao_web.make_page(self))
+
+    def _tl8n_show_login(self):
+        st = self._tl8n
+        if st is None or st.get('session') is None:
+            return
+        import doubao_web
+        st['msg'] = 'shot.translate.login_waiting'
+        self._update_tl8n_button()
+        st['login_win'] = doubao_web.open_login_window(
+            on_logged_in=st['session'].notify_logged_in,
+            on_aborted=lambda: self._tl8n_error(
+                doubao_web.DoubaoError('login cancelled')))
+
+    def _tl8n_done(self, texts):
+        st = self._tl8n
+        if st is None or st['cancel'].is_set() or st.get('sel') != self._sel:
+            return
+        st['translations'] = list(texts)
+        st['state'] = 'ready'
+        st['visible'] = True
+        st['layer'] = None
+        self._update_tl8n_button()
+        self.update()
+
+    def _tl8n_error(self, err):
+        st = self._tl8n
+        if st is None or st['cancel'].is_set():
+            return
+        st['state'] = 'error'
+        key = ('shot.translate.structure_changed'
+               if type(err).__name__ == 'DoubaoStructureChanged'
+               else 'shot.translate.failed')
+        st['msg'] = key
+        self._tl8n_hint(key)
+        self._update_tl8n_button()
+
+    def _update_tl8n_button(self):
+        btn = self._toolbar_btns.get('translate')
+        if btn is None:
+            return
+        st = self._tl8n
+        busy = st is not None and st['state'] in ('preparing', 'ocr', 'translating')
+        on = (st is not None and st['state'] == 'ready' and st.get('visible'))
+        btn.setEnabled(not busy)
+        btn.setProperty('on', 'true' if on else 'false')
+        key = 'shot.tool.translate'
+        if st is not None:
+            if st['state'] == 'ready':
+                key = ('shot.translate.show_original' if st.get('visible')
+                       else 'shot.translate.show_translation')
+            elif st['state'] == 'error':
+                key = 'shot.translate.failed'
+        btn.setToolTip(t(key))
+        btn.style().unpolish(btn)
+        btn.style().polish(btn)
+        self._refresh_icons()
+        self._update_tl8n_label()
+
+    def _update_tl8n_label(self):
+        # 翻译状态气泡：贴主工具条上方；进行中/失败/提示态显示，空闲与就绪隐藏
+        lb = self.tl8n_label
+        st = self._tl8n
+        keys = {'preparing': 'shot.translate.preparing',
+                'ocr': 'shot.translate.recognizing',
+                'translating': 'shot.translate.translating',
+                'no_text': 'shot.translate.no_text',
+                'same_lang': 'shot.translate.same_lang',
+                'unsupported': 'shot.translate.unsupported',
+                'error': 'shot.translate.failed'}
+        key = None
+        if st is not None and st['state'] != 'ready':
+            key = st.get('msg') or keys.get(st['state'])
+        if key is None or not self.bar.isVisible():
+            lb.hide()
+            return
+        lb.setText(t(key))
+        lb.adjustSize()
+        x = min(self.bar.x(), max(0, self.width() - lb.width()))
+        y = self.bar.y() - lb.height() - ui.sc(6)
+        if y < 0:
+            y = self.bar.y() + self.bar.height() + ui.sc(6)
+        lb.move(x, y)
+        lb.show()
+
+    def _tl8n_hint(self, key):
+        """翻译状态提示：浮在翻译按钮上方的气泡，不打断操作流程。"""
+        btn = self._toolbar_btns.get('translate')
+        if btn is not None:
+            QToolTip.showText(btn.mapToGlobal(QPoint(0, -6)), t(key), btn)
+
+    def _paint_tl8n(self, p):
+        """把翻译图层画进选区（底图之上、标注之下）；导出与遮罩共用。"""
+        st = self._tl8n
+        if st is None or st.get('state') != 'ready' or not st.get('visible'):
+            return
+        if st.get('sel') != self._sel:
+            self._cancel_tl8n()
+            return
+        layer = st.get('layer')
+        if layer is None:
+            base = st['base']
+            layer = translation_render.build_layer(
+                base, st['paragraphs'], st['translations'],
+                dpr=base.devicePixelRatio() or 1.0, font_family=self._cn)
+            st['layer'] = layer
+        p.drawImage(QRectF(self._sel), layer,
+                    QRectF(0, 0, layer.width(), layer.height()))
+
+    def _shot_base_image(self):
+        """选区底图（不含标注）：OCR 的输入，也是马赛克采样的来源。"""
+        dpr = 1.0
+        for rect, _pm, d in self._screens:
+            if rect.intersects(self._sel):
+                dpr = max(dpr, d)
+        img = QImage(QSize(max(1, int(self._sel.width() * dpr + 0.5)),
+                           max(1, int(self._sel.height() * dpr + 0.5))), QImage.Format_ARGB32)
+        img.setDevicePixelRatio(dpr)
+        img.fill(Qt.transparent)
+        p = QPainter(img)
+        p.translate(-QPointF(self._sel.topLeft()))
+        for rect, pm, _d in self._screens:
+            p.drawPixmap(rect, pm)
+        p.end()
+        return img
+
     # ---------- 导出与收尾 ----------
 
     def _global_sel(self):
@@ -2105,6 +2410,7 @@ class ShotOverlay(QWidget):
         p.translate(-QPointF(self._sel.topLeft()))
         for rect, pm, _d in self._screens:
             p.drawPixmap(rect, pm)
+        self._paint_tl8n(p)
         for sh in self._shapes:
             self._draw_shape(p, sh)
         p.end()
@@ -2168,6 +2474,7 @@ class ShotOverlay(QWidget):
         self._close()
 
     def _close(self):
+        self._cancel_tl8n()
         if self._marker_edit:
             self._commit_marker_editor()
         if self._long is not None:

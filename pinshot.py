@@ -123,6 +123,7 @@ class PinWindow(QWidget):
             'arrow': lambda: self._edit_image('arrow'),
             'text': lambda: self._edit_image('text'),
             'marker': lambda: self._edit_image('marker'),
+            'translate': lambda: self._edit_image('translate'),
             'save': self._save_image,
             'close': self._hide_toolbar,
             'confirm': self._copy_image,
