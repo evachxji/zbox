@@ -32,18 +32,15 @@ A Windows desktop organizer: desktop boxes + a floating panel (calendar / todo /
   </tr>
 </table>
 
-1. **Desktop organization**: drag files into a box to tidy them away — icons are hidden and restored automatically, and the positions of icons that never entered a box are remembered and put back on launch.
-   Drag a box near another visible box to snap matching edges: left-to-left, right-to-right, top-to-top, or bottom-to-bottom. Opposite edges never snap. The same rule applies while resizing a box and when moving the calendar panel; calendar resizing stays freely resizable. The snap engages within 8 px, releases after 12 px, and blue guides span both cards for every aligned edge.
-   Inside a box, drop onto the white guide line between items for a custom order, onto a folder to move files into it, or onto an app/shortcut to open the dragged files with it.
-   The collapse, lock, and menu icons stay hidden until the pointer enters the title bar, then fade in and fade out after it leaves.
-2. **Floating panel**:
-   - **Calendar**: clock with countdowns, public holidays and an optional lunar calendar, scroll to flip months
-   - **Todo**: check items off (grayed out), overdue reminders (pick a date, then confirm), dated items first and sorted by due date, undated items after them, and completed items last; editing or checking does not jump the list, and the editor has a check button to save. Right-click to edit/copy/delete with stacked 5-second undo toasts, each with its own countdown; new inputs start at the list tail, and the editor grows to show all content (Enter saves, Shift+Enter adds a line)
-   - **Transfer**: send files and folders between devices on the LAN (folders arrive as a recreated directory tree on the receiver), with manual accept on the receiver (allow the Windows Firewall prompt when first enabling it; if you clicked "Cancel" by mistake and devices/files stop arriving, the transfer tab detects it and offers a one-click repair)
-   - **Video downloader**: paste a URL to download videos, multiple resolutions, resumable downloads
-   - Freely resize the card by dragging its edges/corners; the size is remembered
-3. **Screenshot**: global hotkey region capture with window-aware selection — hover an app window to outline it, click to select the full window, or double-click to copy and exit; also supports rectangles, ellipses, QQ-style arrows, sequential number markers with auto-growing multiline dark labels and text, pin-to-screen and scrolling long capture; marker labels stay single-line until they reach the capture boundary or the user presses Enter, then wrap while keeping the number visible; per-tool size sliders are remembered across captures, labels can be dragged and reopened for editing, and clicking or dragging a pinned image opens its fixed bottom toolbar tray for annotation, saving and copying; click elsewhere to dismiss it. The toolbar **Translate** button recognizes text with local OCR and translates it via Doubao (first use shows a two-step setup guide: install the local OCR component from public PyPI mirrors (e.g. Tsinghua TUNA) and sign in to Doubao in a system Microsoft Edge window; only the recognized text is sent, the screenshot never leaves the device), painting the translation over the original text (which gets pixelated); click again to toggle back to the original, and copy/save/pin flattens the final image
-4. **Languages**: the PC app and Android app support **Simplified Chinese and English**. On PC, use the compact language selector directly below **Video downloader** in Settings (a restart applies it); the installer's first page also lets you pick the installation language. On Android, switch it in the **Settings** tab at the bottom; it applies immediately.
+1. **Desktop organization**: drag into a box, auto-restore, same-edge snapping
+2. **Floating panel**: calendar, todo and transfer, freely resizable
+   - **Calendar**: clock countdowns, holidays, lunar calendar
+   - **Todo**: checklist, due reminders, undoable delete
+   - **Transfer**: LAN transfer of files and folders
+3. **Screenshot**: region capture, window pick, annotations, OCR translation
+4. **Video downloader**: paste a URL, multiple resolutions, resumable
+
+**Languages**: the PC app and Android app support **Simplified Chinese and English**; the installer can pick the language too.
 
 ## Quick Start
 
@@ -57,7 +54,7 @@ Run from source: double-click `run.cmd` (it will offer to install PySide6 if mis
 
 - One-click, three platforms: double-click `build.cmd` and pick 1-7 to build a single target or a combination (default 7 = everything: Windows exe installer + Android APK + HarmonyOS HAP). Artifacts (versioned file names) are collected in `dist\release\`.
   - Requirements: PC builds need PySide6 + PyInstaller (auto-install offered if missing); Android needs JDK 17 and the Android SDK; HarmonyOS needs DevEco Studio and `devecocli` (`npm i -g @deveco/deveco-cli@stable`)
-  - The HAP is an unsigned debug package that only installs on emulators / developer debug devices; distributing to real devices requires signing or AppGallery release (see `harmony\README.md`)
+  - HarmonyOS: published on AppGallery — search and install directly
 
 ## Verification
 
@@ -80,8 +77,6 @@ Video downloading is powered by [yt-dlp](https://github.com/yt-dlp/yt-dlp), with
 ## Links
 
 - 🌐 Website: [zbox.wzyjc.cn](https://zbox.wzyjc.cn)
-- 📦 Releases: [github.com/evachxji/zbox/releases](https://github.com/evachxji/zbox/releases)
-- 🐛 Issues: [github.com/evachxji/zbox/issues](https://github.com/evachxji/zbox/issues)
 - 💬 LINUX DO Community: [linux.do](https://linux.do)
 
 ## License
