@@ -40,7 +40,7 @@ import threading
 import time
 from ctypes import wintypes
 
-from PySide6.QtCore import (Qt, QObject, QTimer, QThread, QUrl, QPoint, QRect, QSize,
+from PySide6.QtCore import (Qt, QObject, QTimer, QThread, QUrl, QPoint, QRect, QSize, QEventLoop,
                           QFileSystemWatcher, Signal, QEvent, QVariantAnimation, QEasingCurve,
                           QByteArray)
 from PySide6.QtGui import (QIcon, QCursor, QPainter, QColor, QPen, QFont, QImage, QPixmap, QDrag,
@@ -2667,8 +2667,12 @@ class _DesktopIconLayout(object):
             return
         # SHCNF_FLUSH 只是把通知投进 explorer 的队列，图标真正加进 ListView 有
         # 延迟（实测 0~0.6s+），轮询等到全部出现；超时按已出现的修
+        # 2026-10 性能审计 P1-7：原轮询用 time.sleep(0.1) —— **GUI 线程整个睡
+        # 住**，最坏 3 秒界面无响应。改用 processEvents 推进（且排除用户输入
+        # 事件，避免重入到用户的点击里），并把间隔改成指数退避，减少跨进程枚举次数。
         t0 = time.time()
         found = {}
+        delay = 0.05
         while time.time() - t0 < timeout:
             icons = self.enum_icons()
             found = {}
@@ -2678,7 +2682,10 @@ class _DesktopIconLayout(object):
                     found[b] = m
             if len(found) >= len(basenames):
                 break
-            time.sleep(0.1)
+            # 让界面保持响应（绘制/定时器照常跑），但不处理用户输入（防重入）
+            QApplication.processEvents(QEventLoop.ExcludeUserInputEvents)
+            time.sleep(delay)
+            delay = min(delay * 1.6, 0.25)
         if not found:
             return
         # 末尾行 = 快照里最后一行之下另起一行（必是空行，SET 不挤人）；屏幕下沿
@@ -3740,15 +3747,25 @@ class _DesktopDropOverlay(QWidget):
             return
         try:
             desk = os.path.normpath(desktop_dir())
+            # 2026-10 性能审计 P2-14：原先在**每个图标的循环里**调 os.listdir(desk)
+            # —— 系统开「隐藏扩展名」时显示名缺后缀，必然找不到 → 每个图标都触发
+            # 一次全量 listdir：O(图标数 × 桌面文件数) 的磁盘风暴（200 图标就是
+            # 4 万次 exists + 200 次 listdir），拖拽起始直接卡住。改成先扫一次
+            # 建「主名 → 全名」映射。
+            stem_map = {}
+            try:
+                for f in os.listdir(desk):
+                    stem_map.setdefault(os.path.splitext(f)[0], f)
+            except OSError:
+                pass
             for _i, name, x, y in lay.enum_icons():
                 pt = wintypes.POINT(x, y)
                 ui._u32.ClientToScreen(lay.lv, ctypes.byref(pt))
                 p = os.path.join(desk, name)
                 if not os.path.exists(p):   # 系统「隐藏扩展名」时显示名缺扩展名
-                    for f in os.listdir(desk):
-                        if os.path.splitext(f)[0] == name:
-                            p = os.path.join(desk, f)
-                            break
+                    full = stem_map.get(name)
+                    if full:
+                        p = os.path.join(desk, full)
                 self._icon_zones.append((QRect(pt.x, pt.y, lay.cx, lay.cy),
                                          p if os.path.isdir(p) else None, name))
         finally:
@@ -4075,11 +4092,16 @@ class BoxManager(object):
         want |= {os.path.splitext(n)[0] for n in want}   # 隐藏扩展名的显示名
         deadline = time.time() + 1.5
         found = []
+        delay = 0.05
         while time.time() < deadline:
             found = [(i, n) for i, n, _x, _y in lay.enum_icons() if n.lower() in want]
             if len(found) >= len(names):
                 break
-            time.sleep(0.05)
+            # 2026-10 性能审计 P1-7：同 fixup —— 用 processEvents 代替纯 sleep，
+            # GUI 线程不再整段睡死（排除用户输入事件防重入）；间隔指数退避。
+            QApplication.processEvents(QEventLoop.ExcludeUserInputEvents)
+            time.sleep(delay)
+            delay = min(delay * 1.6, 0.2)
         for k, (i, _n) in enumerate(found):
             lay._set_pos(i, pt.x + lay.cx * k, pt.y)   # 多个图标从落点起横向排开
         if before:
