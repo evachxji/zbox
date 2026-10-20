@@ -2,6 +2,7 @@
 """Zbox 桌面悬浮面板：日历 + 待办。PySide6，Win10 / Win11，Python 3.10+。"""
 import ctypes
 from ctypes import wintypes
+import collections
 import json
 import os
 import sys
@@ -1717,9 +1718,31 @@ _WS_EX_TOOLWINDOW = 0x80
 _SWP_Z_ONLY = 0x1 | 0x2 | 0x10   # SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE：只动 z-order
 
 
+_dbg_buf = collections.deque(maxlen=2000)   # 调试日志缓冲（退出时一次性落盘）
+
+
 def _dbg(msg):
-    """ZBOX_DEBUG 环境变量开启的调试日志。run.cmd 常开，故带 2MB 轮转（留尾部 1MB）。"""
+    """ZBOX_DEBUG 环境变量开启的调试日志。
+
+    2026-10 性能审计 P1-3：原先每次调用都直接在 UI 线程 append 写文件，而
+    _desktop_mode_tick 每 500ms 调一次 → 主线程 2Hz 的 open/write/close；
+    日志超 2MB 时每次调用还要 read 1MB + write 1MB 做截断（可感知的周期性卡顿）。
+    改为先攒在内存环形缓冲里，进程退出时由 flush_debug_log() 一次性落盘
+    （仍带 2MB 轮转）。
+    """
     if not os.environ.get('ZBOX_DEBUG'):
+        return
+    _dbg_buf.append('%.2f %s' % (time.time(), msg))
+
+
+def flush_debug_log():
+    """把缓冲的调试日志落盘（进程退出时调）。
+
+    ⚠️ 崩溃时缓冲区里的内容会丢（原先是实时落盘）。崩溃现场的关键信息另有
+    两路兜底：debug_due.log（Python 未捕获异常）与 crash_native.log
+    （Qt/C++ 原生崩溃），二者都是即时落盘、不走本缓冲。
+    """
+    if not _dbg_buf:
         return
     try:
         path = os.path.join(os.environ.get('TEMP', '.'), 'zbox_debug.log')
@@ -1730,9 +1753,10 @@ def _dbg(msg):
             with open(path, 'wb') as f:
                 f.write(b'... older logs truncated ...\n' + tail)
         with open(path, 'a', encoding='utf-8') as f:
-            f.write('%.2f %s\n' % (time.time(), msg))
+            f.write('\n'.join(_dbg_buf) + '\n')
     except Exception:
         pass
+    _dbg_buf.clear()
 _HWND_TOP = 0
 
 

@@ -353,6 +353,7 @@ def main():
             sysutil.context_menu_set_running(False)  # 桌面右键切回直链「单击启动」
         if hotkey:
             hotkey.shutdown()
+        ui.flush_debug_log()   # 调试日志攒在内存缓冲里，退出时一次性落盘
     qapp.aboutToQuit.connect(_quit_cleanup)
 
     # 截图全局热键（配置为空 = 不启用）；设置窗修改后走 hotkey.apply 即时重注册
