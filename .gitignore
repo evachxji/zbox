@@ -32,3 +32,6 @@ shots/
 # 性能审计工作区（perf-audit/）：脚本与原始测量数据入库，运行时临时目录不入库
 perf-audit/tmp/
 perf-audit/__pycache__/
+# 截图自检的中间产物（前后对比用，不入库；需要时重跑 ZBOX_SHOT 生成）
+perf-audit/shots_*/
+perf-audit/cmp_*/
