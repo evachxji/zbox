@@ -175,11 +175,25 @@ def _fetch(url, dst, progress_cb=None):
                     progress_cb(done, total)
 
 
+class _Cancelled(Exception):
+    """下载被用户主动取消（关闭视频功能）——不是失败，不能当成「换下一个源」。"""
+
+
+def _uniq_tmp(base):
+    """下载临时文件名：进程 + 线程唯一。
+
+    ⚠️ 共用同一个临时文件是危险的：组件准备被快速开关时会起两条下载线程
+    （见 video_ui.set_enabled），两条线程写同一个 .dl_partial → 互相覆盖 /
+    读到半截数据 → 装出损坏的 exe（2026-10 性能审计发现）。
+    """
+    return '%s.%d.%d' % (base, os.getpid(), threading.get_ident())
+
+
 def _try_sources(urls, progress_cb=None, what=None):
     """多个下载源依次尝试，成功返回完整字节；全部失败抛最后一个异常。"""
     what = what or t('video.prep.component')
     err = None
-    tmp = os.path.join(tools_dir(), '.dl_partial')
+    tmp = _uniq_tmp(os.path.join(tools_dir(), '.dl_partial'))
     try:
         for url in urls:
             try:
@@ -187,6 +201,8 @@ def _try_sources(urls, progress_cb=None, what=None):
                        lambda d, total: progress_cb and progress_cb(what, d, total))
                 with open(tmp, 'rb') as f:
                     return f.read()
+            except _Cancelled:
+                raise          # 取消不是「换源」，直接往外传
             except Exception as e:
                 err = e
         raise err if err else RuntimeError(t('video.dl.failed', name=what))
@@ -201,15 +217,24 @@ def download_ytdlp(progress_cb=None):
     """下载最新 yt-dlp.exe：GitHub 加速镜像优先、直连兜底。"""
     dst = ytdlp_path()
     err = None
-    for prefix in GH_MIRRORS:
+    tmp = _uniq_tmp(dst + '.new')
+    try:
+        for prefix in GH_MIRRORS:
+            try:
+                _fetch(prefix + YTDLP_RELEASE, tmp,
+                       lambda d, total: progress_cb and progress_cb('yt-dlp', d, total))
+                os.replace(tmp, dst)
+                return
+            except _Cancelled:
+                raise
+            except Exception as e:
+                err = e
+        raise err if err else RuntimeError(t('video.ytdlp.failed'))
+    finally:
         try:
-            _fetch(prefix + YTDLP_RELEASE, dst + '.new',
-                   lambda d, total: progress_cb and progress_cb('yt-dlp', d, total))
-            os.replace(dst + '.new', dst)
-            return
-        except Exception as e:
-            err = e
-    raise err if err else RuntimeError(t('video.ytdlp.failed'))
+            os.remove(tmp)
+        except OSError:
+            pass
 
 
 def _ffmpeg_from_gz(data):
@@ -241,9 +266,16 @@ def download_ffmpeg(progress_cb=None, ver=None):
     else:
         raise RuntimeError(t('video.ffmpeg.extract_failed'))
     dst = ffmpeg_path()
-    with open(dst + '.new', 'wb') as f:
-        f.write(exe)
-    os.replace(dst + '.new', dst)
+    tmp = _uniq_tmp(dst + '.new')
+    try:
+        with open(tmp, 'wb') as f:
+            f.write(exe)
+        os.replace(tmp, dst)
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
 
 def tools_ready():
@@ -259,6 +291,8 @@ def ensure_tools(progress_cb=None):
         if not os.path.exists(ffmpeg_path()):
             download_ffmpeg(progress_cb)
         return True, ''
+    except _Cancelled:
+        raise          # 用户主动取消：不是失败，让上层安静收尾
     except Exception as e:
         return False, str(e)
 
@@ -332,12 +366,25 @@ def ffmpeg_version():
 
 def uninstall_tools():
     """卸载组件：删除 yt-dlp.exe / ffmpeg.exe 及半截下载残留；tools 目录空了顺带删掉。"""
+    import glob
     d = tools_dir()
     for name in ('yt-dlp.exe', 'ffmpeg.exe', 'cookies.txt'):
         for suffix in ('', '.new', '.part'):
             p = os.path.join(d, name + suffix)
             if os.path.exists(p):
                 os.remove(p)
+        # 带 pid.线程 后缀的并发下载残留（见 _uniq_tmp）
+        for pat in (name + '.new.*', name + '.part.*'):
+            for p in glob.glob(os.path.join(d, pat)):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+    for p in glob.glob(os.path.join(d, '.dl_partial*')):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
     try:
         os.rmdir(d)   # 只在空目录时成功
     except OSError:

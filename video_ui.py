@@ -946,6 +946,8 @@ class VideoWidget(QWidget):
         self._ff_new = False         # 有 ffmpeg 新版
         self._updating = False       # 正在更新 yt-dlp
         self._prep_seq = 0           # 组件准备批次：关功能后迟到的结果要丢弃
+        self._prep_running = False   # 有组件下载线程在跑（防并发下载同一组件）
+        self._prep_cancel = False    # 用户关了视频功能 → 中断进行中的下载
         self.save_dir = cfg.data.get('video_dir') or video_dl.desktop_dir()
 
         root = QVBoxLayout(self)
@@ -1111,12 +1113,19 @@ class VideoWidget(QWidget):
                 self.gate_msg.setText(t('video.gate.checking'))
                 self._show_gate('prep')
                 self._prep_seq += 1
+                self._prep_cancel = False
+                if self._prep_running:
+                    # 已有下载在跑（快速开关）：不再起第二条线程。
+                    # 两条线程并发下载同一组件会抢同一个临时文件 → 装出半截 exe。
+                    return True
+                self._prep_running = True
                 threading.Thread(target=self._prep_work,
                                  args=(self._prep_seq,), daemon=True).start()
                 return True
             self.shutdown()
             self._on = False
             self._prep_seq += 1   # 作废进行中的准备结果
+            self._prep_cancel = True   # 中断正在下载的组件（用户选择「中断」语义）
             self.cfg.set('video_enabled', False)
             self._show_gate('enable')
             self.enabled_changed.emit(False)
@@ -1127,12 +1136,18 @@ class VideoWidget(QWidget):
     def _prep_work(self, seq):
         try:
             ok, err = video_dl.ensure_tools(self._prep_progress)
+        except video_dl._Cancelled:
+            ok, err = False, ''      # 用户主动关闭，不是失败
         except Exception as e:
             ok, err = False, str(e)
+        finally:
+            self._prep_running = False
         self.sig_prep_done.emit(ok, err, seq)
 
     def _prep_progress(self, what, done, total):
         try:
+            if self._prep_cancel:
+                raise video_dl._Cancelled()   # 用户关了视频功能 → 中断下载
             if total:
                 self.sig_prep.emit(t('video.prep.progress', name=what,
                                      percent=done * 100 // total))
