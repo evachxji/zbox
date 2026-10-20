@@ -59,13 +59,10 @@ def _luminance(img, px_rect):
     buf = im.constBits()
     total = count = 0
     for yy in range(y, y + h, 4):
-        if yy >= ih:
-            break
-        row = yy * stride
+        # 越界坐标钳到边界（与原实现 min(xx, w-1) 一致：马赛克外扩的行框可能略微出界）
+        row = min(yy, ih - 1) * stride
         for xx in range(x, x + w, 4):
-            if xx >= iw:
-                break
-            off = row + xx * 4
+            off = row + min(xx, iw - 1) * 4
             total += 0.299 * buf[off + 2] + 0.587 * buf[off + 1] + 0.114 * buf[off]
             count += 1
     return (total / count / 255.0) if count else 1.0
