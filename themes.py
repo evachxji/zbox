@@ -1,5 +1,7 @@
 ﻿# -*- coding: utf-8 -*-
 """两套主题 QSS。%CN% / %NUM% 为字体占位符，运行时按系统可用字体替换。"""
+import functools
+import re
 
 COMMON = """
 QToolTip { color: %TOOLTIP%; }
@@ -716,22 +718,38 @@ THEME_CHOICES = THEME_ORDER + [AUTO]  # 设置窗口的主题选项顺序
 _PX_RE = None
 
 
-def build_qss(key, cn_font, num_font, scale=1.0, icon_dir=''):
-    """生成主题 QSS，并按 DPI 缩放比放大所有 px 尺寸（分数 px，渲染无拉伸、文字锐利）。
-    %ICON_DIR% 为 checkbox/radio 指示器图标目录（正斜杠路径，运行时由 app 生成）。"""
+_R_RE = re.compile(r'%R=(\d+)%')
+
+
+@functools.lru_cache(maxsize=8)
+def _build_qss_cached(key, cn_font, num_font, scale, icon_dir):
+    """build_qss 的实际计算（带缓存）。
+
+    缓存的理由：输出完全由 (key, cn_font, num_font, scale, icon_dir) 决定，而这五个
+    参数在进程生命周期内基本不变。原实现每次调用都要对 ~19.7KB 的 QSS 做 244 处
+    px 正则替换（逐个 Python lambda 回调），主题切换时白算一遍。
+    """
     global _PX_RE
     qss = THEMES[key]['qss'].replace('%CN%', cn_font).replace('%NUM%', num_font)
     qss = qss.replace('%ICON_DIR%', icon_dir)
     if abs(scale - 1.0) > 1e-6:
         if _PX_RE is None:
-            import re
             _PX_RE = re.compile(r'(\d+(?:\.\d+)?)px')
         qss = _PX_RE.sub(lambda m: '%gpx' % (round(float(m.group(1)) * scale, 2)), qss)
     # %R=N% = N 逻辑像素直径圆形按钮的半径占位符（build_qss 按 scale 现算整数）。
     # Qt 的 border-radius 遇分数 px 或超过半宽会静默退化成方角，不能写固定 px 让 _PX_RE 缩放
-    import re
-    qss = re.sub(r'%R=(\d+)%', lambda m: '%d' % (int(round(int(m.group(1)) * scale)) // 2), qss)
+    qss = _R_RE.sub(lambda m: '%d' % (int(round(int(m.group(1)) * scale)) // 2), qss)
     return qss
+
+
+def build_qss(key, cn_font, num_font, scale=1.0, icon_dir=''):
+    """生成主题 QSS，并按 DPI 缩放比放大所有 px 尺寸（分数 px，渲染无拉伸、文字锐利）。
+    %ICON_DIR% 为 checkbox/radio 指示器图标目录（正斜杠路径，运行时由 app 生成）。
+
+    2026-10 性能审计 P1-4：实际计算带缓存（见 _build_qss_cached）——参数不变时
+    主题切换退化成一次 dict 查找，不再重算 244 处 px 缩放。
+    """
+    return _build_qss_cached(key, cn_font, num_font, float(scale), icon_dir)
 
 
 
