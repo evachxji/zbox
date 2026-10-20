@@ -877,6 +877,7 @@ class ShotOverlay(QWidget):
     finished = Signal()   # 会话结束（无论结果），入口用来清引用
     pin_result = Signal(QImage)   # 钉图编辑完成：把带标注的图交回贴图窗
     sig_tl8n = Signal(str, object)   # 翻译流水线（后台线程）→ 主线程的阶段通知
+    sig_layer_ready = Signal(object)   # 后台线程构建好翻译图层 → 主线程回填
 
     def __init__(self, cfg, pin_image=None, pin_pos=None, initial_tool=None):
         super(ShotOverlay, self).__init__(None, Qt.FramelessWindowHint | Qt.Tool
@@ -955,6 +956,7 @@ class ShotOverlay(QWidget):
         self._idle_timer.timeout.connect(self._cancel)
 
         self.sig_tl8n.connect(self._on_tl8n)
+        self.sig_layer_ready.connect(self._on_layer_ready)
         self._build_chrome()
         self._refresh_icons()
         self.setStyleSheet(_qss(self.pal, self._cn, self._num))
@@ -2341,6 +2343,72 @@ class ShotOverlay(QWidget):
         st['layer'] = None
         self._update_tl8n_button()
         self.update()
+        self._build_tl8n_layer_async()
+
+    def _build_tl8n_layer_async(self):
+        """后台线程构建翻译图层（2026-10 性能审计 P1-12）。
+
+        图层构建要在选区底图上逐段落做马赛克 + 排版：4K 选区 dpr=2 时一次性
+        分配 132MB，逐像素亮度采样 + 逐字符字体度量合计 0.2~1 秒。
+        放在 paintEvent 里构建 → 第一次重绘就把 GUI 线程冻住（painter 还在
+        活动时重入风险也高）。改为后台线程构建（QImage 可跨线程读写，
+        QPainter 画 QImage 在工作线程同样安全），完成后经信号回主线程回填。
+        """
+        st = self._tl8n
+        if st is None or st.get('layer') is not None:
+            return
+        base = st.get('base')
+        paras = st.get('paragraphs')
+        trans = st.get('translations')
+        if base is None or not paras or not trans:
+            return
+        sel = st.get('sel')
+        dpr = base.devicePixelRatio() or 1.0
+        family = self._cn
+
+        def work():
+            try:
+                layer = translation_render.build_layer(
+                    base, paras, trans, dpr=dpr, font_family=family)
+            except Exception:
+                layer = None
+            self.sig_layer_ready.emit((sel, layer))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_layer_ready(self, payload):
+        """后台构建好的图层回填（已在主线程）。选区已变则丢弃。"""
+        sel, layer = payload
+        st = self._tl8n
+        if st is None or layer is None:
+            return
+        if st.get('sel') != sel or st.get('sel') != self._sel:
+            return
+        st['layer'] = layer
+        self.update()
+
+    def _ensure_tl8n_layer(self):
+        """确保翻译图层就绪（导出等**同步**场景用）。
+
+        后台线程构建还没完成时同步补一次 —— 导出必须包含译文，不能因为
+        图层还在后台构建就少画一层。
+        """
+        st = self._tl8n
+        if st is None or st.get('state') != 'ready':
+            return None
+        if st.get('layer') is not None:
+            return st['layer']
+        base = st.get('base')
+        if base is None or not st.get('paragraphs') or not st.get('translations'):
+            return None
+        try:
+            layer = translation_render.build_layer(
+                base, st['paragraphs'], st['translations'],
+                dpr=base.devicePixelRatio() or 1.0, font_family=self._cn)
+        except Exception:
+            return None
+        st['layer'] = layer
+        return layer
 
     def _tl8n_error(self, err):
         st = self._tl8n
@@ -2418,11 +2486,7 @@ class ShotOverlay(QWidget):
             return
         layer = st.get('layer')
         if layer is None:
-            base = st['base']
-            layer = translation_render.build_layer(
-                base, st['paragraphs'], st['translations'],
-                dpr=base.devicePixelRatio() or 1.0, font_family=self._cn)
-            st['layer'] = layer
+            return       # 图层在后台线程构建（见 _build_tl8n_layer_async），还没好
         p.drawImage(QRectF(self._sel), layer,
                     QRectF(0, 0, layer.width(), layer.height()))
 
@@ -2463,6 +2527,7 @@ class ShotOverlay(QWidget):
         p.translate(-QPointF(self._sel.topLeft()))
         for rect, pm, _d in self._screens:
             p.drawPixmap(rect, pm)
+        self._ensure_tl8n_layer()   # 导出必须含译文：后台还没建好就同步补一次
         self._paint_tl8n(p)
         for sh in self._shapes:
             self._draw_shape(p, sh)

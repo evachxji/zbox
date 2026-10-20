@@ -90,6 +90,24 @@ class TranslateFlowTest(unittest.TestCase):
         self.overlay._toggle_translate()
         self.qapp.processEvents()
 
+    def _wait_layer(self, timeout=10.0):
+        """等后台线程把翻译图层构建好。
+
+        2026-10 性能审计 P1-12：图层构建（4K 选区 132MB 分配 + 逐像素采样 +
+        逐字符字体度量）原先在 paintEvent 里做，会把 GUI 线程冻住 0.2~1 秒；
+        改为后台线程构建、完成后经信号回主线程回填 —— 所以「ready」之后
+        图层还要等一小会儿才出现。
+        """
+        import time
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            self.qapp.processEvents()
+            st = self.overlay._tl8n
+            if st and st.get('layer') is not None:
+                return st['layer']
+            time.sleep(0.01)
+        return None
+
     def test_pin_overlay_has_translate_button(self):
         self.assertIn('translate', self.overlay._toolbar_btns)
 
@@ -100,6 +118,7 @@ class TranslateFlowTest(unittest.TestCase):
         self.assertEqual(st['state'], 'ready')
         self.assertTrue(st['visible'])
         self.assertEqual(st['translations'], ['译文一', '译文二'])
+        self.assertIsNotNone(self._wait_layer(), '后台线程应把翻译图层建好')
         after = self.overlay.grab().toImage()
         self.assertNotEqual(before.constBits().tobytes(),
                             after.constBits().tobytes())

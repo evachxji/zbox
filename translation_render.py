@@ -43,13 +43,30 @@ def _make_measure(font_family):
 
 
 def _luminance(img, px_rect):
-    """区域平均亮度（0..1），采样步长 4px 够用。"""
+    """区域平均亮度（0..1），采样步长 4px 够用。
+
+    2026-10 性能审计 P1-12：原先逐像素调 img.pixel() 再构造 QColor 取分量 ——
+    纯 Python 层的双重循环 + 对象构造（单段落 1 万次、20 段落 20 万次），
+    是翻译出图时 GUI 线程冻结 0.2~1s 的主因之一。改成一次性把像素读成字节
+    再按步长取（ARGB32 下每像素 4 字节，B=偏移0 G=1 R=2）。
+    """
     x, y, w, h = px_rect
+    if w <= 0 or h <= 0:
+        return 1.0
+    im = img.convertToFormat(QImage.Format_ARGB32) if img.format() != QImage.Format_ARGB32 else img
+    iw, ih = im.width(), im.height()
+    stride = im.bytesPerLine()
+    buf = im.constBits()
     total = count = 0
     for yy in range(y, y + h, 4):
+        if yy >= ih:
+            break
+        row = yy * stride
         for xx in range(x, x + w, 4):
-            c = QColor(img.pixel(min(xx, img.width() - 1), min(yy, img.height() - 1)))
-            total += 0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()
+            if xx >= iw:
+                break
+            off = row + xx * 4
+            total += 0.299 * buf[off + 2] + 0.587 * buf[off + 1] + 0.114 * buf[off]
             count += 1
     return (total / count / 255.0) if count else 1.0
 
