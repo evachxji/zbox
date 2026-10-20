@@ -917,6 +917,9 @@ class ShotOverlay(QWidget):
         self._mode = 'idle'        # idle / creating / ready
         self._drag = None          # (种类, 附加数据)
         self._sel = QRect()
+        self._base_pm = None        # 预渲染的「底图+灰罩」（见 _ensure_base_pm）
+        self._hole_pm = None        # 选区内的纯底图（镂空用，见 _ensure_hole_pm）
+        self._hole_key = None
         self._shapes = []          # 已完成的标注
         self._edit_shape = None    # 选中进编辑的图形（调色板/滑动条直接改它）
         self._cur = None           # 绘制中的矩形/椭圆
@@ -1341,11 +1344,60 @@ class ShotOverlay(QWidget):
 
     # ---------- 绘制 ----------
 
+    def _ensure_base_pm(self):
+        """预渲染「底图 + 灰罩」成一张位图（会话内底图不变，只建一次）。
+
+        2026-10 性能审计 P1-10：原先每次 paintEvent 都先把**所有屏幕**的底图
+        全量画一遍、再 fillRect 盖一层全屏灰罩 —— 拖拽框选时 100+ fps，就是
+        每帧 2 次全桌面合成（4K 双屏 66MB×2）。改成预渲染成一张位图，
+        paintEvent 只 blit 一次。
+        """
+        if self._base_pm is not None and self._base_pm.size() == self.size():
+            return self._base_pm
+        pm = QPixmap(self.size())
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        for rect, screen_pm, _d in self._screens:
+            p.drawPixmap(rect, screen_pm)
+        p.fillRect(self.rect(), MASK_COLOR)
+        p.end()
+        self._base_pm = pm
+        return pm
+
+    def _ensure_hole_pm(self):
+        """选区内的纯底图（盖住灰罩用的镂空图）。选区变了才重画。
+
+        原先是在 clip 到选区后把整张底图再画一遍（全桌面合成）；
+        这里只渲染选区那么大小的一块。
+        """
+        sel = self._sel
+        if not sel.isValid() or sel.isNull():
+            self._hole_pm = None
+            self._hole_key = None
+            return None
+        key = (sel.x(), sel.y(), sel.width(), sel.height())
+        if self._hole_pm is not None and self._hole_key == key:
+            return self._hole_pm
+        pm = QPixmap(sel.size())
+        p = QPainter(pm)
+        for rect, screen_pm, _d in self._screens:
+            inter = rect.intersected(sel)
+            if inter.isEmpty():
+                continue
+            # 源矩形要用**该屏图自身的坐标**（inter 是虚拟桌面坐标，要减掉屏幕原点），
+            # 目标点才是相对选区的偏移
+            src = inter.translated(-rect.topLeft())
+            p.drawPixmap(inter.topLeft() - sel.topLeft(), screen_pm, src)
+        p.end()
+        self._hole_pm = pm
+        self._hole_key = key
+        return pm
+
     def paintEvent(self, e):
         p = QPainter(self)
-        for rect, pm, _d in self._screens:
-            p.drawPixmap(rect, pm)
         if self._pin_mode:
+            for rect, pm, _d in self._screens:
+                p.drawPixmap(rect, pm)
             p.setRenderHint(QPainter.Antialiasing)
             self._paint_tl8n(p)
             for sh in self._shapes:
@@ -1354,17 +1406,18 @@ class ShotOverlay(QWidget):
                 self._draw_shape(p, self._cur)
             p.end()
             return
-        p.fillRect(self.rect(), MASK_COLOR)
+        p.drawPixmap(0, 0, self._ensure_base_pm())
         if self._hover_frame is not None:
             p.setPen(QPen(QColor(self.pal['sel']), 2))
             p.setBrush(Qt.NoBrush)
             p.drawRect(QRectF(self._hover_frame).adjusted(1, 1, -1, -1))
         if self._sel.isValid() and not self._sel.isNull():
             # 选区镂空：把底图在选区内再画一遍（盖住灰罩），再画标注
+            hole = self._ensure_hole_pm()
+            if hole is not None:
+                p.drawPixmap(self._sel.topLeft(), hole)
             p.save()
             p.setClipRect(self._sel)
-            for rect, pm, _d in self._screens:
-                p.drawPixmap(rect, pm)
             p.setRenderHint(QPainter.Antialiasing)
             self._paint_tl8n(p)
             for sh in self._shapes:
