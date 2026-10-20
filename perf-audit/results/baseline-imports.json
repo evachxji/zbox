@@ -1,0 +1,259 @@
+{
+  "imports": {
+    "total_self_ms": 206.45,
+    "top_cum": [
+      {
+        "module": "main",
+        "self_ms": 19.7,
+        "cum_ms": 199.69
+      },
+      {
+        "module": "PySide6.QtCore",
+        "self_ms": 10.72,
+        "cum_ms": 77.09
+      },
+      {
+        "module": "PySide6",
+        "self_ms": 0.81,
+        "cum_ms": 66.36
+      },
+      {
+        "module": "app",
+        "self_ms": 12.09,
+        "cum_ms": 61.39
+      },
+      {
+        "module": "shiboken6",
+        "self_ms": 0.36,
+        "cum_ms": 60.57
+      },
+      {
+        "module": "shiboken6.Shiboken",
+        "self_ms": 5.48,
+        "cum_ms": 43.23
+      },
+      {
+        "module": "shibokensupport.signature.loader",
+        "self_ms": 0.81,
+        "cum_ms": 36.68
+      },
+      {
+        "module": "calendar_data",
+        "self_ms": 0.75,
+        "cum_ms": 24.73
+      },
+      {
+        "module": "urllib.request",
+        "self_ms": 1.41,
+        "cum_ms": 23.99
+      },
+      {
+        "module": "http.client",
+        "self_ms": 1.12,
+        "cum_ms": 18.46
+      },
+      {
+        "module": "transfer_ui",
+        "self_ms": 1.24,
+        "cum_ms": 16.18
+      },
+      {
+        "module": "transfer",
+        "self_ms": 0.56,
+        "cum_ms": 13.18
+      },
+      {
+        "module": "shibokensupport.signature.lib.pyi_generator",
+        "self_ms": 8.27,
+        "cum_ms": 12.54
+      },
+      {
+        "module": "email.parser",
+        "self_ms": 0.46,
+        "cum_ms": 11.84
+      },
+      {
+        "module": "email.feedparser",
+        "self_ms": 0.49,
+        "cum_ms": 11.39
+      },
+      {
+        "module": "email._policybase",
+        "self_ms": 0.41,
+        "cum_ms": 10.43
+      },
+      {
+        "module": "shibokensupport.signature.layout",
+        "self_ms": 2.16,
+        "cum_ms": 9.44
+      },
+      {
+        "module": "platform",
+        "self_ms": 0.68,
+        "cum_ms": 9.07
+      },
+      {
+        "module": "http.server",
+        "self_ms": 6.03,
+        "cum_ms": 8.68
+      },
+      {
+        "module": "zipfile",
+        "self_ms": 0.99,
+        "cum_ms": 8.59
+      },
+      {
+        "module": "email.utils",
+        "self_ms": 0.52,
+        "cum_ms": 7.98
+      },
+      {
+        "module": "shibokensupport.signature.parser",
+        "self_ms": 6.64,
+        "cum_ms": 7.28
+      },
+      {
+        "module": "boxes",
+        "self_ms": 7.16,
+        "cum_ms": 7.16
+      },
+      {
+        "module": "PySide6.QtGui",
+        "self_ms": 6.67,
+        "cum_ms": 6.67
+      },
+      {
+        "module": "shibokensupport.feature",
+        "self_ms": 0.79,
+        "cum_ms": 5.85
+      },
+      {
+        "module": "PySide6.QtNetwork",
+        "self_ms": 5.36,
+        "cum_ms": 5.36
+      },
+      {
+        "module": "screenshot",
+        "self_ms": 2.15,
+        "cum_ms": 5.33
+      },
+      {
+        "module": "inspect",
+        "self_ms": 1.7,
+        "cum_ms": 5.06
+      },
+      {
+        "module": "pathlib",
+        "self_ms": 0.8,
+        "cum_ms": 4.99
+      },
+      {
+        "module": "re",
+        "self_ms": 0.68,
+        "cum_ms": 4.77
+      }
+    ],
+    "top_self": [
+      {
+        "module": "main",
+        "self_ms": 19.7,
+        "cum_ms": 199.69
+      },
+      {
+        "module": "app",
+        "self_ms": 12.09,
+        "cum_ms": 61.39
+      },
+      {
+        "module": "PySide6.QtCore",
+        "self_ms": 10.72,
+        "cum_ms": 77.09
+      },
+      {
+        "module": "shibokensupport.signature.lib.pyi_generator",
+        "self_ms": 8.27,
+        "cum_ms": 12.54
+      },
+      {
+        "module": "boxes",
+        "self_ms": 7.16,
+        "cum_ms": 7.16
+      },
+      {
+        "module": "PySide6.QtGui",
+        "self_ms": 6.67,
+        "cum_ms": 6.67
+      },
+      {
+        "module": "shibokensupport.signature.parser",
+        "self_ms": 6.64,
+        "cum_ms": 7.28
+      },
+      {
+        "module": "http.server",
+        "self_ms": 6.03,
+        "cum_ms": 8.68
+      },
+      {
+        "module": "shiboken6.Shiboken",
+        "self_ms": 5.48,
+        "cum_ms": 43.23
+      },
+      {
+        "module": "PySide6.QtNetwork",
+        "self_ms": 5.36,
+        "cum_ms": 5.36
+      },
+      {
+        "module": "shibokensupport.signature.mapping",
+        "self_ms": 3.32,
+        "cum_ms": 3.32
+      },
+      {
+        "module": "shibokensupport.signature.lib.enum_sig",
+        "self_ms": 2.3,
+        "cum_ms": 2.3
+      },
+      {
+        "module": "shibokensupport.signature.layout",
+        "self_ms": 2.16,
+        "cum_ms": 9.44
+      },
+      {
+        "module": "screenshot",
+        "self_ms": 2.15,
+        "cum_ms": 5.33
+      },
+      {
+        "module": "_hashlib",
+        "self_ms": 2.13,
+        "cum_ms": 2.13
+      },
+      {
+        "module": "encodings",
+        "self_ms": 2.12,
+        "cum_ms": 3.02
+      },
+      {
+        "module": "translation_core",
+        "self_ms": 2.02,
+        "cum_ms": 2.02
+      },
+      {
+        "module": "PySide6.QtWidgets",
+        "self_ms": 1.87,
+        "cum_ms": 1.87
+      },
+      {
+        "module": "typing",
+        "self_ms": 1.86,
+        "cum_ms": 1.89
+      },
+      {
+        "module": "ssl",
+        "self_ms": 1.85,
+        "cum_ms": 3.44
+      }
+    ]
+  }
+}

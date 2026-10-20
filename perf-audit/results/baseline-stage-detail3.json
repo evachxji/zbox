@@ -1,0 +1,229 @@
+{
+  "marks": [
+    {
+      "stage": "import main 完成",
+      "ms": 147.2
+    },
+    {
+      "stage": "QApplication() 前",
+      "ms": 204.5
+    },
+    {
+      "stage": "QApplication() 后",
+      "ms": 508.8
+    },
+    {
+      "stage": "Config() 前",
+      "ms": 508.9
+    },
+    {
+      "stage": "Config() 后",
+      "ms": 522.9
+    },
+    {
+      "stage": "HolidayStore() 前",
+      "ms": 524.9
+    },
+    {
+      "stage": "HolidayStore() 后",
+      "ms": 525.0
+    },
+    {
+      "stage": "TodoStore() 前",
+      "ms": 525.1
+    },
+    {
+      "stage": "TodoStore() 后",
+      "ms": 525.2
+    },
+    {
+      "stage": "FloatingPanel() 前",
+      "ms": 575.6
+    },
+    {
+      "stage": "FloatingPanel() 后",
+      "ms": 2138.0
+    },
+    {
+      "stage": "BoxManager() 前",
+      "ms": 2138.0
+    },
+    {
+      "stage": "BoxManager() 后",
+      "ms": 6395.8
+    },
+    {
+      "stage": "panel.show() 前",
+      "ms": 6409.9
+    },
+    {
+      "stage": "panel.show() 后",
+      "ms": 6483.2
+    },
+    {
+      "stage": "qapp.exec() 入口",
+      "ms": 6483.3
+    },
+    {
+      "stage": "事件循环首拍（可交互）",
+      "ms": 6494.9
+    },
+    {
+      "stage": "面板已可见=True",
+      "ms": 6495.0
+    },
+    {
+      "stage": "事件循环运行中（+2.5s）",
+      "ms": 8980.4
+    }
+  ],
+  "accumulated": {
+    "boxes:BoxManager.restore": {
+      "calls": 1,
+      "ms": 4220.6
+    },
+    "boxes:BoxWindow.__init__": {
+      "calls": 3,
+      "ms": 4037.2
+    },
+    "boxes:BoxWindow.refresh": {
+      "calls": 4,
+      "ms": 4030.2
+    },
+    "boxes:_baked_icon": {
+      "calls": 48,
+      "ms": 4014.0
+    },
+    "transfer:TransferWidget.__init__": {
+      "calls": 1,
+      "ms": 1271.6
+    },
+    "transfer:enable_service": {
+      "calls": 1,
+      "ms": 1269.0
+    },
+    "app:TodoWidget.__init__": {
+      "calls": 1,
+      "ms": 176.0
+    },
+    "app:TodoWidget.rebuild": {
+      "calls": 1,
+      "ms": 175.6
+    },
+    "boxes:BoxWindow.show": {
+      "calls": 3,
+      "ms": 155.3
+    },
+    "app:panel._ensure_band": {
+      "calls": 7,
+      "ms": 35.8
+    },
+    "app:CalendarWidget.__init__": {
+      "calls": 1,
+      "ms": 33.9
+    },
+    "app:CalendarWidget.refresh": {
+      "calls": 1,
+      "ms": 33.1
+    },
+    "app:panel.apply_theme": {
+      "calls": 1,
+      "ms": 21.4
+    },
+    "boxes:hide_icons": {
+      "calls": 1,
+      "ms": 21.1
+    },
+    "video:VideoWidget.__init__": {
+      "calls": 1,
+      "ms": 13.4
+    },
+    "boxes:_restore_desktop_icons": {
+      "calls": 1,
+      "ms": 5.8
+    },
+    "boxes:_DesktopIconLayout.restore_positions": {
+      "calls": 1,
+      "ms": 5.5
+    },
+    "boxes:_DesktopIconLayout.enum_icons": {
+      "calls": 1,
+      "ms": 5.4
+    },
+    "app:TodoWidget._sync_row_heights": {
+      "calls": 1,
+      "ms": 5.3
+    },
+    "app:pick_fonts": {
+      "calls": 10,
+      "ms": 5.3
+    },
+    "app:_indicator_icons": {
+      "calls": 1,
+      "ms": 3.0
+    },
+    "boxes:_upgrade_blank_boxes": {
+      "calls": 1,
+      "ms": 0.9
+    },
+    "video:_refresh_versions": {
+      "calls": 1,
+      "ms": 0.7
+    },
+    "app:TodoWidget._make_row": {
+      "calls": 6,
+      "ms": 0.7
+    },
+    "transfer:_alias_icon": {
+      "calls": 3,
+      "ms": 0.3
+    },
+    "transfer:_build_gate": {
+      "calls": 1,
+      "ms": 0.3
+    },
+    "transfer:set_theme": {
+      "calls": 2,
+      "ms": 0.3
+    },
+    "app:panel.set_tab": {
+      "calls": 1,
+      "ms": 0.3
+    },
+    "transfer:_refresh_icon": {
+      "calls": 3,
+      "ms": 0.3
+    },
+    "boxes:_scan_dir": {
+      "calls": 1,
+      "ms": 0.1
+    },
+    "transfer:_refresh_devices": {
+      "calls": 1,
+      "ms": 0.1
+    },
+    "transfer:_default_save_dir": {
+      "calls": 1,
+      "ms": 0.0
+    },
+    "boxes:_save_desktop_icons": {
+      "calls": 0,
+      "ms": 0.0
+    },
+    "boxes:_DesktopIconLayout.snapshot": {
+      "calls": 0,
+      "ms": 0.0
+    },
+    "app:make_icon": {
+      "calls": 0,
+      "ms": 0.0
+    },
+    "transfer:_file_icon": {
+      "calls": 0,
+      "ms": 0.0
+    }
+  },
+  "working_set_mb": 200.9,
+  "private_mb": 134.0,
+  "peak_ws_mb": 201.0
+}

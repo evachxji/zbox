@@ -1,0 +1,72 @@
+{
+  "marks": [
+    {
+      "stage": "import main 完成",
+      "ms": 150.4
+    },
+    {
+      "stage": "QApplication() 前",
+      "ms": 219.8
+    },
+    {
+      "stage": "QApplication() 后",
+      "ms": 500.5
+    },
+    {
+      "stage": "Config() 前",
+      "ms": 500.6
+    },
+    {
+      "stage": "Config() 后",
+      "ms": 500.8
+    },
+    {
+      "stage": "HolidayStore() 前",
+      "ms": 502.8
+    },
+    {
+      "stage": "HolidayStore() 后",
+      "ms": 502.9
+    },
+    {
+      "stage": "TodoStore() 前",
+      "ms": 503.0
+    },
+    {
+      "stage": "TodoStore() 后",
+      "ms": 503.1
+    },
+    {
+      "stage": "FloatingPanel() 前",
+      "ms": 535.2
+    },
+    {
+      "stage": "FloatingPanel() 后",
+      "ms": 2110.5
+    },
+    {
+      "stage": "BoxManager() 前",
+      "ms": 2110.5
+    },
+    {
+      "stage": "BoxManager() 后",
+      "ms": 6404.3
+    },
+    {
+      "stage": "panel.show() 前",
+      "ms": 6416.8
+    },
+    {
+      "stage": "panel.show() 后",
+      "ms": 6488.7
+    },
+    {
+      "stage": "qapp.exec() 入口",
+      "ms": 6488.7
+    },
+    {
+      "stage": "事件循环运行中（+2.5s）",
+      "ms": 8983.0
+    }
+  ]
+}

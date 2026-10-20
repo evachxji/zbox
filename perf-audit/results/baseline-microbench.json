@@ -1,0 +1,83 @@
+{
+  "n=100": {
+    "scan_dir": {
+      "best_ms": 0.08,
+      "median_ms": 0.09,
+      "worst_ms": 0.15
+    },
+    "listdir_isdir": {
+      "best_ms": 0.28,
+      "median_ms": 0.35,
+      "worst_ms": 0.38
+    },
+    "stat_x2": {
+      "best_ms": 0.0,
+      "median_ms": 0.0,
+      "worst_ms": 0.0,
+      "items": 0
+    },
+    "icons": {
+      "best_ms": 0.98,
+      "median_ms": 41.71,
+      "worst_ms": 41.71,
+      "items": 100,
+      "per_item_ms": 0.417,
+      "extrapolated_1000_ms": 417.0,
+      "extrapolated_10000_ms": 4170.0
+    }
+  },
+  "n=1000": {
+    "scan_dir": {
+      "best_ms": 0.07,
+      "median_ms": 0.08,
+      "worst_ms": 0.11
+    },
+    "listdir_isdir": {
+      "best_ms": 0.23,
+      "median_ms": 0.24,
+      "worst_ms": 0.27
+    },
+    "stat_x2": {
+      "best_ms": 0.0,
+      "median_ms": 0.0,
+      "worst_ms": 0.0,
+      "items": 0
+    },
+    "icons": {
+      "best_ms": 6.48,
+      "median_ms": 7.02,
+      "worst_ms": 7.02,
+      "items": 600,
+      "per_item_ms": 0.012,
+      "extrapolated_1000_ms": 12.0,
+      "extrapolated_10000_ms": 120.0
+    }
+  },
+  "n=10000": {
+    "scan_dir": {
+      "best_ms": 0.07,
+      "median_ms": 0.09,
+      "worst_ms": 0.1
+    },
+    "listdir_isdir": {
+      "best_ms": 0.26,
+      "median_ms": 0.29,
+      "worst_ms": 0.34
+    },
+    "stat_x2": {
+      "best_ms": 0.0,
+      "median_ms": 0.0,
+      "worst_ms": 0.0,
+      "items": 0
+    },
+    "icons": {
+      "best_ms": 6.93,
+      "median_ms": 7.38,
+      "worst_ms": 7.38,
+      "items": 600,
+      "per_item_ms": 0.012,
+      "extrapolated_1000_ms": 12.0,
+      "extrapolated_10000_ms": 120.0
+    }
+  }
+}

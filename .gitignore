@@ -28,3 +28,7 @@ shots/
 
 # 隔离工作树
 .worktrees/
+
+# 性能审计工作区（perf-audit/）：脚本与原始测量数据入库，运行时临时目录不入库
+perf-audit/tmp/
+perf-audit/__pycache__/

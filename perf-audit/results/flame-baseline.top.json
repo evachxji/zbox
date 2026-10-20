@@ -1,0 +1,228 @@
+{
+  "tag": "baseline",
+  "total_samples": 247,
+  "top_leaf": [
+    {
+      "frame": "<module> (stage_probe.py:214)",
+      "samples": 201,
+      "pct": 81.38
+    },
+    {
+      "frame": "_bootstrap (threading.py:1032)",
+      "samples": 30,
+      "pct": 12.15
+    },
+    {
+      "frame": "run (boxes.py:3259)",
+      "samples": 15,
+      "pct": 6.07
+    },
+    {
+      "frame": "run (boxes.py:3233)",
+      "samples": 1,
+      "pct": 0.4
+    }
+  ],
+  "top_inclusive": [
+    {
+      "frame": "main (stage_probe.py:198)",
+      "samples": 201,
+      "pct": 81.38
+    },
+    {
+      "frame": "<module> (stage_probe.py:214)",
+      "samples": 201,
+      "pct": 81.38
+    },
+    {
+      "frame": "new_init (stage_probe.py:120)",
+      "samples": 127,
+      "pct": 51.42
+    },
+    {
+      "frame": "main (main.pyw:328)",
+      "samples": 84,
+      "pct": 34.01
+    },
+    {
+      "frame": "__init__ (app.py:3140)",
+      "samples": 61,
+      "pct": 24.7
+    },
+    {
+      "frame": "__init__ (app.py:1325)",
+      "samples": 59,
+      "pct": 23.89
+    },
+    {
+      "frame": "rebuild (app.py:1383)",
+      "samples": 58,
+      "pct": 23.48
+    },
+    {
+      "frame": "main (main.pyw:334)",
+      "samples": 42,
+      "pct": 17.0
+    },
+    {
+      "frame": "__init__ (boxes.py:3574)",
+      "samples": 41,
+      "pct": 16.6
+    },
+    {
+      "frame": "__new__ (stage_probe.py:103)",
+      "samples": 34,
+      "pct": 13.77
+    },
+    {
+      "frame": "main (main.pyw:248)",
+      "samples": 34,
+      "pct": 13.77
+    },
+    {
+      "frame": "main (main.pyw:462)",
+      "samples": 33,
+      "pct": 13.36
+    },
+    {
+      "frame": "exec_ (stage_probe.py:75)",
+      "samples": 33,
+      "pct": 13.36
+    },
+    {
+      "frame": "restore (boxes.py:3606)",
+      "samples": 31,
+      "pct": 12.55
+    },
+    {
+      "frame": "run (threading.py:1012)",
+      "samples": 30,
+      "pct": 12.15
+    },
+    {
+      "frame": "_bootstrap_inner (threading.py:1075)",
+      "samples": 30,
+      "pct": 12.15
+    },
+    {
+      "frame": "_bootstrap (threading.py:1032)",
+      "samples": 30,
+      "pct": 12.15
+    },
+    {
+      "frame": "__init__ (boxes.py:1227)",
+      "samples": 25,
+      "pct": 10.12
+    },
+    {
+      "frame": "refresh (boxes.py:1366)",
+      "samples": 25,
+      "pct": 10.12
+    },
+    {
+      "frame": "_baked_icon (boxes.py:1255)",
+      "samples": 23,
+      "pct": 9.31
+    },
+    {
+      "frame": "run (boxes.py:3259)",
+      "samples": 15,
+      "pct": 6.07
+    },
+    {
+      "frame": "load_default_certs (ssl.py:533)",
+      "samples": 11,
+      "pct": 4.45
+    },
+    {
+      "frame": "urlopen (urllib\\request.py:212)",
+      "samples": 11,
+      "pct": 4.45
+    },
+    {
+      "frame": "build_opener (urllib\\request.py:593)",
+      "samples": 11,
+      "pct": 4.45
+    },
+    {
+      "frame": "latest_version (video_dl.py:293)",
+      "samples": 11,
+      "pct": 4.45
+    },
+    {
+      "frame": "_create_https_context (http\\client.py:807)",
+      "samples": 11,
+      "pct": 4.45
+    },
+    {
+      "frame": "work (video_ui.py:1177)",
+      "samples": 11,
+      "pct": 4.45
+    },
+    {
+      "frame": "__init__ (urllib\\request.py:1386)",
+      "samples": 11,
+      "pct": 4.45
+    },
+    {
+      "frame": "create_default_context (ssl.py:712)",
+      "samples": 11,
+      "pct": 4.45
+    },
+    {
+      "frame": "restore (boxes.py:3612)",
+      "samples": 9,
+      "pct": 3.64
+    },
+    {
+      "frame": "_readerthread (subprocess.py:1599)",
+      "samples": 8,
+      "pct": 3.24
+    },
+    {
+      "frame": "__init__ (app.py:3139)",
+      "samples": 7,
+      "pct": 2.83
+    },
+    {
+      "frame": "apply_theme (app.py:3283)",
+      "samples": 6,
+      "pct": 2.43
+    },
+    {
+      "frame": "__init__ (app.py:3166)",
+      "samples": 6,
+      "pct": 2.43
+    },
+    {
+      "frame": "__init__ (app.py:542)",
+      "samples": 6,
+      "pct": 2.43
+    },
+    {
+      "frame": "_load_windows_store_certs (ssl.py:522)",
+      "samples": 6,
+      "pct": 2.43
+    },
+    {
+      "frame": "_load_windows_store_certs (ssl.py:517)",
+      "samples": 5,
+      "pct": 2.02
+    },
+    {
+      "frame": "refresh (app.py:686)",
+      "samples": 5,
+      "pct": 2.02
+    },
+    {
+      "frame": "_listen_loop (transfer.py:621)",
+      "samples": 5,
+      "pct": 2.02
+    },
+    {
+      "frame": "pin_to_desktop (app.py:1777)",
+      "samples": 4,
+      "pct": 1.62
+    }
+  ]
+}

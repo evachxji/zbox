@@ -1,0 +1,14 @@
+{
+  "idle": {
+    "idle_seconds": 45,
+    "cpu_pct_1core": 0.833,
+    "cpu_total_s": 0.375,
+    "working_set_mb": 203.99,
+    "private_mb": 133.45,
+    "peak_ws_mb": 211.7,
+    "handles": 1448,
+    "threads": 21,
+    "gdi": 0,
+    "user": 0
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "startup": [
+    {
+      "run": 1,
+      "import_ms": 156.0,
+      "qapp_ms": 492.4,
+      "panel_ctor_ms": 2338.2,
+      "boxmgr_ms": 6524.9,
+      "shown_ms": 6605.7,
+      "interactive_ms": 6621.0,
+      "panel_visible": true,
+      "working_set_mb": 202.7,
+      "private_mb": 133.1,
+      "peak_ws_mb": 202.7
+    },
+    {
+      "run": 2,
+      "import_ms": 160.2,
+      "qapp_ms": 531.5,
+      "panel_ctor_ms": 2396.0,
+      "boxmgr_ms": 6646.8,
+      "shown_ms": 6734.9,
+      "interactive_ms": 6749.3,
+      "panel_visible": true,
+      "working_set_mb": 209.6,
+      "private_mb": 136.9,
+      "peak_ws_mb": 209.6
+    },
+    {
+      "run": 3,
+      "import_ms": 160.1,
+      "qapp_ms": 499.7,
+      "panel_ctor_ms": 2130.7,
+      "boxmgr_ms": 6241.3,
+      "shown_ms": 6331.9,
+      "interactive_ms": 6348.1,
+      "panel_visible": true,
+      "working_set_mb": 196.6,
+      "private_mb": 130.5,
+      "peak_ws_mb": 196.6
+    },
+    {
+      "run": 4,
+      "import_ms": 153.4,
+      "qapp_ms": 482.7,
+      "panel_ctor_ms": 2093.9,
+      "boxmgr_ms": 6200.2,
+      "shown_ms": 6284.0,
+      "interactive_ms": 6298.6,
+      "panel_visible": true,
+      "working_set_mb": 204.9,
+      "private_mb": 133.9,
+      "peak_ws_mb": 204.9
+    },
+    {
+      "run": 5,
+      "import_ms": 159.6,
+      "qapp_ms": 503.5,
+      "panel_ctor_ms": 2115.4,
+      "boxmgr_ms": 6183.3,
+      "shown_ms": 6271.9,
+      "interactive_ms": 6286.4,
+      "panel_visible": true,
+      "working_set_mb": 202.9,
+      "private_mb": 133.5,
+      "peak_ws_mb": 202.9
+    }
+  ]
+}

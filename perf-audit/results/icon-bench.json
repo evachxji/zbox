@@ -1,0 +1,136 @@
+{
+  "rows": [
+    {
+      "name": "A. 普通文件 .txt (42)",
+      "count": 42,
+      "total_ms": 33.7,
+      "min_ms": 0.006,
+      "median_ms": 0.006,
+      "p90_ms": 0.007,
+      "max_ms": 33.414,
+      "mean_ms": 0.803,
+      "slowest": [
+        {
+          "ms": 33.4,
+          "path": "D:\\Document\\code\\zbox\\perf-audit\\tmp\\zbox_icon_si9p8cab\\txt\\f_000.txt"
+        },
+        {
+          "ms": 0.0,
+          "path": "D:\\Document\\code\\zbox\\perf-audit\\tmp\\zbox_icon_si9p8cab\\txt\\f_001.txt"
+        },
+        {
+          "ms": 0.0,
+          "path": "D:\\Document\\code\\zbox\\perf-audit\\tmp\\zbox_icon_si9p8cab\\txt\\f_002.txt"
+        },
+        {
+          "ms": 0.0,
+          "path": "D:\\Document\\code\\zbox\\perf-audit\\tmp\\zbox_icon_si9p8cab\\txt\\f_003.txt"
+        },
+        {
+          "ms": 0.0,
+          "path": "D:\\Document\\code\\zbox\\perf-audit\\tmp\\zbox_icon_si9p8cab\\txt\\f_006.txt"
+        }
+      ]
+    },
+    {
+      "name": "B. 快捷方式 .lnk",
+      "skipped": "exception: access violation reading 0xFFFFFFFFFFFFFFFF"
+    },
+    {
+      "name": "C. 真实目录 桌面快捷方式 (40)",
+      "count": 40,
+      "total_ms": 6887.8,
+      "min_ms": 0.025,
+      "median_ms": 6.214,
+      "p90_ms": 35.017,
+      "max_ms": 5006.657,
+      "mean_ms": 172.194,
+      "slowest": [
+        {
+          "ms": 5006.7,
+          "path": "D:\\Document\\桌面快捷方式\\快捷键检测.exe"
+        },
+        {
+          "ms": 1534.1,
+          "path": "D:\\Document\\桌面快捷方式\\暴雪战网.lnk"
+        },
+        {
+          "ms": 43.0,
+          "path": "D:\\Document\\桌面快捷方式\\炉石传说.lnk"
+        },
+        {
+          "ms": 36.5,
+          "path": "D:\\Document\\桌面快捷方式\\网易云音乐.lnk"
+        },
+        {
+          "ms": 35.0,
+          "path": "D:\\Document\\桌面快捷方式\\腾讯会议.lnk"
+        }
+      ]
+    },
+    {
+      "name": "D. 重复提取（热）",
+      "count": 42,
+      "total_ms": 2.1,
+      "min_ms": 0.047,
+      "median_ms": 0.048,
+      "p90_ms": 0.05,
+      "max_ms": 0.095,
+      "mean_ms": 0.049,
+      "slowest": [
+        {
+          "ms": 0.1,
+          "path": "D:\\Document\\code\\zbox\\perf-audit\\tmp\\zbox_icon_si9p8cab\\txt\\f_014.txt"
+        },
+        {
+          "ms": 0.1,
+          "path": "D:\\Document\\code\\zbox\\perf-audit\\tmp\\zbox_icon_si9p8cab\\txt\\f_015.txt"
+        },
+        {
+          "ms": 0.1,
+          "path": "D:\\Document\\code\\zbox\\perf-audit\\tmp\\zbox_icon_si9p8cab\\txt\\f_016.txt"
+        },
+        {
+          "ms": 0.1,
+          "path": "D:\\Document\\code\\zbox\\perf-audit\\tmp\\zbox_icon_si9p8cab\\txt\\f_000.txt"
+        },
+        {
+          "ms": 0.0,
+          "path": "D:\\Document\\code\\zbox\\perf-audit\\tmp\\zbox_icon_si9p8cab\\txt\\f_017.txt"
+        }
+      ]
+    },
+    {
+      "name": "E. 第二轮整批提取",
+      "count": 42,
+      "total_ms": 2.2,
+      "min_ms": 0.045,
+      "median_ms": 0.048,
+      "p90_ms": 0.065,
+      "max_ms": 0.125,
+      "mean_ms": 0.053,
+      "slowest": [
+        {
+          "ms": 0.1,
+          "path": "D:\\Document\\code\\zbox\\perf-audit\\tmp\\zbox_icon_si9p8cab\\txt\\f_022.txt"
+        },
+        {
+          "ms": 0.1,
+          "path": "D:\\Document\\code\\zbox\\perf-audit\\tmp\\zbox_icon_si9p8cab\\txt\\f_021.txt"
+        },
+        {
+          "ms": 0.1,
+          "path": "D:\\Document\\code\\zbox\\perf-audit\\tmp\\zbox_icon_si9p8cab\\txt\\f_023.txt"
+        },
+        {
+          "ms": 0.1,
+          "path": "D:\\Document\\code\\zbox\\perf-audit\\tmp\\zbox_icon_si9p8cab\\txt\\f_003.txt"
+        },
+        {
+          "ms": 0.1,
+          "path": "D:\\Document\\code\\zbox\\perf-audit\\tmp\\zbox_icon_si9p8cab\\txt\\f_041.txt"
+        }
+      ]
+    }
+  ]
+}
