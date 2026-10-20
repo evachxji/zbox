@@ -2,7 +2,7 @@
   <img src="assets/icon.png" width="96" alt="Zbox">
 </p>
 
-<h1 align="center">Zbox</h1>
+# Zbox 桌面格子
 
 <p align="center">
   <a href="https://github.com/evachxji/zbox/releases/latest"><img src="https://img.shields.io/github/v/release/evachxji/zbox" alt="Release"></a>
@@ -12,77 +12,79 @@
 </p>
 
 <p align="center">
-  <b>English</b> | <a href="README.zh-CN.md">简体中文</a>
+  <b>简体中文</b> | <a href="README.en.md">English</a>
 </p>
 
-A Windows desktop organizer: desktop boxes + a floating panel (calendar / todo / LAN transfer / video downloader) + screenshot tool. Windows 10 / 11.
+Windows 桌面整理工具：桌面格子 + 悬浮面板（日历 / 待办 / 传输 / 视频解析）+ 截图。Win10 / Win11。
 
-## Features
+## 功能
 
 <table>
   <tr>
-    <th align="center">Desktop Boxes</th>
-    <th align="center">File Transfer</th>
-    <th align="center">Video Downloader</th>
+    <th align="center">桌面格子</th>
+    <th align="center">文件传输</th>
+    <th align="center">视频解析</th>
   </tr>
   <tr>
-    <td><a href="assets/box.png"><img src="assets/box.png" width="260" alt="Desktop boxes"></a></td>
-    <td><a href="assets/transfer.png"><img src="assets/transfer.png" width="260" alt="File transfer"></a></td>
-    <td><a href="assets/video.png"><img src="assets/video.png" width="260" alt="Video downloader"></a></td>
+    <td><a href="assets/box.png"><img src="assets/box.png" width="260" alt="桌面格子"></a></td>
+    <td><a href="assets/transfer.png"><img src="assets/transfer.png" width="260" alt="文件传输"></a></td>
+    <td><a href="assets/video.png"><img src="assets/video.png" width="260" alt="视频解析"></a></td>
   </tr>
 </table>
 
-1. **Desktop organization**: drag files into a box to tidy them away — icons are hidden and restored automatically, and the positions of icons that never entered a box are remembered and put back on launch.
-   Drag a box near another visible box to snap matching edges: left-to-left, right-to-right, top-to-top, or bottom-to-bottom. Opposite edges never snap. The same rule applies while resizing a box and when moving the calendar panel; calendar resizing stays freely resizable. The snap engages within 8 px, releases after 12 px, and blue guides span both cards for every aligned edge.
-   Inside a box, drop onto the white guide line between items for a custom order, onto a folder to move files into it, or onto an app/shortcut to open the dragged files with it.
-   The collapse, lock, and menu icons stay hidden until the pointer enters the title bar, then fade in and fade out after it leaves.
-2. **Floating panel**:
-   - **Calendar**: clock with countdowns, public holidays and an optional lunar calendar, scroll to flip months
-   - **Todo**: check items off (grayed out), overdue reminders (pick a date, then confirm), dated items first and sorted by due date, undated items after them, and completed items last; editing or checking does not jump the list, and the editor has a check button to save. Right-click to edit/copy/delete with stacked 5-second undo toasts, each with its own countdown; new inputs start at the list tail, and the editor grows to show all content (Enter saves, Shift+Enter adds a line)
-   - **Transfer**: send files and folders between devices on the LAN (folders arrive as a recreated directory tree on the receiver), with manual accept on the receiver (allow the Windows Firewall prompt when first enabling it; if you clicked "Cancel" by mistake and devices/files stop arriving, the transfer tab detects it and offers a one-click repair)
-   - **Video downloader**: paste a URL to download videos, multiple resolutions, resumable downloads
-   - Freely resize the card by dragging its edges/corners; the size is remembered
-3. **Screenshot**: global hotkey region capture with window-aware selection — hover an app window to outline it, click to select the full window, or double-click to copy and exit; also supports rectangles, ellipses, QQ-style arrows, sequential number markers with auto-growing multiline dark labels and text, pin-to-screen and scrolling long capture; marker labels stay single-line until they reach the capture boundary or the user presses Enter, then wrap while keeping the number visible; per-tool size sliders are remembered across captures, labels can be dragged and reopened for editing, and clicking or dragging a pinned image opens its fixed bottom toolbar tray for annotation, saving and copying; click elsewhere to dismiss it. The toolbar **Translate** button recognizes text with local OCR and translates it via Doubao (first use shows a two-step setup guide: install the local OCR component from public PyPI mirrors (e.g. Tsinghua TUNA) and sign in to Doubao in a system Microsoft Edge window; only the recognized text is sent, the screenshot never leaves the device), painting the translation over the original text (which gets pixelated); click again to toggle back to the original, and copy/save/pin flattens the final image
-4. **Languages**: the PC app and Android app support **Simplified Chinese and English**. On PC, use the compact language selector directly below **Video downloader** in Settings (a restart applies it); the installer's first page also lets you pick the installation language. On Android, switch it in the **Settings** tab at the bottom; it applies immediately.
+1. **桌面整理**：文件拖入格子即归类，图标自动收纳还原，未入格文件的图标位置自动记忆、启动时摆回；
+   拖动格子靠近其他可见格子时只吸附同边：左对左、右对右、上对上、下对下，相对的两条边不吸附；缩放格子以及移动日历卡片时规则相同，日历卡片缩放不吸附。8px 内进入吸附，移出 12px 后释放；每一条实际对齐的边都会显示一条贯穿两张卡片的蓝色辅助线；
+   格子内拖到条目间的白色引导线上可自定义排序，拖到文件夹上 = 移入该文件夹，拖到程序/快捷方式上 = 用它打开；
+   顶部栏右侧的收起、锁定、菜单图标默认隐藏，鼠标移入顶部栏时淡入、移出后淡出
+2. **悬浮面板**：
+   - **日历**：时钟倒计时、节假日与可关闭的农历显示、滚轮翻月
+   - **待办**：勾选完成置灰，截止日期逾期提醒（日历点选后按「确定」保存）；有日期项在上并按日期升序排列，无日期项在下，已完成项最后；编辑和勾选不跳动列表；编辑行右侧可点勾保存；右键可编辑、复制或删除，删除后 5 秒内可撤销，连续删除的提示浮窗向上堆叠并各自带倒计时细线；新建输入框先追加到列表尾部；输入框随内容完整增高，Enter 保存、Shift+Enter 换行
+   - **传输**：局域网设备互传文件/文件夹（接收端按原目录结构还原文件夹），手动确认接收（首次启用请放行 Windows 防火墙弹窗；误点「取消」导致收不到设备/文件时，传输页会自动提示并可一键修复）
+   - **视频解析**：粘贴网址下载视频，多清晰度、断点续传
+   - 卡片四边/四角拖拽自由缩放，大小自动记忆
+3. **截图**：全局热键框选标注，支持程序窗口自动套选——鼠标悬浮显示窗口轮廓，单击选中完整窗口，双击复制并退出；同时支持矩形、椭圆、QQ 风格箭头、自动伸缩的黑色说明框序号标注和文字，兼容钉图与滚动长图；序号说明默认单行，仅在用户回车或触及截图边界时自动换行并始终保留红色编号可见；各工具的尺寸滑杆会记住上次位置，说明框可拖拽并可再次编辑，点击或拖拽钉图可在固定于图片底部的托盘工具条中继续标注、保存或复制，点击别处自动收起；工具条「翻译」按钮本地 OCR 识别文字后调用豆包翻译（首次使用弹出两步准备引导：从公共 PyPI 镜像（清华 TUNA 等）安装本地识别组件 + 在系统 Edge 浏览器窗口里登录豆包；仅识别出的文字会发送，截图不上传），译文直接覆盖在原文字位置（原文打马赛克），再点一次切换回原文，复制/保存/钉图时压平成最终图片
+4. **语言**：PC 端与 Android 端均支持**简体中文 / English**。PC 端在设置中「视频解析」下方的紧凑语言下拉框切换（重启生效）；
+  安装向导首屏也可以直接选择安装语言。Android 端在底部「设置」tab 中切换，即时生效。
 
-## Quick Start
+## 快速开始
 
-👉 **[Click to download the latest Windows installer](https://github.com/evachxji/zbox/releases/latest)** (`zbox-Setup-v<version>-x64.exe`) and double-click to open it.
+👉 **[点击下载最新版 Windows 安装包](https://github.com/evachxji/zbox/releases/latest)**（`zbox-Setup-v<版本>-x64.exe`），双击打开安装向导。
 
-Upgrading: "Check for updates" in the bottom-right corner of the Settings window compares against the latest GitHub release and can download the installer and guide you through the upgrade.
+升级：设置窗右下角「检查更新」会自动比对 GitHub 最新 release，有新版本可一键下载安装包并引导安装。
 
-Run from source: double-click `run.cmd` (it will offer to install PySide6 if missing).
+源码运行：双击 `run.cmd`（缺 PySide6 会提示自动安装）。
 
-## Build It Yourself
+## 自行构建
 
-- One-click, three platforms: double-click `build.cmd` and pick 1-7 to build a single target or a combination (default 7 = everything: Windows exe installer + Android APK + HarmonyOS HAP). Artifacts (versioned file names) are collected in `dist\release\`.
-  - Requirements: PC builds need PySide6 + PyInstaller (auto-install offered if missing); Android needs JDK 17 and the Android SDK; HarmonyOS needs DevEco Studio and `devecocli` (`npm i -g @deveco/deveco-cli@stable`)
-  - The HAP is an unsigned debug package that only installs on emulators / developer debug devices; distributing to real devices requires signing or AppGallery release (see `harmony\README.md`)
+- 一键三端：双击 `build.cmd`，启动后选 1-7 构建单端或组合（默认 7 全量：Windows exe 安装包 + Android APK + 鸿蒙 HAP），产物汇总在 `dist\release\`（文件名带版本号）
+  - 依赖：PC 需 PySide6 + PyInstaller（缺了会提示自动装）；Android 需 JDK 17 与 Android SDK；鸿蒙需 DevEco Studio 与 `devecocli`（`npm i -g @deveco/deveco-cli@stable`）
+  - hap 是免签名调试包，只能装模拟器/开发者调试设备；分发真机需签名或上架（见 `harmony\README.md`）
 
-## Verification
+## 验证
 
-- `python -m unittest discover -s tests -v` — Python/UI regression tests
-- `python transfer_selftest.py` — transfer protocol self-test (`SELFTEST OK`)
-- `cd android && gradlew.bat testDebugUnitTest` — Android language-rule unit tests
-- Bilingual screenshot self-check (renders every UI scene and exits):
-  `set ZBOX_SHOT=designs\verify-en` + `set ZBOX_SHOT_LANG=en-US` + `python main.pyw` (use `zh-CN` for Chinese).
-  Screenshot runs use an isolated IPC name, so they do not disturb a running panel.
+- `python -m unittest discover -s tests -v` — Python/UI 回归测试
+- `python transfer_selftest.py` — 传输协议自检（`SELFTEST OK`）
+- `cd android && gradlew.bat testDebugUnitTest` — Android 语言规则单元测试
+- 双语截图自检（导出全界面场景后自动退出）：
+  `set ZBOX_SHOT=designs\verify-en` + `set ZBOX_SHOT_LANG=en-US` + `python main.pyw`（中文用 `zh-CN`）。
+  截图进程使用独立 IPC 名，不会干扰正在运行的面板。
 
-## Compatibility
+## 兼容性
 
-PySide6 (Qt 6.8 LTS), Python 3.10+, Windows 10 / 11.
+PySide6（Qt 6.8 LTS），Python 3.10+，Win10 / Win11。
 
-## Acknowledgments
+## 开源致谢
 
-The LAN transfer feature implements the v2 protocol of the open-source project [LocalSend](https://github.com/localsend/localsend) (Apache License 2.0) as a private instance (port 53327 / multicast 224.0.0.168) and is not interoperable with the official LocalSend apps.
-Video downloading is powered by [yt-dlp](https://github.com/yt-dlp/yt-dlp), with audio/video merging by [ffmpeg](https://ffmpeg.org/).
+局域网传输功能参照开源项目 [LocalSend](https://github.com/localsend/localsend)（Apache License 2.0）的
+v2 协议实现，为私有实例（端口 53327 / 组播 224.0.0.168），与官方 LocalSend 应用不互通。
+视频解析功能由 [yt-dlp](https://github.com/yt-dlp/yt-dlp) 驱动，音视频合并由 [ffmpeg](https://ffmpeg.org/) 完成。
 
-## Links
+## 链接
 
-- 🌐 Website: [zbox.wzyjc.cn](https://zbox.wzyjc.cn)
-- 📦 Releases: [github.com/evachxji/zbox/releases](https://github.com/evachxji/zbox/releases)
-- 🐛 Issues: [github.com/evachxji/zbox/issues](https://github.com/evachxji/zbox/issues)
-- 💬 LINUX DO Community: [linux.do](https://linux.do)
+- 🌐 官网：[zbox.wzyjc.cn](https://zbox.wzyjc.cn)
+- 📦 下载发布：[github.com/evachxji/zbox/releases](https://github.com/evachxji/zbox/releases)
+- 🐛 问题反馈：[github.com/evachxji/zbox/issues](https://github.com/evachxji/zbox/issues)
+- 💬 LINUX DO 社区：[linux.do](https://linux.do)
 
 ## License
 
