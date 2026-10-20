@@ -12,10 +12,24 @@ from PySide6.QtCore import Qt, QTimer, QRectF
 from PySide6.QtGui import QPainter, QColor, QPen, QPainterPath
 from PySide6.QtWidgets import QFrame
 
+_sc_cache = {}
+
+
 def _sc(v):
-    """DPI 缩放（运行期惰性 import app，绕开 transfer_ui/video_ui 与 app 的循环）。"""
+    """DPI 缩放（运行期惰性 import app，绕开 transfer_ui/video_ui 与 app 的循环）。
+
+    2026-10 性能审计 P2-12：这里每帧要被调好几次（paintEvent 里的 rad、
+    _border_segments 里的 step），而每次都走一遍函数内 import + 缩放计算。
+    DPI 在进程内不变（QSS 也按启动时的 scale 构建），故直接缓存结果。
+    """
+    try:
+        return _sc_cache[v]
+    except KeyError:
+        pass
     import app as ui
-    return ui.sc(v)
+    r = ui.sc(v)
+    _sc_cache[v] = r
+    return r
 
 
 class GlowCard(QFrame):
@@ -33,6 +47,8 @@ class GlowCard(QFrame):
         self._timer.timeout.connect(self._tick)
         self._poly_key = None        # 边框折线缓存键（尺寸）
         self._poly = None            # [(起始累计长度, a, b)...], 周长
+        self._pens = None            # 跑马灯的色相档 QPen 缓存（见 _hue_pens）
+        self._pens_key = None
 
     def set_accent(self, color):
         self._accent = QColor(color)
@@ -69,10 +85,11 @@ class GlowCard(QFrame):
             else:   # run：彩虹沿边框顺时针追跑——逐段画折线，色相由「沿周长的
                 # 位置 - 相位」决定（旧实现对角渐变+转色相：上下边同向变色，不像跑马灯）
                 segs, total = self._border_segments(r, rad)
+                pens = self._hue_pens()
+                nh = len(pens)
                 for start, a, b in segs:
                     frac = ((start / total) - self._phase) % 1.0
-                    p.setPen(QPen(QColor.fromHsv(int(frac * 360), 210, 255),
-                                  2, Qt.SolidLine, Qt.RoundCap))
+                    p.setPen(pens[int(frac * nh) % nh])
                     p.drawLine(a, b)
                 p.end()
                 return
@@ -83,6 +100,26 @@ class GlowCard(QFrame):
         except Exception:
             pass
 
+
+    def _hue_pens(self, n_hue=360):
+        """按色相档预建 QPen（跑马灯每帧要给上百段换色）。
+
+        2026-10 性能审计 P2-12：原实现每帧对每一段都新建一个 QColor.fromHsv +
+        QPen（约 120 段 × 20fps = 每秒 2400 次颜色转换与 QPen 分配）。
+        改为预先按固定档位建好一排 QPen，每帧只做整数运算 + 数组下标。
+
+        档位取 360 = 与原实现 int(frac*360) **完全同一套索引** → 渲染像素与
+        原版逐点相同（视觉零差异），只是不再每帧重新构造。
+        """
+        key = (n_hue, self.width(), self.height())
+        if self._pens_key != key:
+            pens = []
+            for i in range(n_hue):
+                c = QColor.fromHsv(int(i * 360.0 / n_hue), 210, 255)
+                pens.append(QPen(c, 2, Qt.SolidLine, Qt.RoundCap))
+            self._pens = pens
+            self._pens_key = key
+        return self._pens
 
     def _border_segments(self, r, rad):
         """圆角矩形边框的折线段 + 各段起点的累计周长（尺寸不变时缓存）。
