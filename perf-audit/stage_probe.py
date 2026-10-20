@@ -225,6 +225,15 @@ def main():
     for fn in ('_placeholder_icon', '_icon_worker', '_icon_cache_put', '_box_qss'):
         patch_func(bx, fn, 'boxes:%s' % fn)
 
+    # 传输服务内部（enable_service 同步占 1.27s）
+    tr = M.ui.transfer_ui.transfer
+    patch_acc(tr.TransferServer, '__init__', 'transfer:TransferServer.__init__')
+    patch_acc(tr.TransferServer, 'start', 'transfer:TransferServer.start')
+    patch_acc(tr.Discovery, '__init__', 'transfer:Discovery.__init__')
+    patch_acc(tr.Discovery, 'start', 'transfer:Discovery.start')
+    patch_acc(tr.Discovery, 'announce', 'transfer:Discovery.announce')
+    patch_acc(tr.Discovery, '_listen_loop', 'transfer:Discovery._listen_loop')
+
     # --- 事件循环真正跑起来后 dump 并退出 ---
     def _dump_and_quit():
         mark('事件循环运行中（+2.5s）')

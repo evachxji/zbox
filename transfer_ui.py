@@ -451,6 +451,7 @@ class TransferWidget(QWidget):
     sig_send_done = Signal(str, bool, str)          # 记录 key, ok, err
     sig_firewall = Signal()                         # 检测到防火墙阻止规则
     sig_fw_result = Signal(str)                     # 防火墙修复结果 ok/error
+    sig_service_started = Signal(bool, object, object)   # 后台起服务结果 ok, server, discovery
 
     def __init__(self, cfg, device_info, parent=None, auto_start=True):
         super(TransferWidget, self).__init__(parent)
@@ -471,6 +472,8 @@ class TransferWidget(QWidget):
         self._progress_ts = {}       # 接收进度节流：{session_id: 上次 emit 时间}
         self._scanning = False
         self._fw_warned = False    # 防火墙拦截提示：每会话最多一次
+        self._starting = False     # 服务正在后台启动（bind 端口要 1 秒多）
+        self._stop_requested = False   # 启动期间用户关了传输：起来就立刻停
         self._save_dir = _default_save_dir(cfg)
         self.setAcceptDrops(True)
 
@@ -663,6 +666,7 @@ class TransferWidget(QWidget):
         self.sig_send_done.connect(self._on_send_done)
         self.sig_firewall.connect(self._on_firewall_blocked)
         self.sig_fw_result.connect(self._on_fw_result)
+        self.sig_service_started.connect(self._on_service_started)
 
         # ---- 门禁层：未开启传输时盖住整页（内容高斯模糊）----
         self._build_gate()
@@ -673,8 +677,9 @@ class TransferWidget(QWidget):
         if not auto_start:
             return
         if bool(cfg.data.get('transfer_enabled')):
-            if not self.enable_service():
-                self._show_gate('occupied')   # 端口被占：提示，确定后回到未开启态
+            # 后台起服务（bind 端口要 1 秒多，不能挡首帧）；失败由
+            # _on_service_started 切「不可用」形态
+            self.enable_service()
         else:
             self._show_gate('enable')
 
@@ -702,7 +707,9 @@ class TransferWidget(QWidget):
     # ---------------- 服务生命周期 ----------------
 
     def service_enabled(self):
-        return self.server is not None
+        # 正在后台启动（bind 端口要 1 秒多）也算已启用，否则设置窗勾选会与
+        # 配置里的 transfer_enabled=True 不一致
+        return self.server is not None or self._starting
 
     def _wire_server(self, server, discovery):
         '''网络回调接线：后台线程里只发信号，不碰 UI。'''
@@ -715,25 +722,76 @@ class TransferWidget(QWidget):
         discovery.on_device_found = self._cb_device_found
 
     def enable_service(self):
-        '''启动端口监听 + 设备发现；端口被占返回 False（界面保持门禁层）。'''
+        '''请求启动端口监听 + 设备发现。
+
+        2026-10 性能改造：端口 bind 在 Windows 上第一次会触发防火墙规则创建，
+        实测要 1.26 秒（TransferServer.__init__ 一次 1263ms）——放 GUI 线程会
+        卡住首帧（冷启动 6.35s 里有 1.27s 花在这）。故整个启动过程放后台线程，
+        结果经 sig_service_started 回主线程切换门禁层形态。
+        返回 True = 已请求启动（不代表已就绪）。
+        '''
         if self.server is not None:
             return True
+        if self._starting:
+            return True
+        self._starting = True
+        self._stop_requested = False
+        threading.Thread(target=self._enable_work, daemon=True).start()
+        return True
+
+    def _enable_work(self):
+        '''后台线程：bind 端口 + 起发现服务。绝不碰 UI（结果经信号回主线程）。'''
+        server = discovery = None
+        ok = False
         try:
             server = transfer.TransferServer(self.device_info)
+            discovery = transfer.Discovery(self.device_info)
+            self._wire_server(server, discovery)
+            server.start()
+            discovery.start()
+            ok = True
         except Exception:
-            return False
-        discovery = transfer.Discovery(self.device_info)
-        self._wire_server(server, discovery)
-        server.start()
-        discovery.start()
+            ok = False
+            try:
+                if discovery is not None:
+                    discovery.stop()
+                if server is not None:
+                    server.stop()
+            except Exception:
+                pass
+        self.sig_service_started.emit(ok, server, discovery)
+
+    def _on_service_started(self, ok, server, discovery):
+        '''后台启动结果（已在主线程）：接管服务对象 / 切门禁层形态。'''
+        self._starting = False
+        if not ok:
+            # 端口被占等失败：门禁层切「不可用」
+            self.cfg.set('transfer_enabled', False)
+            self._show_gate('occupied')
+            self.enabled_changed.emit(False)
+            return
+        if self._stop_requested:
+            # 启动期间用户把传输关了：起来就立刻停
+            try:
+                discovery.stop()
+                server.stop()
+            except Exception:
+                pass
+            return
         self.server = server
         self.discovery = discovery
         self._service_started = True
+        self.cfg.set('transfer_enabled', True)
+        self._hide_gate()
+        self.enabled_changed.emit(True)
+        self._refresh_devices()
         self._check_firewall()
-        return True
 
     def disable_service(self):
         '''停止监听并释放端口，清空设备列表。'''
+        if self._starting:
+            # 正在后台 bind：等它起来后立刻停（_on_service_started 负责收尾）
+            self._stop_requested = True
         server, discovery = self.server, self.discovery
         self.server = None
         self.discovery = None
@@ -776,6 +834,8 @@ class TransferWidget(QWidget):
     def shutdown_service(self):
         '''程序退出：只停真正 start 过的服务。'''
         try:
+            if self._starting:
+                self._stop_requested = True
             if self._service_started and self.server is not None:
                 self.discovery.stop()
                 self.server.stop()

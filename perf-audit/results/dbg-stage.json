@@ -2,229 +2,249 @@
   "marks": [
     {
       "stage": "import main 完成",
-      "ms": 176.5
+      "ms": 150.7
     },
     {
       "stage": "QApplication() 前",
-      "ms": 230.8
+      "ms": 206.7
     },
     {
       "stage": "QApplication() 后",
-      "ms": 256.5
+      "ms": 227.4
     },
     {
       "stage": "Config() 前",
-      "ms": 256.7
+      "ms": 227.5
     },
     {
       "stage": "Config() 后",
-      "ms": 259.9
+      "ms": 244.9
     },
     {
       "stage": "HolidayStore() 前",
-      "ms": 261.8
+      "ms": 247.3
     },
     {
       "stage": "HolidayStore() 后",
-      "ms": 262.0
+      "ms": 247.5
     },
     {
       "stage": "TodoStore() 前",
-      "ms": 262.0
+      "ms": 247.5
     },
     {
       "stage": "TodoStore() 后",
-      "ms": 262.1
+      "ms": 247.7
     },
     {
       "stage": "FloatingPanel() 前",
-      "ms": 321.7
+      "ms": 291.7
     },
     {
       "stage": "FloatingPanel() 后",
-      "ms": 2071.1
+      "ms": 2015.4
     },
     {
       "stage": "BoxManager() 前",
-      "ms": 2071.1
+      "ms": 2015.4
     },
     {
       "stage": "BoxManager() 后",
-      "ms": 5824.0
+      "ms": 2164.0
     },
     {
       "stage": "panel.show() 前",
-      "ms": 5830.7
+      "ms": 2170.3
     },
     {
       "stage": "panel.show() 后",
-      "ms": 5885.3
+      "ms": 2197.7
     },
     {
       "stage": "qapp.exec() 入口",
-      "ms": 5885.3
+      "ms": 2197.7
     },
     {
       "stage": "事件循环首拍（可交互）",
-      "ms": 5897.1
+      "ms": 2203.4
     },
     {
       "stage": "面板已可见=True",
-      "ms": 5897.2
+      "ms": 2203.5
     },
     {
       "stage": "事件循环运行中（+2.5s）",
-      "ms": 8384.5
+      "ms": 4695.7
     }
   ],
   "accumulated": {
-    "boxes:BoxManager.restore": {
-      "calls": 1,
-      "ms": 3737.9
-    },
-    "boxes:BoxWindow.__init__": {
-      "calls": 3,
-      "ms": 3599.0
-    },
     "transfer:TransferWidget.__init__": {
       "calls": 1,
-      "ms": 1261.3
+      "ms": 1267.4
     },
     "transfer:enable_service": {
       "calls": 1,
-      "ms": 1259.0
+      "ms": 1264.8
+    },
+    "transfer:TransferServer.__init__": {
+      "calls": 1,
+      "ms": 1263.2
     },
     "app:TodoWidget.__init__": {
       "calls": 1,
-      "ms": 381.8
+      "ms": 349.1
     },
     "app:TodoWidget.rebuild": {
       "calls": 1,
-      "ms": 381.4
+      "ms": 348.6
+    },
+    "boxes:BoxManager.restore": {
+      "calls": 1,
+      "ms": 132.8
+    },
+    "boxes:BoxWindow.__init__": {
+      "calls": 3,
+      "ms": 83.8
     },
     "boxes:BoxWindow.refresh": {
-      "calls": 4,
-      "ms": 157.5
+      "calls": 3,
+      "ms": 68.4
     },
     "boxes:_baked_icon": {
-      "calls": 48,
-      "ms": 151.9
+      "calls": 45,
+      "ms": 50.1
     },
     "boxes:BoxWindow.show": {
       "calls": 3,
-      "ms": 116.1
-    },
-    "app:panel._ensure_band": {
-      "calls": 7,
-      "ms": 31.0
+      "ms": 33.2
     },
     "app:CalendarWidget.__init__": {
       "calls": 1,
-      "ms": 28.2
-    },
-    "boxes:_placeholder_icon": {
-      "calls": 44,
-      "ms": 27.4
+      "ms": 30.6
     },
     "app:CalendarWidget.refresh": {
       "calls": 1,
-      "ms": 27.4
+      "ms": 29.9
+    },
+    "app:panel._ensure_band": {
+      "calls": 6,
+      "ms": 27.8
+    },
+    "boxes:_placeholder_icon": {
+      "calls": 40,
+      "ms": 24.2
     },
     "app:panel.apply_theme": {
       "calls": 1,
-      "ms": 23.6
-    },
-    "boxes:hide_icons": {
-      "calls": 1,
-      "ms": 17.8
+      "ms": 22.4
     },
     "video:VideoWidget.__init__": {
       "calls": 1,
-      "ms": 15.0
+      "ms": 16.7
+    },
+    "boxes:hide_icons": {
+      "calls": 1,
+      "ms": 12.6
     },
     "app:TodoWidget._sync_row_heights": {
       "calls": 1,
-      "ms": 4.5
-    },
-    "boxes:_restore_desktop_icons": {
-      "calls": 1,
-      "ms": 3.9
-    },
-    "boxes:_DesktopIconLayout.restore_positions": {
-      "calls": 1,
-      "ms": 3.3
-    },
-    "boxes:_DesktopIconLayout.enum_icons": {
-      "calls": 1,
-      "ms": 3.3
-    },
-    "app:_indicator_icons": {
-      "calls": 1,
-      "ms": 3.0
+      "ms": 4.9
     },
     "app:pick_fonts": {
       "calls": 10,
-      "ms": 2.6
+      "ms": 3.1
+    },
+    "app:_indicator_icons": {
+      "calls": 1,
+      "ms": 2.8
+    },
+    "boxes:_restore_desktop_icons": {
+      "calls": 1,
+      "ms": 2.2
+    },
+    "boxes:_DesktopIconLayout.restore_positions": {
+      "calls": 1,
+      "ms": 2.1
+    },
+    "boxes:_DesktopIconLayout.enum_icons": {
+      "calls": 1,
+      "ms": 2.1
     },
     "boxes:_apply_rec_to_ui": {
       "calls": 3,
-      "ms": 2.0
+      "ms": 1.2
     },
-    "boxes:BoxList.set_view": {
-      "calls": 3,
-      "ms": 1.5
+    "transfer:Discovery.start": {
+      "calls": 1,
+      "ms": 1.0
+    },
+    "transfer:Discovery.announce": {
+      "calls": 1,
+      "ms": 0.9
     },
     "boxes:_upgrade_blank_boxes": {
       "calls": 1,
-      "ms": 0.8
+      "ms": 0.9
+    },
+    "boxes:BoxList.set_view": {
+      "calls": 3,
+      "ms": 0.9
+    },
+    "boxes:_request_icon": {
+      "calls": 40,
+      "ms": 0.6
     },
     "app:TodoWidget._make_row": {
       "calls": 6,
       "ms": 0.6
     },
-    "video:_refresh_versions": {
-      "calls": 1,
+    "boxes:_icon_worker": {
+      "calls": 41,
       "ms": 0.5
     },
-    "boxes:_request_icon": {
-      "calls": 44,
+    "video:_refresh_versions": {
+      "calls": 1,
       "ms": 0.4
+    },
+    "boxes:_box_qss": {
+      "calls": 3,
+      "ms": 0.3
+    },
+    "transfer:TransferServer.start": {
+      "calls": 1,
+      "ms": 0.3
     },
     "app:panel.set_tab": {
       "calls": 1,
-      "ms": 0.4
+      "ms": 0.3
     },
-    "transfer:set_theme": {
-      "calls": 2,
-      "ms": 0.4
+    "transfer:_build_gate": {
+      "calls": 1,
+      "ms": 0.3
     },
     "transfer:_alias_icon": {
       "calls": 3,
+      "ms": 0.3
+    },
+    "transfer:set_theme": {
+      "calls": 2,
       "ms": 0.3
     },
     "transfer:_refresh_icon": {
       "calls": 3,
       "ms": 0.3
     },
-    "boxes:_box_qss": {
-      "calls": 3,
-      "ms": 0.3
-    },
-    "boxes:_icon_worker": {
-      "calls": 45,
-      "ms": 0.2
-    },
-    "transfer:_build_gate": {
+    "boxes:_scan_dir": {
       "calls": 1,
-      "ms": 0.2
+      "ms": 0.1
+    },
+    "boxes:_icon_cache_put": {
+      "calls": 37,
+      "ms": 0.1
     },
     "boxes:set_collapsed": {
       "calls": 3,
-      "ms": 0.2
-    },
-    "boxes:_scan_dir": {
-      "calls": 1,
-      "ms": 0.2
+      "ms": 0.1
     },
     "transfer:_refresh_devices": {
       "calls": 1,
@@ -232,14 +252,14 @@
     },
     "boxes:set_locked": {
       "calls": 3,
-      "ms": 0.1
-    },
-    "boxes:_icon_cache_put": {
-      "calls": 46,
       "ms": 0.0
     },
     "boxes:BoxWindow.setStyleSheet": {
       "calls": 3,
+      "ms": 0.0
+    },
+    "transfer:Discovery.__init__": {
+      "calls": 1,
       "ms": 0.0
     },
     "transfer:_default_save_dir": {
@@ -261,9 +281,13 @@
     "transfer:_file_icon": {
       "calls": 0,
       "ms": 0.0
+    },
+    "transfer:Discovery._listen_loop": {
+      "calls": 0,
+      "ms": 0.0
     }
   },
-  "working_set_mb": 168.3,
-  "private_mb": 87.2,
-  "peak_ws_mb": 168.3
+  "working_set_mb": 167.6,
+  "private_mb": 87.5,
+  "peak_ws_mb": 167.6
 }

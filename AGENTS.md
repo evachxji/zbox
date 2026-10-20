@@ -617,6 +617,19 @@ IPC 通道（与 `--pick-folder` 同一条）发回面板建格子；`new_folder
   `_baked_icon` 烘成纯位图 QIcon（paint 只读内存），切视图后按新图标尺寸重烘。
   滚轮是 200ms 缓出动画驱动滚动条（`BoxList.wheelEvent`，对齐资源管理器手感），
   两种视图都 ScrollPerPixel，触摸板 pixelDelta 直接跟手不走动画。
+- **壳图标提取必须分两条路（2026-10 性能审计，实测）**：`QFileIconProvider.icon()` 对
+  `.lnk` 要经壳**解析目标**、对 `.exe` 要**从 PE 资源提取**（11.8MB 的 exe 一次 3 秒，
+  得扫完整个文件），而普通文件只要 0.006ms。故 `_baked_icon` 按类型分流：
+  ① `.lnk`/`.exe`/`.dll`/… 走**后台线程**（模块级 `_IconThread` 单例服务所有格子），
+     纯 ctypes 实现：`IShellLinkW` 解析 .lnk 目标 → `ExtractIconExW` → `DrawIconEx`
+     画成 QImage（QImage 可跨线程，QPixmap 不行 → QPixmap 转换留主线程）；主线程先给
+     占位图标，取到后回填。② 普通文件 / 目录 / `.url` 仍走主线程同步取（渲染路径与
+     原先完全一致，像素不变）。另有进程内缓存 `(path, is_dir, size, dpr) → QIcon`。
+  ⚠️ **别把 `QFileIconProvider` 放后台线程**：它的图标引擎挂在**全局 QPixmapCache**
+  （带 mutex）上，后台取图标时主线程的 resize/paint 也要用同一把锁——实测把启动从
+  2.0s 劣化到 5.4s（首帧被拖到 5.6s）。纯 ctypes 路线完全不碰 Qt 缓存。
+  ⚠️ `SHGetFileInfoW` / `ExtractIconExW` 对 `.lnk` **不解析目标**，只给「快捷方式」
+  默认图标；必须先 `IShellLinkW` 解析目标路径再取图标，否则快捷方式全变成同一种图标。
 - **层级策略（踩坑三轮后的终态，2026-10 再修订）：挂桌面带（`pin_to_desktop`，免疫 Win+D）
   + 永不主动沉底。** 带内窗口点击激活会浮到应用窗口之上（实测确认），只要不主动 sink
   它就一直在，这就是「格子永不消失」的关键。
@@ -1018,6 +1031,17 @@ HTTP 模式无加密，只面向可信局域网。组播失效时有 /24 子网�
   `main.pyw` 启动时已把指纹同步进 `cfg.data`，改启动流程时别丢掉这一步。
 - 未 `start()` 的 `TransferServer` 调 `stop()` 会死等：只有 `enable_service()` 成功才会置
   `_service_started`，`disable_service()` / `shutdown_service()` 只在这个标志下 stop。
+- **传输服务是后台启动的（2026-10 性能改造）**：端口 bind 在 Windows 上第一次会触发
+  防火墙规则创建，**实测 1.26 秒**（`TransferServer.__init__` 一项就占满）——放 GUI 线程
+  会卡住首帧（冷启动 6.35s 里有 1.27s 花在这）。故 `enable_service()` 改为起后台线程做
+  bind，结果经 `sig_service_started(bool, server, discovery)` 回主线程接管。
+  ⚠️ 随之而来的三条约定：① **「端口被占」的提示必须在主线程弹**（`_on_service_started`
+  里切门禁层形态）——后台线程只做 bind，不碰 UI；② 启动期间用户关掉传输 → 置
+  `_stop_requested`，`_on_service_started` 见到就立刻把起来的服务停掉；③
+  `service_enabled()` 要把「正在启动」也算已启用（`self._starting`），否则设置窗勾选
+  会与配置里的 `transfer_enabled=True` 不一致。
+  ⚠️ `TransferServer.allow_reuse_address = True` —— 同一台机器上可以同时绑多个 53327，
+  「端口被占」只有在别的进程用 `SO_EXCLUSIVEADDRUSE` 占了端口时才会真的发生。
 - 改别名要到下次启动或点「刷新」才会重新广播（发现报文只在启动/刷新时发）。
 - Windows 防火墙首次监听 53327 会弹授权框（发生在用户点「启用传输」那一刻）；点「取消」会
   写入一条针对该 exe 路径的「阻止」规则且**不再弹窗**——出站正常（对方能发现本机）、入站被
