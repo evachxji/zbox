@@ -363,11 +363,16 @@ class DayCell(QFrame):
         # 右上角标签：法定节假日「休」、调休上班日「班」；普通双休日不标
         if kind:
             self.badge.setText(t('calendar.badge.off') if kind == 'off' else t('calendar.badge.work'))
-            self.badge.setProperty('kind', kind)
+            if self.badge.property('kind') != kind:
+                self.badge.setProperty('kind', kind)
+                # badge 的 QSS 规则是 `#badge[kind="off"]` 这样的 id 选择器，
+                # 不依赖祖先属性 —— 只有它自己变了才需要重刷
+                self.badge.style().unpolish(self.badge)
+                self.badge.style().polish(self.badge)
             self.badge.show()
         else:
             self.badge.hide()
-        for w in (self, self.num, self.sub, self.badge):
+        for w in (self, self.num, self.sub):
             w.style().unpolish(w)
             w.style().polish(w)
         self._place_badge()   # QSS 字号在 polish 之后才生效，尺寸自适应要放最后
@@ -519,6 +524,7 @@ class CalendarWidget(QWidget):
         self._pages = {}      # 上/当前/下三个条带：{-1, 0, 1} -> _GridPage
         self._off = 0.0       # 平移偏移（像素）：>0 内容下移（往上月），<0 内容上移（往下月）
         self._selected = None  # 单击选中的日期
+        self._selected_cell = None   # 选中态对应的 DayCell（页面重建后会失效，见 _select_day）
         self._dim_month = None  # 灰色显示当前依据的 (年, 月)，跟随视口显示月
         self._dim_dirty = False  # 置灰滞后标记：平移中只记账，停手时一次性重刷
         self._panning = False  # 平移中（画位图缓存）
@@ -716,16 +722,36 @@ class CalendarWidget(QWidget):
                                      else {-1: pm, 0: px[-1], 1: px[0]})
 
     def _select_day(self, d):
-        """单击日期：记录选中并刷新现有格子的选中态（滚动/重建后由 build 保持）。"""
+        """单击日期：记录选中并刷新现有格子的选中态（滚动/重建后由 build 保持）。
+
+        2026-10 性能审计 P1-5：原先遍历全部 105 个格子逐个比对 sel 属性。
+        实际只有「原选中」与「新选中」两格的状态会变 —— 改为定点刷新两格，
+        QSS 重解析从 315 次降到 6 次（unpolish+polish 会丢弃样式缓存并重新
+        解析整份 QSS，是 Qt6 最贵的样式操作）。
+        """
         self._selected = d
+        old = self._selected_cell
+        new = None
         for page in self._pages.values():
             for cell in page.findChildren(DayCell):
-                sel = 'true' if cell.date == d else 'false'
-                if cell.property('sel') != sel:
-                    cell.setProperty('sel', sel)
-                    for w in (cell, cell.num, cell.sub):  # 子孙选择器依赖祖先属性，需一并重刷
-                        w.style().unpolish(w)
-                        w.style().polish(w)
+                if cell.date == d:
+                    new = cell
+                    break
+            if new is not None:
+                break
+        for cell, want in ((old, 'false'), (new, 'true')):
+            if cell is None:
+                continue
+            try:
+                if cell.property('sel') == want:
+                    continue
+            except RuntimeError:
+                continue    # 页面重建过，这个 cell 已被销毁（选中态由 build 重设）
+            cell.setProperty('sel', want)
+            for w in (cell, cell.num, cell.sub):  # 子孙选择器依赖祖先属性，需一并重刷
+                w.style().unpolish(w)
+                w.style().polish(w)
+        self._selected_cell = new
 
     # --- 自由平移（滚轮 / 触摸板 / 鼠标拖拽，停在哪就留在哪，不吸附） ---
     def _pan_by(self, dy):
@@ -3293,7 +3319,10 @@ class FloatingPanel(QWidget):
         idx = idx if 0 <= idx < len(pages) else 0   # 持久化的 tab 越界时回退日历
         self.single_stack.slide_to(pages[idx])
         for i, b in enumerate(self.tabs):
-            b.setProperty('active', 'true' if i == idx else 'false')
+            want = 'true' if i == idx else 'false'
+            if b.property('active') == want:
+                continue        # 状态没变就别重刷（polish 要重新解析整份 QSS）
+            b.setProperty('active', want)
             b.style().unpolish(b)
             b.style().polish(b)
         if save:
