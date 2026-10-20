@@ -561,6 +561,11 @@ class Download(object):
                     continue
                 break
         except Exception as e:
+            # 异常分支原先只把 _proc 置 None → yt-dlp 子进程**继续跑着下载并写文件**
+            # （孤儿进程：占 CPU/带宽、输出目录留下半成品，退出时也再也终止不了它）。
+            # 先按整棵树杀掉（yt-dlp 是 PyInstaller 双进程结构，见 _kill_tree），
+            # 再清 .part 残留。
+            self._kill_tree()
             self._proc = None
             self._cleanup_parts(dests)
             done_cb(False, str(e))
