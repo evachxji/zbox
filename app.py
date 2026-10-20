@@ -3292,10 +3292,17 @@ class FloatingPanel(QWidget):
     def showEvent(self, e):
         super(FloatingPanel, self).showEvent(e)
         self._round_corners()
+        # 面板收起时时钟 tick 已停（见 hideEvent），显示时恢复
+        if not self.cal._clock.isActive():
+            self.cal._clock.start(1000)
 
     def hideEvent(self, e):
         self.titlebar.hide()   # 栏窗无属主，不随面板隐藏，手动带上
         self._hide_snap_guide()
+        # 收起后时钟 tick 停掉：1Hz 的 setText + _update_sub（重新解析倒计时配置 +
+        # 字体度量）在看不见的时候纯属浪费 CPU（2026-10 性能审计）。
+        # 只停显示用的时钟；_sink_timer 保留 —— 它负责挂带健康与失焦沉底。
+        self.cal._clock.stop()
         super(FloatingPanel, self).hideEvent(e)
 
     def moveEvent(self, e):
