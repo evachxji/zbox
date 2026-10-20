@@ -370,7 +370,7 @@ QWidget#panel {
     border-radius: 12px;
 }
 QFrame#titlebar { background: #f7f8fa; }
-QFrame#tabBox { background: rgba(0,0,0,14); border-radius: 8px; }
+QFrame#tabBox { background: transparent; }
 QToolButton#tab {
     background: transparent; border: none; border-radius: 6px;
     /* 英文 tab 比中文宽得多：横向 padding 收到 2px（与 nocturne 一致），
