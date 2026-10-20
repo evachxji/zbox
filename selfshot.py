@@ -136,7 +136,8 @@ class _Runner(object):
         # 自动更新与热键，没有任何路径会把这份内存配置写回 config.json）
         self.cfg.data['off_noon'] = '12:00-13:00'
         self.cfg.data['off_evening'] = '18:00'
-        self.cfg.data['show_lunar'] = True   # 截图基准固定显示农历，不受用户本地配置影响
+        self.cfg.data['show_lunar'] = True   # 截图基准固定显示农历/节假日，不受用户本地配置影响
+        self.cfg.data['show_holiday'] = True
         # 版本号打桩（关于窗 / 设置窗左下角 / 向导标题栏）
         self._ver_backup = (ui.APP_VERSION, sysutil.APP_VERSION)
         ui.APP_VERSION = sysutil.APP_VERSION = SHOT_VERSION
@@ -249,6 +250,9 @@ class _Runner(object):
                      lambda: ui.AboutDialog(p))
             self.job('%s_holiday_import' % theme, 300, None,
                      lambda: ui.HolidayImportDialog(
+                         p, lambda *a, **kw: False, lambda: None))
+            self.job('%s_holiday_info' % theme, 300, None,
+                     lambda: ui.HolidayInfoDialog(
                          p, lambda *a, **kw: False, lambda: None))
             self.job('%s_due_popup' % theme, 300, None,
                      lambda: ui.DuePopup(p, FIXED_NOW.date().isoformat(),

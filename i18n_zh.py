@@ -62,9 +62,10 @@ CATALOG = {
     'settings.hotkey.prompt': '请按组合键…',
     'settings.hotkey.tooltip': '按下组合键录入；留空 = 不启用截图热键',
     'settings.hotkey.clear': '清空快捷键',
-    'settings.lunar': '农历',
+    'settings.calendar': '日历',
     'settings.lunar.show': '显示农历',
-    'settings.holiday': '日历假期',
+    'settings.holiday.show': '显示节假日',
+    'settings.holiday.help': '节假日数据说明',
     'settings.pick_time': '选择时间',
     'settings.noon': '午休时间',
     'settings.off_time': '下班时间',
@@ -94,7 +95,10 @@ CATALOG = {
     'holiday.downloading': '正在下载 {name}…',
     'holiday.download_busy': '上一次下载还没结束，本次随它一起完成',
     'holiday.fetch': '联网更新',
-    'holiday.import_json': '导入 JSON…',
+    'holiday.import_offline': '离线导入…',
+    'holiday.info.title': '节假日',
+    'holiday.info.desc': '目前仅支持加载中国地区节假日。程序会定期自动联网同步最新节假日信息，'
+                         '也可以在这里手动更新或离线导入。',
 
     # 检查更新
     'update.check': '检查更新',

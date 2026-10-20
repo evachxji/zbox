@@ -210,7 +210,7 @@ class Config(object):
         self.path = path
         self.data = {'theme': THEME_ORDER[0], 'tab': 0, 'pos': None,
                      'off_noon': '12:00-13:00', 'off_evening': '18:00',
-                     'show_lunar': True,
+                     'show_lunar': True, 'show_holiday': True,
                      'transfer_enabled': False, 'shot_hotkey': '',
                      'shot_sizes': {},
                      'video_enabled': False, 'video_dir': '', 'video_quality': '1080P',
@@ -333,6 +333,9 @@ class DayCell(QFrame):
 
     def _set_sub_text(self, text):
         self._sub_full = text or ''
+        # 无小字（农历/节假日都关或本无节日）时隐藏副标题：不占行高，
+        # 数字在上下两段 stretch 之间独占格子垂直居中，不再为预留空间偏上
+        self.sub.setVisible(bool(self._sub_full))
         self._elide_sub()
 
     def _place_badge(self):
@@ -340,7 +343,7 @@ class DayCell(QFrame):
         self.badge.adjustSize()
         self.badge.move(self.width() - self.badge.width() - sc(2), sc(2))
 
-    def set_day(self, d, dim, store, sel=False, show_lunar=True):
+    def set_day(self, d, dim, store, sel=False, show_lunar=True, show_holiday=True):
         today = date.today()
         self.date = d
         self.setProperty('dim', 'true' if dim else 'false')
@@ -349,6 +352,8 @@ class DayCell(QFrame):
         self.setProperty('today', 'true' if d == today else 'false')
         self.num.setText(str(d.day))
         name, kind = store.info(d)
+        if not show_holiday:   # 关闭节假日显示：法定假日名称与「休/班」角标一并隐藏
+            name, kind = None, None
         show_name = name if kind == 'off' else None  # 调休班日不显示“班”，开启农历时只显示农历
         fest = bool(show_name or cd.festival_name(d))
         sub = show_name or (cd.lunar_text(d) if show_lunar else '')
@@ -421,7 +426,8 @@ class _GridPage(QWidget):
         self._grid.setSpacing(0)
         self._grid.setContentsMargins(0, 0, 0, 0)
 
-    def build(self, start, selected=None, dim_month=None, show_lunar=True):
+    def build(self, start, selected=None, dim_month=None, show_lunar=True,
+              show_holiday=True):
         self.start = start
         while self._grid.count():
             it = self._grid.takeAt(0)
@@ -435,7 +441,7 @@ class _GridPage(QWidget):
             d = start + timedelta(days=i)
             cell = DayCell()
             cell.set_day(d, (d.year, d.month) != dim_month, self.store, d == selected,
-                         show_lunar=show_lunar)
+                         show_lunar=show_lunar, show_holiday=show_holiday)
             if self.on_day_click:
                 cell.clicked.connect(lambda c=cell: self.on_day_click(c.date))
             self._grid.addWidget(cell, i // 7, i % 7)
@@ -675,9 +681,11 @@ class CalendarWidget(QWidget):
         first = date(self.year, self.month, 1)
         anchor = first - timedelta(days=first.weekday())  # 当前月 1 日所在周的周一
         show_lunar = bool(self.cfg.data.get('show_lunar', True))
+        show_holiday = bool(self.cfg.data.get('show_holiday', True))
         for d in (-1, 0, 1):
             self._pages[d].build(anchor + timedelta(days=35 * d), self._selected,
-                                 self._dim_month, show_lunar=show_lunar)
+                                 self._dim_month, show_lunar=show_lunar,
+                                 show_holiday=show_holiday)
         self._update_sub()
         self._layout_pages()
 
@@ -2070,6 +2078,87 @@ class HolidayImportDialog(QDialog):
         super(HolidayImportDialog, self).mouseReleaseEvent(e)
 
 
+class HolidayInfoDialog(QDialog):
+    """设置页「日历」行「?」的节假日说明弹窗：数据范围说明 + 联网更新 / 离线导入入口。
+    样式复用设置窗（#settingsDlg / #settingsPanel 区段），与 transfer_ui.TransferInfoDialog 同款。"""
+
+    def __init__(self, parent, on_fetch, on_import):
+        super(HolidayInfoDialog, self).__init__(parent)
+        self.setObjectName('settingsDlg')
+        self.setWindowTitle(t('holiday.info.title'))
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self._on_fetch = on_fetch
+        self._on_import = on_import
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        card = QWidget()
+        card.setObjectName('settingsPanel')
+        root.addWidget(card)
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(sc(16), sc(6), sc(16), sc(14))
+        lay.setSpacing(sc(8))
+
+        tb = QHBoxLayout()
+        tb.setContentsMargins(0, 0, 0, 0)
+        title = QLabel(t('holiday.info.title'))
+        title.setObjectName('setTitle')
+        tb.addWidget(title)
+        tb.addStretch(1)
+        close = QToolButton()
+        close.setObjectName('closeBtn')
+        close.setText('\u2715')
+        close.setFixedSize(sc(28), sc(24))
+        close.setToolTip(t('common.close'))
+        close.clicked.connect(self.reject)
+        tb.addWidget(close)
+        lay.addLayout(tb)
+
+        desc = QLabel(t('holiday.info.desc'))
+        desc.setObjectName('infoText')
+        desc.setWordWrap(True)
+        lay.addWidget(desc)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(sc(8))
+        self.btn_fetch = QPushButton(t('holiday.fetch'))
+        self.btn_fetch.setObjectName('setBtn')
+        self.btn_fetch.setCursor(Qt.PointingHandCursor)
+        self.btn_fetch.clicked.connect(self._fetch_clicked)
+        btn_row.addWidget(self.btn_fetch)
+        imp = QPushButton(t('holiday.import_offline'))
+        imp.setObjectName('setBtn')
+        imp.setCursor(Qt.PointingHandCursor)
+        imp.clicked.connect(self._import_clicked)
+        btn_row.addWidget(imp)
+        btn_row.addStretch(1)
+        lay.addLayout(btn_row)
+
+        self.setFixedWidth(sc(320))
+        self.adjustSize()
+        # 英文文案换行后行数比中文多：固定宽度后按布局的实际换行高度补足
+        self.setFixedHeight(max(self.height(),
+                                self.layout().totalHeightForWidth(self.width())))
+
+    def _fetch_clicked(self):
+        """联网更新：点击即 loading + 禁用，后台抓取结束后恢复（结果在本窗口中央 toast 反馈）。"""
+        self.btn_fetch.setEnabled(False)
+        self.btn_fetch.setText(t('update.updating'))
+        self._on_fetch(self._fetch_done, toast_win=self)
+
+    def _fetch_done(self):
+        try:
+            self.btn_fetch.setEnabled(True)
+            self.btn_fetch.setText(t('holiday.fetch'))
+        except RuntimeError:
+            pass  # 弹窗已关，按钮随窗口销毁
+
+    def _import_clicked(self):
+        """离线导入：先关掉本弹窗（它是模态的），再开导入引导窗。"""
+        self.accept()
+        self._on_import()
+
+
 def restart_application():
     """立即重启本程序（切换语言后），成功返回 True。
 
@@ -2229,7 +2318,13 @@ class SettingsDialog(QDialog):
         sep1.setFixedHeight(1)
         form.addRow(sep1)
 
-        # 农历开关：只控制日期格副标题里的农历/节日小字，休班角标与法定假日名称不受影响
+        # 日历行：农历开关只控制日期格副标题里的农历/节日小字；
+        # 节假日开关控制法定假日名称与「休/班」角标；「?」弹出节假日说明窗
+        # （数据范围说明 + 联网更新/离线导入入口，见 HolidayInfoDialog）
+        self._on_fetch = on_fetch
+        self._on_import = on_import
+        cal_row = QHBoxLayout()
+        cal_row.setSpacing(sc(8))
         self.lunar_chk = QCheckBox(t('settings.lunar.show'))
         self.lunar_chk.setObjectName('showLunarChk')
         self.lunar_chk.setChecked(bool(cfg.data.get('show_lunar', True)))
@@ -2238,21 +2333,27 @@ class SettingsDialog(QDialog):
             cfg.set('show_lunar', bool(on))
             panel.cal.refresh()
         self.lunar_chk.toggled.connect(commit_lunar)
-        form.addRow(row_label(t('settings.lunar')), self.lunar_chk)
+        cal_row.addWidget(self.lunar_chk)
+        self.holiday_chk = QCheckBox(t('settings.holiday.show'))
+        self.holiday_chk.setObjectName('showHolidayChk')
+        self.holiday_chk.setChecked(bool(cfg.data.get('show_holiday', True)))
 
-        # 日历假期数据
-        holiday_row = QHBoxLayout()
-        holiday_row.setSpacing(sc(8))
-        self._on_fetch = on_fetch
-        self.btn_fetch = QPushButton(t('holiday.fetch'))
-        self.btn_fetch.setObjectName('setBtn')
-        self.btn_fetch.clicked.connect(self._fetch_clicked)
-        holiday_row.addWidget(self.btn_fetch)
-        b = QPushButton(t('holiday.import_json'))
-        b.setObjectName('setBtn')
-        b.clicked.connect(on_import)
-        holiday_row.addWidget(b)
-        form.addRow(row_label(t('settings.holiday')), holiday_row)
+        def commit_holiday(on):
+            cfg.set('show_holiday', bool(on))
+            panel.cal.refresh()
+        self.holiday_chk.toggled.connect(commit_holiday)
+        cal_row.addWidget(self.holiday_chk)
+        holiday_help = QToolButton()
+        holiday_help.setObjectName('gateHelpBtn')
+        holiday_help.setText('?')
+        holiday_help.setFixedSize(sc(20), sc(20))
+        holiday_help.setCursor(Qt.PointingHandCursor)
+        holiday_help.setToolTip(t('settings.holiday.help'))
+        holiday_help.clicked.connect(
+            lambda: HolidayInfoDialog(self, self._on_fetch, self._on_import).exec())
+        cal_row.addWidget(holiday_help)
+        cal_row.addStretch(1)
+        form.addRow(row_label(t('settings.calendar')), cal_row)
 
         # 下班倒计时（自由文本输入 + 时钟弹层）
         # 用 QLineEdit 而非 QTimeEdit：QTimeEdit 是按时/分分段校验的，全选后直接打字会被
@@ -2428,19 +2529,6 @@ class SettingsDialog(QDialog):
         g = self.frameGeometry()
         g.moveCenter(ag.center())
         self.move(g.topLeft())
-
-    def _fetch_clicked(self):
-        """联网更新：点击即 loading + 禁用，后台抓取结束后恢复（结果在本窗口中央 toast 反馈）。"""
-        self.btn_fetch.setEnabled(False)
-        self.btn_fetch.setText(t('update.updating'))
-        self._on_fetch(self._fetch_done, toast_win=self)
-
-    def _fetch_done(self):
-        try:
-            self.btn_fetch.setEnabled(True)
-            self.btn_fetch.setText(t('holiday.fetch'))
-        except RuntimeError:
-            pass  # 设置窗已关，按钮随窗口销毁
 
     # ---------------- 检查更新 ----------------
 
@@ -2636,11 +2724,17 @@ class SettingsDialog(QDialog):
         round_corners(self)
 
     def mousePressEvent(self, e):
-        if e.button() == Qt.LeftButton and e.pos().y() < self.titlebar.height():
-            self._drag = e.globalPos() - self.frameGeometry().topLeft()
-            e.accept()
-        else:
-            super(SettingsDialog, self).mousePressEvent(e)
+        if e.button() == Qt.LeftButton:
+            # 点窗口空白处（含标题栏）：时间框失焦即触发 editingFinished 归一化落盘。
+            # 空白区域没有可聚焦控件接住点击，不主动清焦点输入框会一直挂着编辑态
+            fw = QApplication.focusWidget()
+            if fw is not None and fw is not self:
+                fw.clearFocus()
+            if e.pos().y() < self.titlebar.height():
+                self._drag = e.globalPos() - self.frameGeometry().topLeft()
+                e.accept()
+                return
+        super(SettingsDialog, self).mousePressEvent(e)
 
     def mouseMoveEvent(self, e):
         if self._drag is not None and e.buttons() & Qt.LeftButton:
@@ -2916,6 +3010,35 @@ def _hide_toast_on(win, seq):
         pass
 
 
+def _zone_at(pos, w, h, m):
+    """矩形内坐标 → 边框命中码（HT*）：四角优先，其次四边，未命中返回 0。"""
+    x, y = pos.x(), pos.y()
+    l, r, top, b = x < m, x >= w - m, y < m, y >= h - m
+    if top and l:
+        return 13   # HTTOPLEFT
+    if top and r:
+        return 14   # HTTOPRIGHT
+    if b and l:
+        return 16   # HTBOTTOMLEFT
+    if b and r:
+        return 17   # HTBOTTOMRIGHT
+    if l:
+        return 10   # HTLEFT
+    if r:
+        return 11   # HTRIGHT
+    if top:
+        return 12   # HTTOP
+    if b:
+        return 15   # HTBOTTOM
+    return 0
+
+
+_RESIZE_CURSORS = {13: Qt.SizeFDiagCursor, 17: Qt.SizeFDiagCursor,
+                   14: Qt.SizeBDiagCursor, 16: Qt.SizeBDiagCursor,
+                   10: Qt.SizeHorCursor, 11: Qt.SizeHorCursor,
+                   12: Qt.SizeVerCursor, 15: Qt.SizeVerCursor}
+
+
 class FloatingPanel(QWidget):
     toggled = Signal()
     settingsRequested = Signal()   # 顶部栏齿轮按钮 → 入口 open_settings（非模态去重在那里）
@@ -2936,6 +3059,7 @@ class FloatingPanel(QWidget):
         self._floating = False      # True = 被点击激活浮起到应用窗口之上，失焦后需要沉回
         self._drag = None           # 窗口拖拽偏移（globalPos - topLeft）；None = 未在拖拽
         self._sizing = False        # 原生边框缩放进行中（WM_ENTERSIZEMOVE 起）：防失焦沉底
+        self._tb_resize = None      # 顶部栏边角手动缩放：(命中码, 起始面板几何, 起始光标)
         self._snap_sticky = (None, None)
         self._snap_guide = None
         self.card_rects_provider = None
@@ -2961,6 +3085,7 @@ class FloatingPanel(QWidget):
         self.titlebar = QFrame(None, Qt.FramelessWindowHint | Qt.Tool)
         self.titlebar.setObjectName('titlebar')
         self.titlebar.installEventFilter(self)
+        self.titlebar.setMouseTracking(True)   # 悬停边角要出缩放光标，需要无按键的 MouseMove
         tb = QHBoxLayout(self.titlebar)
         # ?? 14px ????????bar_corner_radius????????????
         # ???????????? sc(42)??????
@@ -3230,6 +3355,8 @@ class FloatingPanel(QWidget):
         QTimer.singleShot(150, self._check_hover)
 
     def _check_hover(self):
+        if self._tb_resize is not None:
+            return   # 栏窗边角缩放拖拽中光标可能划出窗口，不收起栏窗
         pos = QCursor.pos()
         in_panel = self.geometry().contains(pos)
         in_bar = self.titlebar.geometry().contains(pos)
@@ -3307,27 +3434,8 @@ class FloatingPanel(QWidget):
         return super(FloatingPanel, self).nativeEvent(eventType, message)
 
     def _hit_zone(self, pos):
-        """窗口内 Qt 坐标 → 边框命中码（HT*）：四角优先，其次四边，未命中返回 0。"""
-        m = sc(8)
-        x, y, w, h = pos.x(), pos.y(), self.width(), self.height()
-        l, r, top, b = x < m, x >= w - m, y < m, y >= h - m
-        if top and l:
-            return 13   # HTTOPLEFT
-        if top and r:
-            return 14   # HTTOPRIGHT
-        if b and l:
-            return 16   # HTBOTTOMLEFT
-        if b and r:
-            return 17   # HTBOTTOMRIGHT
-        if l:
-            return 10   # HTLEFT
-        if r:
-            return 11   # HTRIGHT
-        if top:
-            return 12   # HTTOP
-        if b:
-            return 15   # HTBOTTOM
-        return 0
+        """窗口内 Qt 坐标 → 边框命中码（HT*），规则见 _zone_at。"""
+        return _zone_at(pos, self.width(), self.height(), sc(8))
 
     def eventFilter(self, obj, ev):
         """时分秒 / 日期行和展开的顶部栏都是窗口拖拽把手；栏窗的悬浮进出也在这里接力。"""
@@ -3339,7 +3447,37 @@ class FloatingPanel(QWidget):
             self._slide_titlebar(True)
             return False
         if obj is self.titlebar and etype == QEvent.Leave:
+            if self._tb_resize is None:
+                self.titlebar.unsetCursor()
             self._schedule_hover_check()
+            return False
+        # 栏窗边角缩放：栏窗是独立顶层窗，展开时盖住面板顶边，面板的 WM_NCHITTEST
+        # 收不到那些像素；这里在栏窗上做同套命中，拖拽时手动改面板几何（栏窗随
+        # _sync_bar 跟随）。命中边角优先于拖拽移动。
+        if obj is self.titlebar and etype == QEvent.MouseMove and self._tb_resize is not None:
+            if ev.buttons() & Qt.LeftButton:
+                self._resize_from_bar(ev.globalPos())
+            return True
+        if obj is self.titlebar and etype == QEvent.MouseButtonRelease and self._tb_resize is not None:
+            self._tb_resize = None
+            self._sizing = False
+            self._save_pos()
+            return True
+        if obj is self.titlebar and etype == QEvent.MouseButtonPress \
+                and ev.button() == Qt.LeftButton:
+            zone = _zone_at(ev.pos(), self.titlebar.width(), self.titlebar.height(), sc(8))
+            if zone:
+                self._tb_resize = (zone, QRect(self.geometry()), ev.globalPos())
+                self._sizing = True   # 与原生缩放同款：拖拽期间防失焦沉底
+                self.titlebar.setCursor(_RESIZE_CURSORS[zone])
+                return True
+        if obj is self.titlebar and etype == QEvent.MouseMove \
+                and not ev.buttons() & Qt.LeftButton:
+            zone = _zone_at(ev.pos(), self.titlebar.width(), self.titlebar.height(), sc(8))
+            if zone:
+                self.titlebar.setCursor(_RESIZE_CURSORS[zone])
+            else:
+                self.titlebar.unsetCursor()
             return False
         if etype == QEvent.MouseButtonPress and ev.button() == Qt.LeftButton:
             self._drag = ev.globalPos() - self.frameGeometry().topLeft()
@@ -3370,6 +3508,22 @@ class FloatingPanel(QWidget):
                 _place_below(self.titlebar, self)
             return True
         return super(FloatingPanel, self).eventFilter(obj, ev)
+
+    def _resize_from_bar(self, gpos):
+        """栏窗边角拖拽 → 面板几何：按命中边改对应边，夹取面板最小尺寸。"""
+        zone, r0, g0 = self._tb_resize
+        d = gpos - g0
+        rect = QRect(r0)
+        minw, minh = self.minimumWidth(), self.minimumHeight()
+        if zone in (10, 13, 16):   # 左边
+            rect.setLeft(min(r0.left() + d.x(), r0.right() - minw + 1))
+        elif zone in (11, 14, 17):   # 右边
+            rect.setRight(max(r0.right() + d.x(), r0.left() + minw - 1))
+        if zone in (12, 13, 14):   # 顶边
+            rect.setTop(min(r0.top() + d.y(), r0.bottom() - minh + 1))
+        elif zone in (15, 16, 17):   # 底边（栏窗底边被面板遮住，正常命不中；防御）
+            rect.setBottom(max(r0.bottom() + d.y(), r0.top() + minh - 1))
+        self.setGeometry(rect)
 
     def _save_pos(self):
         ag = QApplication.primaryScreen().availableGeometry()

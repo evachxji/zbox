@@ -62,9 +62,10 @@ CATALOG = {
     'settings.hotkey.prompt': 'Press a shortcut…',
     'settings.hotkey.tooltip': 'Press a shortcut to record; leave empty to disable the screenshot hotkey',
     'settings.hotkey.clear': 'Clear shortcut',
-    'settings.lunar': 'Lunar calendar',
+    'settings.calendar': 'Calendar',
     'settings.lunar.show': 'Show lunar calendar',
-    'settings.holiday': 'Calendar holidays',
+    'settings.holiday.show': 'Show holidays',
+    'settings.holiday.help': 'About holiday data',
     'settings.pick_time': 'Pick a time',
     'settings.noon': 'Lunch break',
     'settings.off_time': 'Off work',
@@ -96,7 +97,11 @@ CATALOG = {
     'holiday.downloading': 'Downloading {name}…',
     'holiday.download_busy': 'The previous download is still running; this one will finish with it',
     'holiday.fetch': 'Update online',
-    'holiday.import_json': 'Import JSON…',
+    'holiday.import_offline': 'Import offline…',
+    'holiday.info.title': 'Holidays',
+    'holiday.info.desc': 'Only holidays for mainland China are supported. The app syncs the latest '
+                         'holiday data online automatically on a regular basis; you can also update '
+                         'manually or import offline here.',
 
     # 检查更新
     'update.check': 'Check for updates',

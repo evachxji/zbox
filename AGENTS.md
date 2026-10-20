@@ -85,7 +85,7 @@ Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyS
 平铺布局，一个模块一个职责：
 
 - `main.pyw` — 入口：语言解析（`i18n.resolve_language`，`ZBOX_SHOT_LANG` 仅自检态）、单实例 IPC（`QLocalServer`）、节假日后台更新、局域网传输服务启动、（frozen 时）`--uninstall` 卸载向导入口；`ZBOX_SHOT` 下改用独立 IPC 名并跳过转发/菜单同步，不干扰运行中的实例
-- `app.py` — 面板 UI（日历 / 待办 / 传输 / 顶部栏滑出与拖动）、`SettingsDialog`（语言选择紧随视频解析开关并以分割线分组，下拉框固定为 150 基准宽；右下角「检查更新」后台查 GitHub 最新 release，有新版本确认后经 updater 下载安装包、再确认即启动安装向导并退出本程序）与节假日导入引导窗；面板移动复用 `snapping.py` 的同边吸附，原生边框缩放不吸附
+- `app.py` — 面板 UI（日历 / 待办 / 传输 / 顶部栏滑出与拖动）、`SettingsDialog`（语言选择紧随视频解析开关并以分割线分组，下拉框固定为 150 基准宽；右下角「检查更新」后台查 GitHub 最新 release，有新版本确认后经 updater 下载安装包、再确认即启动安装向导并退出本程序）与节假日导入引导窗；「日历」行集中农历/节假日显示开关，「?」弹 `HolidayInfoDialog`（数据范围说明 + 联网更新/离线导入入口，联网更新按钮的 loading/toast 流程自持）；午休/下班时间框点击窗口空白处（含标题栏）即失焦归一化落盘（`mousePressEvent` 主动清焦点）；面板移动复用 `snapping.py` 的同边吸附，原生边框缩放不吸附；顶部栏展开时会盖住面板顶边、原生 WM_NCHITTEST 收不到那片像素，栏窗边角（含左右边与顶边）的缩放命中在栏窗 eventFilter 里做同套 `_zone_at` 判定并手动 `setGeometry` 面板（`_tb_resize`/`_resize_from_bar`，悬停出缩放光标，边角优先于拖拽移动，拖拽期置 `_sizing` 防沉底、`_check_hover` 不收栏）
 - `boxes.py` — 桌面格子：空白格子（桌面文件的收纳视图，不搬文件、只隐藏桌面图标）与文件夹映射格子、双击桌面显隐；格子移动与缩放复用 `snapping.py` 的同边吸附；桌面图标位置记忆（`boxes.json['desktop_icons']`：退出时与每 60s 快照可见图标坐标——格子里的已隐藏、ListView 枚举不到，正好是「没进格子的文件」——启动时 `_DesktopIconLayout.restore_positions` 按显示名摆回并 3s 后补一次，自动排列桌面不插手）；
 - `snapping.py` — 桌面卡片共享吸附层：横纵轴分别只匹配同边（左对左 / 右对右 / 上对上 / 下对下），8px 进入、12px 释放；`snap_move` / `snap_resize` 提供纯几何结果，`SnapGuideOverlay` 在吸附期间用蓝色辅助线贯穿本卡片与目标卡片，左右或上下两条边同时对齐时逐条显示；覆盖层窗口比虚拟屏幕右/下各收 1px——恰好满屏的无边框置顶窗会被 Win11 专注助手误判为全屏应用自动开勿扰（任务栏冒铃铛图标）
 格子拖出落回桌面由 `_DesktopDropOverlay`（桌面带最底层的全屏透明落放层，仅拖拽期间显示）接住内部处理、不走 Explorer（被占用的文件夹也能拖出），落到资源管理器窗口/其他应用才交 URL 给对方真实移动；拖拽默认「移动」、按住 Ctrl 落放 = 复制；Delete 删除走外壳原生确认弹窗（`_shell_op` 包 SHFileOperation）；
@@ -102,9 +102,9 @@ Zbox 是 Windows 桌面悬浮面板（日历 + 待办 + 局域网传输），PyS
 - `transfer_selftest.py` — 传输协议自动化自检（16 用例，动态端口，不依赖组播/Qt）
 - `i18n.py` / `i18n_zh.py` / `i18n_en.py` — PC 语言核心：`resolve_language` 按「截图自检语言 → 用户设置 → 安装时记录 → 系统界面语言」归一，`t()` 查当前语言词典（缺失回落中文），`t_data()` 翻译农历/节日名；`i18n_zh` / `i18n_en` 两份词典**键集合与占位符必须完全一致**（`tests/test_i18n.py` 自动校验）
 - `selfshot.py` — 全界面截图自检 harness（`ZBOX_SHOT` 触发）：时间冻结（patch `ui.date`/`ui.datetime`
-  成固定时刻）+ 示例数据注入（结束还原）+ `widget.grab()` 离屏渲染，两主题 59 个场景；
+  成固定时刻）+ 示例数据注入（结束还原）+ `widget.grab()` 离屏渲染，两主题 61 个场景；
   `ZBOX_SHOT_LANG=zh-CN|en-US` 指定出图语言（只在自检态生效、不写回配置）
-- `tests/` — Python/UI 回归测试（`unittest`，81 用例）：i18n 词典一致性、用户可见中英文硬编码覆盖、设置页语言切换、
+- `tests/` — Python/UI 回归测试（`unittest`，205 用例）：i18n 词典一致性、用户可见中英文硬编码覆盖、设置页语言切换、
   安装器语言、传输/格子文案、DPI 缩放、待办操作、格子吸附与标题操作
 - `tools/compare_shots.py` — 截图前后对比：逐像素 diff + 生成带前/后/差异高亮三图的 report.md
   （Pillow，仅开发依赖）；验收口径见文件头 docstring
@@ -158,7 +158,7 @@ set ZBOX_SHOT=designs\verify-zh && set ZBOX_SHOT_LANG=zh-CN && python main.pyw  
 set ZBOX_SHOT=designs\verify-en && set ZBOX_SHOT_LANG=en-US && python main.pyw   :: 英文截图自检
 ```
 
-自检导出两主题全界面 59 张场景截图（面板四 tab / 顶部栏展开 / 各弹窗 / 格子各形态 / 安装卸载向导）
+自检导出两主题全界面 61 张场景截图（面板四 tab / 顶部栏展开 / 各弹窗 / 格子各形态 / 安装卸载向导）
 后自动退出。大范围改 UI / 主题 / 布局时跑全量；局部样式小改只跑相关测试并查看目标界面截图，
 不必跑全部自检。涉及文案或可能截断的局部改动，中英文分别查看目标场景即可。
 截图 harness 在 `selfshot.py`：冻结时间源 + 注入示例数据（结束还原，不落盘用户配置）+ 离屏渲染；
@@ -413,8 +413,10 @@ E_HANDLE——DWM 路线在 Qt6 走不通，`round_corners()` 已改为 Win10/Wi
 `HolidayStore.info(d)` 的优先级：用户自定义（联网/导入）→ 内置官方数据 → 普通日。
 内置 `EMBEDDED_OFF` / `EMBEDDED_WORK` 是国务院公布的年份安排，**新一年安排发布后要手工补**；
 没有数据的年份只显示双休与农历节日，不标「休/班」角标。农历是 1900–2100 查表法（`LUNAR_INFO`），带缓存。
-设置页「显示农历」写 `config.json` 的 `show_lunar`（默认开）；关闭后日期格不显示农历/节日小字，
-但法定节假日名称与「休/班」角标保留。
+设置页「日历」行的「显示农历」写 `config.json` 的 `show_lunar`（默认开），关闭后日期格不显示
+农历/节日小字；「显示节假日」写 `show_holiday`（默认开），关闭后法定节假日名称与「休/班」角标
+一并隐藏（`DayCell.set_day` 的 `show_holiday` 参数）。副标题（农历/节日小字）为空时整个隐藏不占行高
+（`DayCell._set_sub_text`），数字在格内垂直居中，不为预留空间偏上。
 
 **三个数据源**（`SOURCES` 按顺序回退，三家 JSON 格式互不相同而 `parse_holiday_json` 全认）：
 timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` 扁平 `{iso:{isOffDay}}`
@@ -430,8 +432,8 @@ timor.tech `{"holiday":{"01-01":{...}}}` → jiejiariapi `/v1/holidays/<年>` �
 「下载并导入」走同一条通道，手动路径的结果经 `ui.show_toast_on(win, text, ok, hold_ms)` 在**触发按钮
 所在窗口**的正中央反馈（托盘已移除的替代通道，细节仍写调试日志 `_dbg`）：toast 是该窗口的子控件，
 单行胶囊居中淡入停留淡出，`ok=False` 失败配色，状态存放在 win 上各窗口独立；调用方经 `toast_win`
-透传目标窗口（设置窗/导入窗都传 `self`），窗口已关闭则回落面板。设置窗「联网更新」、导入窗
-「下载并导入」/「选择文件导入」都走它。
+透传目标窗口（节假日说明窗/导入窗都传 `self`），窗口已关闭则回落面板。节假日说明窗「联网更新」、
+导入窗「下载并导入」/「选择文件导入」都走它。
 
 日历格子右上角的「休」/「班」角标：只标法定节假日（`kind == 'off'`）与调休上班日（`kind == 'work'`），
 **普通双休日不标**（双休只靠日期数字的弱化配色区分）。角标是 `DayCell.badge` 这个 QLabel，文字与配色
@@ -1057,7 +1059,7 @@ PC 与 Android 都支持**简体中文 / English**。PC 端词典与运行时切
 
 ## Testing Guidelines
 
-- `python -m unittest discover -s tests -v` — Python/UI 回归测试（当前 81 用例，必须全过）
+- `python -m unittest discover -s tests -v` — Python/UI 回归测试（当前 205 用例，必须全过）
 - `python transfer_selftest.py` — 传输协议自检（`SELFTEST OK`；改 `transfer.py` 后必跑）
 - `set ZBOX_SHOT=... && set ZBOX_SHOT_LANG=... && python main.pyw` — 中英双语截图自检
 - `cd android && gradlew.bat testDebugUnitTest` — Android 语言规则单元测试（`AppStringsTest`）；
