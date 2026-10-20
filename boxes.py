@@ -1668,13 +1668,23 @@ class BoxWindow(QWidget):
         return entries
 
     def _rewatch(self):
-        old = self.watcher.directories()
-        if old:
-            self.watcher.removePaths(old)
+        """重建目录监听。
+
+        2026-10 性能/正确性改造：原先每次 refresh() 都 removePaths + addPath 重建一遍
+        ——① 白费一次句柄重建；② **remove 与 add 之间的窗口里到达的变更被永久丢弃**
+        （Windows 的 ReadDirectoryChangesW 缓冲区随 remove 一起丢弃），快速连续复制
+        时列表会少文件。故只在被监听的路径真的变了时才重建。
+        """
         # 空白格子看桌面：收进格子的文件在桌面被删/改名/剪切走都要跟着刷新
         watch = self.display_dir()
-        if os.path.isdir(watch):
-            self.watcher.addPath(watch)
+        want = watch if os.path.isdir(watch) else ''
+        old = self.watcher.directories()
+        if old and (not want or old == [want]):
+            return          # 已经监听对了（或目标已不存在），不动
+        if old:
+            self.watcher.removePaths(old)
+        if want:
+            self.watcher.addPath(want)
 
     # ---------- 空白格子：桌面图标隐藏账本 ----------
     def _hide_icon(self, path):
