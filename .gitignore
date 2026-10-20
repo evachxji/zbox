@@ -29,6 +29,15 @@ shots/
 # 隔离工作树
 .worktrees/
 
+# 工具的临时工作目录（brainstorm 记录等，非源码）
+.superpowers/
+
+# Gradle / Kotlin 构建缓存（Android 端）
+android/.kotlin/
+android/.gradle/
+android/build/
+android/app/build/
+
 # 性能审计工作区（perf-audit/）：脚本与原始测量数据入库，运行时临时目录不入库
 perf-audit/tmp/
 perf-audit/__pycache__/
