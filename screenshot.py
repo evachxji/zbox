@@ -15,6 +15,7 @@ import ctypes
 import io
 import os
 import threading
+from operator import sub
 import time
 import traceback
 from ctypes import wintypes
@@ -377,24 +378,40 @@ def _find_shift(prev, cur):
     两阶段：整行均值粗筛出前 5 个候选位移，再用行内桶均值复核定案——
     只按整行均值会在列表页锁错对齐，把已拼内容当成新内容拼出重复段。
     搜索范围限制在半帧以内：滚动一 tick 超半帧本就拼不可靠，且大位移对应
-    的重叠区只有几行，周期内容上零星星几行撞车就会拿满分骗过复核。"""
+    的重叠区只有几行，周期内容上零星星几行撞车就会拿满分骗过复核。
+
+    2026-10 性能审计 P1-11：粗筛是 O(n²/4) 的纯 Python 索引循环（1080 行签名
+    时约 7.3 万次迭代/tick，实测每 tick 30~60ms，全在 GUI 线程）。改为先把
+    整行均值抽成 int 列表，再用**切片 + zip**（C 层驱动迭代）求和 ——
+    求和顺序与原实现完全一致，结果逐位相同。
+    """
     n = min(len(prev), len(cur))
+    if n < 2:
+        return 0, 1e9
+    # 截断到 n：原实现是 for i in range(0, n-s, 2)，只比到 n 行为止 ——
+    # 切片 + zip 必须复现**完全相同**的取样范围，否则差值会变、锁错对齐
+    prev = prev[:n]
+    cur = cur[:n]
+    # 整行均值序列（粗筛只用这一维）
+    pm = [p[0] for p in prev]
+    cm = [p[0] for p in cur]
+    # 行内桶序列（复核用）
+    pb = [p[1] for p in prev]
+    cb = [p[1] for p in cur]
     cands = []
     for s in range(0, min(n - 2, n // 2) + 1):
-        d, cnt = 0, 0
-        for i in range(0, n - s, 2):
-            d += abs(prev[s + i][0] - cur[i][0])
-            cnt += 1
+        # map + operator.sub 全在 C 层迭代（生成器表达式仍有 Python 层 yield 开销）
+        d = sum(map(abs, map(sub, pm[s::2], cm[0::2])))
+        cnt = len(pm[s::2])
         if cnt:
             cands.append((d / cnt, s))
     scores = []
     for _m, s in sorted(cands)[:5]:
-        d, cnt = 0, 0
-        for i in range(0, n - s, 2):
-            pa, ca = prev[s + i][1], cur[i][1]
-            for x in range(_SIG_BUCKETS):
-                d += abs(pa[x] - ca[x])
-                cnt += 1
+        d = 0
+        cnt = 0
+        for pa, ca in zip(pb[s::2], cb[0::2]):
+            d += sum(map(abs, map(sub, pa, ca)))
+            cnt += _SIG_BUCKETS
         if cnt:
             scores.append((d / cnt, s))
     if not scores:
