@@ -89,9 +89,16 @@ class AttachLaunchTest(unittest.TestCase):
             class _Proc:
                 pid = 123
 
+                def poll(self):
+                    return None
+
+            version_calls = []
+
             def fake_http(url, **kw):
                 if 'json/version' in url:
-                    return None                       # 端口文件是死的
+                    version_calls.append(url)
+                    # 第一次（残留探测）死，之后（新实例就绪）活
+                    return {'Browser': 'Edge'} if len(version_calls) > 1 else None
                 return {'id': 'T1', 'webSocketDebuggerUrl': 'ws://x'}
 
             with patch('edge_driver._http_json', side_effect=fake_http), \
@@ -109,17 +116,104 @@ class AttachLaunchTest(unittest.TestCase):
             self.assertIn('--remote-allow-origins=*', args)   # 新版 Chromium 默认拒绝带 Origin 的 WS
             self.assertIn('--user-data-dir=' + d, args)
 
+    def test_stale_port_file_deleted_before_launch(self):
+        import os as _os
+        with tempfile.TemporaryDirectory() as d:
+            stale = _os.path.join(d, 'DevToolsActivePort')
+            with open(stale, 'w') as f:
+                f.write('53327\n/devtools/browser/old')
+
+            class _Proc:
+                pid = 1
+
+            # /json/version 第一次（探测残留）死，第二次（新实例就绪检查）活
+            version_calls = []
+
+            def fake_http(url, **kw):
+                version_calls.append(url)
+                return {'Browser': 'Edge'} if len(version_calls) > 1 else None
+
+            with patch('edge_driver._http_json', side_effect=fake_http), \
+                 patch('edge_driver.subprocess.Popen', return_value=_Proc()), \
+                 patch('edge_driver.read_devtools_port', return_value=(53328, '/y')):
+                port, proc = ed.attach_or_launch(d, headless=True,
+                                                 edge_path=r'C:\Edge\msedge.exe',
+                                                 wait_s=0.01)
+            self.assertFalse(_os.path.exists(stale))   # 残留文件已删
+            self.assertEqual(port, 53328)
+            self.assertGreaterEqual(len(version_calls), 2)   # 启动后做了就绪检查
+
     def test_headed_omits_headless_flag(self):
         with tempfile.TemporaryDirectory() as d:
             class _Proc:
                 pid = 1
-            with patch('edge_driver._http_json', return_value=None), \
+
+                def poll(self):
+                    return None
+
+            version_calls = []
+
+            def fake_http(url, **kw):
+                version_calls.append(1)
+                return {'Browser': 'Edge'} if len(version_calls) > 1 else None
+
+            with patch('edge_driver._http_json', side_effect=fake_http), \
                  patch('edge_driver.subprocess.Popen', return_value=_Proc()) as popen, \
                  patch('edge_driver.read_devtools_port', return_value=(53329, '/y')):
                 ed.attach_or_launch(d, headless=False, edge_path=r'C:\Edge\msedge.exe',
                                     wait_s=0.01)
             args = popen.call_args[0][0]
             self.assertNotIn('--headless=new', args)
+
+
+class HeadlessMarkerTest(unittest.TestCase):
+    def test_headless_launch_writes_marker_and_close_clears(self):
+        with tempfile.TemporaryDirectory() as d:
+            class _Proc:
+                pid = 4242
+
+                def poll(self):
+                    return None
+
+                def terminate(self):
+                    pass
+
+                def wait(self, timeout=None):
+                    return 0
+
+            version_calls = []
+
+            def fake_http(url, **kw):
+                version_calls.append(1)
+                # 第一次（残留探测）死，之后（新实例就绪）活 → 走 launch 路径
+                return {'Browser': 'Edge'} if len(version_calls) > 1 else None
+
+            with patch('edge_driver._http_json', side_effect=fake_http), \
+                 patch('edge_driver.subprocess.Popen', return_value=_Proc()), \
+                 patch('edge_driver.read_devtools_port',
+                       side_effect=[(53327, '/x'), (53330, '/y')]):
+                port, proc = ed.attach_or_launch(d, headless=True,
+                                                 edge_path=r'C:\Edge\msedge.exe')
+            marker = ed._marker_path(d)
+            import os as _os
+            self.assertTrue(_os.path.isfile(marker))
+            self.assertEqual(open(marker).read().strip(), '4242')
+
+    def test_kill_profile_instances_kills_marker_pid(self):
+        with tempfile.TemporaryDirectory() as d:
+            with open(ed._marker_path(d), 'w') as f:
+                f.write('4242')
+            killed = []
+            with patch('edge_driver._taskkill_tree', side_effect=lambda pid: killed.append(pid)):
+                ed.kill_profile_instances(d)
+            self.assertEqual(killed, [4242])
+            import os as _os
+            self.assertFalse(_os.path.exists(ed._marker_path(d)))
+
+    def test_kill_profile_instances_tolerates_missing_marker(self):
+        with tempfile.TemporaryDirectory() as d:
+            with patch('edge_driver._taskkill_tree', side_effect=AssertionError('不应调用')):
+                ed.kill_profile_instances(d)   # 无标记文件也不炸
 
 
 class CdpConnectionTest(unittest.TestCase):

@@ -100,6 +100,33 @@ def _http_json(url, method='GET', timeout=3):
 _OWNED = {}          # profile_dir → 我们拉起的 Popen（attach 来的不在这里）
 _OWNED_LOCK = threading.Lock()
 
+def _marker_path(profile_dir):
+    """headless 实例的 pid 标记：父进程崩溃/被杀后 _OWNED 丢了，标记文件还在，
+    登录开窗前靠它清掉残留 headless（attach 无法区分有头无头，实测踩过）。"""
+    return os.path.join(profile_dir, 'zbox_headless.pid')
+
+
+def _taskkill_tree(pid):
+    subprocess.call(['taskkill', '/PID', str(pid), '/T', '/F'],
+                    creationflags=CREATE_NO_WINDOW,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def kill_profile_instances(profile_dir):
+    """清掉用本 profile 的所有实例：_OWNED 登记的 + 标记文件记录的残留 headless。"""
+    kill_owned(profile_dir)
+    try:
+        with open(_marker_path(profile_dir), 'r') as f:
+            pid = int(f.read().strip())
+    except (OSError, ValueError):
+        pid = None
+    if pid:
+        _taskkill_tree(pid)
+    try:
+        os.remove(_marker_path(profile_dir))
+    except OSError:
+        pass
+
 
 def attach_or_launch(profile_dir, headless, edge_path=None, wait_s=_LAUNCH_WAIT_S):
     """有存活实例直连（proc=None），否则新起进程。返回 (port, proc|None)。"""
@@ -110,6 +137,12 @@ def attach_or_launch(profile_dir, headless, edge_path=None, wait_s=_LAUNCH_WAIT_
     info = read_devtools_port(profile_dir)
     if info and _http_json('http://127.0.0.1:%d/json/version' % info[0], timeout=1):
         return info[0], None
+    # 残留端口文件必须先删：死实例的 DevToolsActivePort 还在原地，等待循环会
+    # 立刻读到旧端口就 break，然后 _create_target 打到死端口上（实测竞态必现）
+    try:
+        os.remove(os.path.join(profile_dir, 'DevToolsActivePort'))
+    except OSError:
+        pass
     args = [edge_path, '--remote-debugging-port=0',
             '--user-data-dir=' + profile_dir]
     if headless:
@@ -118,10 +151,13 @@ def attach_or_launch(profile_dir, headless, edge_path=None, wait_s=_LAUNCH_WAIT_
     args.append('about:blank')
     proc = subprocess.Popen(args, creationflags=CREATE_NO_WINDOW)
     deadline = time.monotonic() + wait_s
+    info = None
     while time.monotonic() < deadline:
         info = read_devtools_port(profile_dir)
-        if info:
-            break
+        if info and _http_json('http://127.0.0.1:%d/json/version' % info[0],
+                               timeout=1):
+            break           # 文件出现 ≠ 服务就绪，/json/version 活着才算
+        info = None
         if proc.poll() is not None:
             break
         time.sleep(0.1)
@@ -130,6 +166,12 @@ def attach_or_launch(profile_dir, headless, edge_path=None, wait_s=_LAUNCH_WAIT_
         raise EdgeUnavailableError('edge did not expose devtools port')
     with _OWNED_LOCK:
         _OWNED[profile_dir] = proc
+    if headless:
+        try:
+            with open(_marker_path(profile_dir), 'w') as f:
+                f.write(str(proc.pid))
+        except OSError:
+            pass
     return info[0], proc
 
 
@@ -143,6 +185,43 @@ def kill_owned(profile_dir):
             proc.wait(timeout=5)
         except Exception:
             proc.kill()
+
+
+def bring_window_to_front(pid, timeout_s=15.0, class_name='Chrome_WidgetWin_1'):
+    """按 pid 找 Edge 主窗口并提到最前/置顶：截图遮罩是全屏置顶窗，
+    登录窗开在它下面就等于没开（用户实测"无任何登录窗口弹出"的另一面）。"""
+    import ctypes
+    from ctypes import wintypes
+    u32 = ctypes.windll.user32
+    found = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def _enum(hwnd, _lp):
+        wp = wintypes.DWORD()
+        u32.GetWindowThreadProcessId(hwnd, ctypes.byref(wp))
+        if wp.value == pid and u32.IsWindowVisible(hwnd):
+            cls = ctypes.create_unicode_buffer(64)
+            u32.GetClassNameW(hwnd, cls, 64)
+            if cls.value == class_name:
+                found.append(hwnd)
+        return True
+
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline and not found:
+        u32.EnumWindows(_enum, 0)
+        if not found:
+            time.sleep(0.2)
+    if not found:
+        return False
+    hwnd = found[0]
+    HWND_TOPMOST = -1
+    SWP_NOMOVE = 0x0002
+    SWP_NOSIZE = 0x0001
+    SW_RESTORE = 9
+    u32.ShowWindow(hwnd, SW_RESTORE)
+    u32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE)
+    u32.SetForegroundWindow(hwnd)
+    return True
 
 
 class EdgeUnavailableError(RuntimeError):
@@ -331,6 +410,6 @@ class EdgePage(object):
     def close(self):
         """收掉连接与我们拉起的进程（attach 来的实例只断开，不杀）。"""
         self._teardown_conn()
-        if self._profile is not None:
-            kill_owned(self._profile)
+        if self._profile is not None and self._proc is not None:
+            kill_profile_instances(self._profile)
         self._proc = None

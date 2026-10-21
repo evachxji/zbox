@@ -9,7 +9,7 @@ doubao_web.DoubaoLoginDialog（共享持久 profile）。完成后关闭窗口�
 
 import threading
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QProgressBar,
                                QPushButton, QVBoxLayout)
 
@@ -145,3 +145,82 @@ class TranslateGuideDialog(QDialog):
         self._logged_in = True
         self._login_win = None
         self._refresh()
+
+class DoubaoLoginGuideDialog(QDialog):
+    """豆包未登录/登录过期：截屏已退出，引导用户登录网页版豆包。
+    [打开登录窗口] 开有头 Edge（doubao_web.open_login_window）；
+    登录完成 → 提示翻译功能可用；用户关掉登录窗 → 按钮复位可重开。"""
+
+    def __init__(self, parent=None):
+        super(DoubaoLoginGuideDialog, self).__init__(parent)
+        self.setWindowTitle(t('shot.login.guide.title'))
+        from app import make_icon   # 惰性 import 防循环；标题栏用 zbox logo
+        self.setWindowIcon(make_icon())
+        # 强制置顶：要压在钉图窗（也是 StaysOnTop）之上，靠 show 后 raise
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+        self.setObjectName('settingsDlg')
+        self._login_win = None
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(20, 18, 20, 16)
+        lay.setSpacing(12)
+        self.state_label = QLabel(t('shot.login.guide.desc'))
+        self.state_label.setObjectName('setLabel')
+        self.state_label.setWordWrap(True)
+        lay.addWidget(self.state_label)
+
+        bottom = QHBoxLayout()
+        bottom.addStretch(1)
+        self.open_btn = QPushButton(t('shot.login.guide.open'))
+        self.open_btn.setObjectName('setBtn')
+        self.open_btn.clicked.connect(self._open_login)
+        bottom.addWidget(self.open_btn)
+        lay.addLayout(bottom)
+        self.resize(360, 0)
+
+    def _open_login(self):
+        text = self.open_btn.text()
+        if text == t('common.close'):
+            self.accept()
+            return
+        self.open_btn.setEnabled(False)
+        self.state_label.setText(t('shot.login.guide.waiting'))
+        import doubao_web
+        self._login_win = doubao_web.open_login_window(
+            on_logged_in=self._on_logged_in,
+            on_aborted=self._on_aborted)
+
+    def _on_logged_in(self):
+        self._login_win = None
+        self.state_label.setText(t('shot.login.guide.done'))
+        self.open_btn.setText(t('common.close'))
+        self.open_btn.setEnabled(True)
+
+    def _on_aborted(self):
+        self._login_win = None
+        self.state_label.setText(t('shot.login.guide.desc'))
+        self.open_btn.setText(t('shot.login.guide.open'))
+        self.open_btn.setEnabled(True)
+
+
+_current_login_guide = None
+
+
+def show_login_guide(parent=None):
+    """弹出豆包登录引导窗并保持模块级引用：调用方（截图遮罩）随即销毁，
+    局部变量持有会被 Python GC 收掉——窗口一闪而过（实测）。
+    WA_DeleteOnClose + destroyed 清引用，窗关即释放。"""
+    global _current_login_guide
+    dlg = DoubaoLoginGuideDialog(parent)
+    dlg.setAttribute(Qt.WA_DeleteOnClose)
+    _current_login_guide = dlg
+    dlg.destroyed.connect(lambda *_: _clear_login_guide())
+    dlg.show()
+    dlg.raise_()          # 同为 StaysOnTop 的钉图窗之上靠后 raise 抢 z 序
+    dlg.activateWindow()
+    return dlg
+
+
+def _clear_login_guide():
+    global _current_login_guide
+    _current_login_guide = None

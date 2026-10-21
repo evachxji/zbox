@@ -40,12 +40,15 @@ class _FakeTranslator:
         self.on_login_required = None
         _FakeTranslator.instances.append(self)
 
-    def translate(self, texts, target, on_done, on_error):
+    def translate(self, texts, target, on_done, on_error, preloaded=False):
         self.texts = texts
+        self.preloaded = preloaded
         if _FakeTranslator.next_error is not None:
             on_error(_FakeTranslator.next_error)
         else:
             on_done(_FakeTranslator.next_result)
+
+    _orig_translate = translate
 
     def cancel(self):
         pass
@@ -72,7 +75,7 @@ class TranslateFlowTest(unittest.TestCase):
         self.overlay = ShotOverlay(_Cfg(), pin_image=_pin_image(), pin_pos=QPoint(0, 0))
         self.overlay.show()
         self.qapp.processEvents()
-        self.addCleanup(self.overlay.close)
+        self.addCleanup(self._close_overlay_safely)
         # 注入假货：OCR 同步返回两行英文，翻译同步返回译文
         regions = [
             tc.OcrRegion('hello', 0.99, None, (20, 20, 60, 12)),
@@ -82,9 +85,22 @@ class TranslateFlowTest(unittest.TestCase):
         ready.start()
         self.addCleanup(ready.stop)
         self.overlay._run_ocr_job = lambda job: job()
+        self.overlay._run_warm_job = lambda job: job()   # Edge 预热同步跑（假货不启动真 Edge）
         self._regions = regions
         self.overlay._ocr_recognize = lambda png, cancel: list(self._regions)
         self.overlay._make_translator = _FakeTranslator
+        page = type('FakePage', (), {'closed': False,
+                                     'close': lambda self: setattr(self, 'closed', True)})
+        self.overlay._fake_page = page()
+        self.overlay._make_page = lambda: self.overlay._fake_page
+        self._login_state = True   # 默认已登录
+        self.overlay._check_login = lambda page, cb: cb(self._login_state)
+
+    def _close_overlay_safely(self):
+        try:
+            self.overlay.close()
+        except RuntimeError:
+            pass   # 已随 WA_DeleteOnClose 销毁（未登录流程会主动 _close）
 
     def _translate(self):
         self.overlay._toggle_translate()
@@ -174,6 +190,61 @@ class TranslateFlowTest(unittest.TestCase):
         self.assertEqual(before.constBits().tobytes(),
                          after.constBits().tobytes())
 
+    def test_error_label_maps_cause(self):
+        import doubao_web
+        import ocr_runtime
+        import i18n
+        cases = [
+            (doubao_web.DoubaoNetworkError('x'), 'shot.translate.err_network'),
+            (doubao_web.DoubaoTimeout('x'), 'shot.translate.err_timeout'),
+            (doubao_web.DoubaoReplyError('x'), 'shot.translate.err_reply'),
+            (doubao_web.DoubaoStructureChanged('x'), 'shot.translate.structure_changed'),
+            (doubao_web.DoubaoLoginCancelled('x'), 'shot.translate.login_aborted'),
+            (RuntimeError('x'), 'shot.translate.failed'),
+        ]
+        for err, key in cases:
+            _FakeTranslator.next_error = err
+            self.overlay._tl8n = None
+            self._translate()
+            self.assertEqual(self.overlay._tl8n['state'], 'error', key)
+            self.assertEqual(self.overlay.tl8n_label.text(), i18n.t(key), key)
+        _FakeTranslator.next_error = None
+
+    def test_ocr_error_label(self):
+        import i18n
+        import ocr_runtime
+        def boom(png, cancel):
+            raise ocr_runtime.OcrRuntimeError('helper died')
+        self.overlay._ocr_recognize = boom
+        self._translate()
+        self.assertEqual(self.overlay._tl8n['state'], 'error')
+        self.assertEqual(self.overlay.tl8n_label.text(),
+                         i18n.t('shot.translate.err_ocr'))
+
+    def test_not_logged_in_exits_overlay_and_shows_guide(self):
+        from unittest.mock import MagicMock, patch as _patch
+        self._login_state = False   # 预检：未登录
+        guide = MagicMock()
+        with _patch('translate_guide.show_login_guide',
+                    MagicMock(return_value=guide)):
+            self._translate()
+            self.qapp.processEvents()
+        from shiboken6 import isValid
+        self.assertFalse(isValid(self.overlay))        # 截屏状态已退出（遮罩销毁）
+        self.assertEqual(_FakeTranslator.instances, [])   # 没建翻译会话（没白等 OCR）
+
+    def test_precheck_pass_reuses_loaded_page(self):
+        self._login_state = True
+        self._translate()
+        self.assertEqual(self.overlay._tl8n['state'], 'ready')
+        self.assertTrue(_FakeTranslator.instances[0].preloaded)
+
+    def test_precheck_unknown_falls_back_to_full_flow(self):
+        self._login_state = None   # 预检失败（断网等）：回落完整 load+probe
+        self._translate()
+        self.assertEqual(self.overlay._tl8n['state'], 'ready')
+        self.assertFalse(_FakeTranslator.instances[0].preloaded)
+
     def test_selection_change_drops_layer(self):
         self._translate()
         self.overlay._sel = QRect(10, 10, 100, 100)
@@ -199,15 +270,16 @@ class TranslateFlowTest(unittest.TestCase):
         self._translate()
         self.assertTrue(self.overlay.tl8n_label.isVisibleTo(self.overlay))
         import i18n
-        self.assertEqual(self.overlay.tl8n_label.text(), i18n.t('shot.translate.failed'))
+        self.assertEqual(self.overlay.tl8n_label.text(),
+                         i18n.t('shot.translate.err_network'))
 
     def test_progress_stage_updates_label(self):
         import i18n
         self.overlay._tl8n = {'state': 'preparing', 'sel': self.overlay._sel,
                               'cancel': None, 'session': None}
-        self.overlay._on_tl8n('progress', 'shot.translate.recognizing')
+        self.overlay._on_tl8n('progress', 'shot.translate.translating')
         self.assertEqual(self.overlay.tl8n_label.text(),
-                         i18n.t('shot.translate.recognizing'))
+                         i18n.t('shot.translate.translating'))
 
     def test_component_missing_opens_guide_instead_of_pipeline(self):
         from unittest.mock import MagicMock, patch as _patch
@@ -244,6 +316,121 @@ class TranslateFlowTest(unittest.TestCase):
         self.overlay._long = {'dummy': True}
         self._translate()
         self.assertIsNone(self.overlay._tl8n)
+
+
+class TranslatePinDelegationTest(unittest.TestCase):
+    """截图模式点翻译：钉住选区（钉图窗进 loading 态），遮罩退到幕后跑流水线，
+    成功把译文压进钉图窗，未登录/失败则还原钉图并退出截屏。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QApplication.instance() or QApplication([])
+
+    def setUp(self):
+        from unittest.mock import MagicMock
+        _FakeTranslator.next_result = ['译文一']
+        _FakeTranslator.next_error = None
+        _FakeTranslator.instances = []
+        self.overlay = ShotOverlay(_Cfg())   # 截图模式（非 pin_mode）
+        self.overlay.show()   # 生产路径必然先 show；WA_DeleteOnClose 对从未显示的窗口不销毁
+        self.qapp.processEvents()
+        self.overlay._sel = QRect(20, 20, 200, 120)
+        self.overlay._mode = 'ready'
+        self.addCleanup(self._close_overlay_safely)
+        regions = [tc.OcrRegion('hello', 0.99, None, (20, 20, 60, 12))]
+        self._regions = regions
+        ready = patch('ocr_runtime.ocr_ready', return_value=True)
+        ready.start()
+        self.addCleanup(ready.stop)
+        self.overlay._run_ocr_job = lambda job: job()
+        self.overlay._run_warm_job = lambda job: job()   # Edge 预热同步跑
+        self.overlay._ocr_recognize = lambda png, cancel: list(self._regions)
+        self.overlay._make_translator = _FakeTranslator
+        page = type('FakePage', (), {'closed': False,
+                                     'close': lambda self: setattr(self, 'closed', True)})
+        self.overlay._make_page = lambda: page()
+        self._login_state = True
+        self.overlay._check_login = lambda page, cb: cb(self._login_state)
+        self.pin = MagicMock()
+        pin_patch = patch('pinshot.pin', return_value=self.pin)
+        pin_patch.start()
+        self.addCleanup(pin_patch.stop)
+
+    def _close_overlay_safely(self):
+        try:
+            self.overlay.close()
+        except RuntimeError:
+            pass
+
+    def _translate(self):
+        self.overlay._toggle_translate()
+        self.qapp.processEvents()
+
+    def _overlay_destroyed(self):
+        from shiboken6 import isValid
+        self.qapp.processEvents()
+        return not isValid(self.overlay)
+
+    def _wait_finish(self, timeout=10.0):
+        import time
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            self.qapp.processEvents()
+            if self.pin.finish_translate.called:
+                return True
+            time.sleep(0.01)
+        return False
+
+    def test_kickoff_deferred_so_pin_paints_first(self):
+        """点击处理器返回瞬间：钉图已建、loading 已开，Edge 还没启动（下一拍）。"""
+        calls = []
+        orig = self.overlay._make_page
+        self.overlay._make_page = lambda: calls.append(1) or orig()
+        self.overlay._toggle_translate()
+        self.pin.set_translate_busy.assert_any_call(True)
+        self.assertFalse(self.overlay.isVisible())
+        self.assertEqual(calls, [], 'Edge 启动不该卡在点击处理器里')
+        self.qapp.processEvents()
+        self.assertEqual(len(calls), 1)
+
+    def test_translate_pins_selection_and_hides_overlay(self):
+        import pinshot
+        self._translate()
+        pinshot.pin.assert_called_once()
+        self.pin.set_translate_busy.assert_any_call(True)
+        self.assertFalse(self.overlay.isVisible())   # 遮罩退到幕后
+
+    def test_done_pushes_translation_to_pin_and_closes_overlay(self):
+        self._translate()
+        self.assertTrue(self._wait_finish(), '图层建好后应推译文给钉图窗')
+        layer = self.pin.finish_translate.call_args[0][0]
+        self.assertIsInstance(layer, QImage)
+        self.assertTrue(self._overlay_destroyed())
+
+    def test_not_logged_in_restores_pin_and_shows_guide(self):
+        from unittest.mock import patch as _patch
+        self._login_state = False
+        with _patch('translate_guide.show_login_guide') as guide:
+            self._translate()
+        guide.assert_called_once()
+        self.pin.set_translate_busy.assert_any_call(False)
+        self.assertFalse(self.pin.finish_translate.called)
+        self.assertTrue(self._overlay_destroyed())
+
+    def test_error_restores_pin_and_closes_overlay(self):
+        import doubao_web
+        _FakeTranslator.next_error = doubao_web.DoubaoNetworkError('x')
+        self._translate()
+        self.pin.set_translate_busy.assert_any_call(False)
+        self.assertFalse(self.pin.finish_translate.called)
+        self.assertTrue(self._overlay_destroyed())
+
+    def test_no_text_restores_pin_and_closes_overlay(self):
+        self._regions = []
+        self._translate()
+        self.pin.set_translate_busy.assert_any_call(False)
+        self.assertFalse(self.pin.finish_translate.called)
+        self.assertTrue(self._overlay_destroyed())
 
 
 if __name__ == '__main__':

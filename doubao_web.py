@@ -14,6 +14,7 @@ WebPage / DoubaoLoginDialog 是 Qt WebEngine 实现，延迟到功能启用时�
 import json
 import os
 import shutil
+import threading
 
 import translation_core
 
@@ -52,6 +53,10 @@ class DoubaoReplyError(DoubaoError):
 
 class DoubaoTimeout(DoubaoError):
     """等待回复超时。"""
+
+
+class DoubaoLoginCancelled(DoubaoError):
+    """用户关掉了登录窗口（未登录）：提示点击重试重新引导。"""
 
 
 def profile_dir():
@@ -183,17 +188,28 @@ class DoubaoSession(object):
     def cancel(self):
         self._cancelled = True
 
+    def close(self):
+        """取消并收掉底层 page（headless Edge 工人随会话结束，不留孤儿进程）。"""
+        self.cancel()
+        close = getattr(self._page, 'close', None)
+        if close is not None:
+            close()
+
     def notify_logged_in(self):
         """登录窗口回报成功后重走整个流程。"""
         if not self._cancelled and not self._finished:
             self._start()
 
-    def translate(self, texts, target_lang, on_done, on_error):
+    def translate(self, texts, target_lang, on_done, on_error, preloaded=False):
+        """preloaded=True：页面已加载过（登录预检同款页），跳过 load 直接探测。"""
         self._texts = list(texts)
         self._target = target_lang
         self._on_done = on_done
         self._on_error = on_error
-        self._start()
+        if preloaded:
+            self._page.run_js(build_probe_js(), self._on_probe_started)
+        else:
+            self._start()
 
     def _start(self):
         self._page.load(CHAT_URL, self._on_loaded)
@@ -385,6 +401,36 @@ def make_page(parent=None):
     return _Page()
 
 
+def check_login(page, cb, timer=None):
+    """登录态预检（headless 页，不建 session）：load → 两阶段探测 →
+    cb(True=已登录 / False=未登录 / None=检查失败如断网)。与 DoubaoSession 共享
+    同一套 JS 与 _decode，但不动状态机本体。"""
+    timer = timer or DoubaoSession._qt_timer
+    state = {'elapsed': 0}
+
+    def on_loaded(ok):
+        if not ok:
+            cb(None)
+            return
+        page.run_js(build_probe_js(), lambda _started: timer(500, tick))
+
+    def tick():
+        state['elapsed'] += 500
+        if state['elapsed'] > 10000:
+            cb(None)
+            return
+        page.run_js(build_probe_collect_js(), on_collect)
+
+    def on_collect(raw):
+        v = _decode(raw)
+        if not isinstance(v, dict) or not v.get('settled'):
+            timer(500, tick)
+            return
+        cb(bool(v.get('logged_in')))
+
+    page.load(CHAT_URL, on_loaded)
+
+
 class DoubaoLoginWindow(object):
     """有头 Edge 打开豆包登录页，后台两阶段探测登录态：
     登录成功（code===0）→ 关窗并 on_logged_in()；用户直接关窗/加载失败 → on_aborted()。
@@ -398,10 +444,16 @@ class DoubaoLoginWindow(object):
         self._timer = timer or DoubaoSession._qt_timer
         self._done = False
         self._dispatcher = _gui_dispatcher()
-        edge_driver.kill_owned(profile_dir())
+        # 清掉本 profile 的所有实例（含父进程死后残留的 headless——attach 分不出
+        # 有头无头，连上残留 headless 登录窗就"隐形"了），再开有头窗口
+        edge_driver.kill_profile_instances(profile_dir())
         self._page = edge_driver.EdgePage(headless=False, profile_dir=profile_dir())
         self._phase = 'start'
         self._page.load(CHAT_URL, self._post(self._on_loaded))
+        if self._page._proc is not None:
+            # 截图遮罩是全屏置顶窗：登录窗必须抢到它前面
+            threading.Thread(target=edge_driver.bring_window_to_front,
+                             args=(self._page._proc.pid,), daemon=True).start()
 
     def _post(self, fn):
         return lambda v: self._dispatcher.post(fn, v)

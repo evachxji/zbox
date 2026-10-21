@@ -48,8 +48,8 @@ class PinToolbarTest(unittest.TestCase):
         self.assertTrue(toolbar.isVisible())
         self.assertEqual(
             list(win._toolbar_btns),
-            ['rect', 'ellipse', 'arrow', 'text', 'marker', 'translate',
-             'save', 'close', 'confirm'])
+            ['rect', 'ellipse', 'arrow', 'pen', 'text', 'mosaic', 'marker',
+             'translate', 'save', 'close', 'confirm'])
         self.assertGreater(
             toolbar.geometry().center().y(), win.geometry().center().y())
 
@@ -58,8 +58,8 @@ class PinToolbarTest(unittest.TestCase):
 
         self.assertEqual(
             list(screenshot.SHOT_TOOLBAR_KINDS),
-            ['rect', 'ellipse', 'arrow', 'text', 'marker', 'translate',
-             'long', 'pin', 'save', 'close', 'confirm'])
+            ['rect', 'ellipse', 'arrow', 'pen', 'text', 'mosaic', 'marker',
+             'undo', 'translate', 'long', 'pin', 'save', 'close', 'confirm'])
         self.assertEqual(
             set(screenshot.PIN_TOOLBAR_EXCLUDED), {'pin', 'long'})
 
@@ -75,7 +75,7 @@ class PinToolbarTest(unittest.TestCase):
 
         for group in screenshot.SHOT_TOOLBAR_GROUPS:
             for kind, tip_key in group:
-                if kind in screenshot.PIN_TOOLBAR_EXCLUDED:
+                if kind not in win._toolbar_btns:   # 钉图工具条排除的按钮（pin/long/undo）
                     continue
                 if kind == 'confirm':
                     self.assertEqual(win._toolbar_btns[kind].text(),
@@ -431,6 +431,252 @@ class PinToolbarTest(unittest.TestCase):
         second._close()
         self.qapp.processEvents()
         self.assertGreater(cfg.saved, 0)
+
+    def test_pen_drag_creates_polyline_shape(self):
+        win = self._pin()
+        QTest.mouseClick(win, Qt.LeftButton, pos=win.rect().center())
+        self.qapp.processEvents()
+
+        import screenshot
+        win._toolbar_btns['pen'].click()
+        editor = win._editor
+        self.assertEqual(   # 画笔走线宽量程
+            (editor._size_slider.minimum(), editor._size_slider.maximum()),
+            screenshot.STROKE_RANGE)
+        QTest.mousePress(editor, Qt.LeftButton, pos=QPoint(40, 50))
+        for pt in (QPoint(80, 60), QPoint(120, 90), QPoint(150, 110)):
+            QTest.mouseMove(editor, pt, 10)
+        QTest.mouseRelease(editor, Qt.LeftButton, pos=QPoint(150, 110))
+        self.qapp.processEvents()
+
+        pen = editor._shapes[-1]
+        self.assertEqual(pen['kind'], 'pen')
+        self.assertGreaterEqual(len(pen['points']), 3)
+        self.assertEqual(pen['points'][0], QPointF(40, 50))
+        self.assertEqual(pen['points'][-1], QPointF(150, 110))
+        rendered = editor._result_image()   # 默认红色画笔画在米色底图上
+        c = rendered.pixelColor(40, 50)
+        self.assertGreater(c.red(), 200)
+        self.assertLess(c.green(), 120)
+
+    def test_pen_click_without_drag_leaves_no_shape(self):
+        win = self._pin()
+        QTest.mouseClick(win, Qt.LeftButton, pos=win.rect().center())
+        self.qapp.processEvents()
+
+        win._toolbar_btns['pen'].click()
+        editor = win._editor
+        QTest.mouseClick(editor, Qt.LeftButton, pos=QPoint(60, 60))
+        self.qapp.processEvents()
+        self.assertEqual(editor._shapes, [])
+
+    def test_mosaic_brush_pixelates_painted_stripes(self):
+        img = QImage(320, 200, QImage.Format_ARGB32)   # 竖条斑马纹：原生逐像素明暗交替
+        for x in range(img.width()):
+            for y in range(img.height()):
+                img.setPixelColor(x, y, QColor('#ffffff') if x % 2 == 0 else QColor('#000000'))
+        win = PinWindow(img, QPoint(120, 120), '#999999', _Cfg())
+        win.show()
+        self.qapp.processEvents()
+        self.addCleanup(win.close)
+        QTest.mouseClick(win, Qt.LeftButton, pos=win.rect().center())
+        self.qapp.processEvents()
+
+        import screenshot
+        win._toolbar_btns['mosaic'].click()
+        editor = win._editor
+        self.assertEqual(   # 马赛克走笔刷直径量程
+            (editor._size_slider.minimum(), editor._size_slider.maximum()),
+            screenshot.MOSAIC_RANGE)
+        self.assertTrue(editor._dots[0][1].isHidden())        # 马赛克无颜色语义
+        editor._size_slider.setValue(20)
+        QTest.mousePress(editor, Qt.LeftButton, pos=QPoint(40, 40))
+        QTest.mouseMove(editor, QPoint(160, 100), 10)
+        QTest.mouseRelease(editor, Qt.LeftButton, pos=QPoint(160, 100))
+        self.qapp.processEvents()
+
+        sh = editor._shapes[-1]
+        self.assertEqual(sh['kind'], 'mosaic')
+        self.assertEqual(sh['size'], 20)
+        self.assertEqual(sh['points'][0], QPointF(40, 40))    # 笔刷记折线，不是矩形
+        mos = editor._mosaic_image(sh, 1.0)
+        self.assertIsNotNone(mos)
+        out, tl = mos
+        self.assertEqual(tl, QPoint(30, 30))   # 包围盒 = 路径外扩笔刷半径 10
+        # 涂抹路径上的点：同一块内相邻像素已被抹平（原生斑马纹相邻列必然不同）
+        self.assertEqual(out.pixelColor(5, 5), out.pixelColor(6, 5))
+        # 打码结果与原生底图不同（条纹被平均成灰）
+        self.assertNotEqual(out.pixelColor(5, 5).name(), img.pixelColor(35, 35).name())
+        # 蒙版之外保持透明：远离路径的角落没有打码内容
+        self.assertEqual(out.pixelColor(out.width() - 2, 2).alpha(), 0)
+        # 缓存：路径不变时重算返回同一对象
+        self.assertIs(editor._mosaic_image(sh, 1.0)[0], out)
+
+    def test_undo_button_pops_last_shape(self):
+        win = self._pin()
+        QTest.mouseClick(win, Qt.LeftButton, pos=win.rect().center())
+        self.qapp.processEvents()
+
+        win._toolbar_btns['rect'].click()
+        editor = win._editor
+        self.assertIn('undo', editor._toolbar_btns)     # 编辑窗工具条有撤销
+        self.assertNotIn('undo', win._toolbar_btns)     # 钉图窗没有可撤销的标注，不出现
+        for x in (20, 100):
+            QTest.mousePress(editor, Qt.LeftButton, pos=QPoint(x, 40))
+            QTest.mouseMove(editor, QPoint(x + 40, 80), 10)
+            QTest.mouseRelease(editor, Qt.LeftButton, pos=QPoint(x + 40, 80))
+            self.qapp.processEvents()
+        self.assertEqual(len(editor._shapes), 2)
+        editor._toolbar_btns['undo'].click()            # 等同 Ctrl+Z
+        self.assertEqual(len(editor._shapes), 1)
+        editor._toolbar_btns['undo'].click()
+        self.assertEqual(editor._shapes, [])
+        editor._toolbar_btns['undo'].click()            # 空栈再点 = no-op
+        self.assertEqual(editor._shapes, [])
+
+    def test_mosaic_cursor_is_circle_sized_to_brush(self):
+        import screenshot
+        win = self._pin()
+        QTest.mouseClick(win, Qt.LeftButton, pos=win.rect().center())
+        self.qapp.processEvents()
+
+        win._toolbar_btns['mosaic'].click()
+        editor = win._editor
+        editor._size_slider.setValue(20)
+        cur = editor._brush_cursor()
+        pm = cur.pixmap()
+        self.assertEqual(pm.width(), pm.height())
+        self.assertGreaterEqual(pm.width(), 20)   # 直径随笔刷大小走
+        center = pm.toImage().pixelColor(pm.width() // 2, pm.height() // 2)
+        self.assertGreater(center.alpha(), 150)   # 灰色实心圆
+        self.assertAlmostEqual(center.red(), center.green(), delta=2)
+        self.assertAlmostEqual(center.green(), center.blue(), delta=2)
+        edge = pm.toImage().pixelColor(pm.width() // 2, 2)
+        self.assertEqual(edge.red(), 0)           # 外圈黑色轮廓
+        editor._update_cursor(editor.mapToGlobal(QPoint(100, 100)))
+        self.assertEqual(editor.cursor().shape(), Qt.BitmapCursor)  # 自定义圆形光标
+        editor._set_tool('pen')
+        editor._update_cursor(editor.mapToGlobal(QPoint(100, 100)))
+        self.assertEqual(editor.cursor().shape(), Qt.CrossCursor)  # 切走恢复十字
+
+
+class PinTranslateBusyTest(unittest.TestCase):
+    """钉图窗翻译态：高斯模糊 + loading，完成后压平译文并可切换原文/译文。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.qapp = QApplication.instance() or QApplication([])
+
+    def _pin(self):
+        img = QImage(320, 200, QImage.Format_ARGB32)
+        img.fill(QColor('#f5f0e6'))
+        win = PinWindow(img, QPoint(120, 120), '#999999', _Cfg())
+        win.show()
+        self.qapp.processEvents()
+        self.addCleanup(win.close)
+        return win
+
+    def test_busy_paints_marquee_border(self):
+        """busy 态：沿窗口边框跑淡蓝色跑马灯，画面本体不模糊不遮挡。"""
+        win = self._pin()
+        before = win.grab().toImage()
+        win.set_translate_busy(True)
+        self.qapp.processEvents()
+        self.assertTrue(win._tl8n_busy)
+        self.assertTrue(win._mq_timer.isActive())
+        after = win.grab().toImage()
+        self.assertNotEqual(before.constBits().tobytes(),
+                            after.constBits().tobytes())
+        # 画面本体不动：中心像素保持原色
+        c = win.rect().center()
+        self.assertEqual(before.pixelColor(c), after.pixelColor(c))
+        # 边缘出现淡蓝光带：左边框逐像素找蓝色调
+        h = win.height()
+        self.assertTrue(any(
+            after.pixelColor(2, y).blue() > after.pixelColor(2, y).red() + 20
+            for y in range(2, h - 2)), '边框应有淡蓝色跑马灯')
+
+    def test_busy_stop_without_result_keeps_original(self):
+        win = self._pin()
+        original = win._img.constBits().tobytes()
+        win.set_translate_busy(True)
+        win.set_translate_busy(False)
+        self.qapp.processEvents()
+        self.assertFalse(win._tl8n_busy)
+        self.assertFalse(win._mq_timer.isActive())
+        self.assertEqual(win._img.constBits().tobytes(), original)
+        self.assertIsNone(win._tl8n_pair)
+
+    def test_finish_translate_flattens_layer_and_enables_toggle(self):
+        win = self._pin()
+        original = win._img.constBits().tobytes()
+        layer = QImage(win._img.size(), QImage.Format_ARGB32)
+        layer.fill(QColor('#ff0000'))
+        win.set_translate_busy(True)
+        win.finish_translate(layer)
+        self.qapp.processEvents()
+        self.assertFalse(win._tl8n_busy)
+        self.assertNotEqual(win._img.constBits().tobytes(), original)
+        self.assertIsNotNone(win._tl8n_pair)
+        # 工具条翻译键 = 切换原文/译文
+        win._translate_clicked()
+        self.assertEqual(win._img.constBits().tobytes(), original)
+        win._translate_clicked()
+        self.assertNotEqual(win._img.constBits().tobytes(), original)
+
+    def test_pinned_translate_shows_busy_on_pin(self):
+        """已钉住的截图点翻译：loading 做在钉图窗上，编辑窗退到幕后。"""
+        import translation_core as tc
+        from screenshot import ShotOverlay
+        from unittest.mock import patch
+
+        class _FakeTr:
+            def __init__(self):
+                self.on_login_required = None
+            def translate(self, texts, target, on_done, on_error, preloaded=False):
+                on_done(['译文'])
+            def cancel(self):
+                pass
+
+        regions = [tc.OcrRegion('hello', 0.99, None, (20, 20, 60, 12))]
+        page = type('FakePage', (), {'close': lambda self: None})
+        win = self._pin()
+        with patch('ocr_runtime.supported', return_value=True), \
+             patch('doubao_web.supported', return_value=True), \
+             patch('ocr_runtime.ocr_ready', return_value=True), \
+             patch.object(ShotOverlay, '_run_ocr_job', lambda self, job: job()), \
+             patch.object(ShotOverlay, '_run_warm_job', lambda self, job: job()), \
+             patch.object(ShotOverlay, '_ocr_recognize',
+                          lambda self, png, cancel: list(regions)), \
+             patch.object(ShotOverlay, '_make_page', lambda self: page()), \
+             patch.object(ShotOverlay, '_check_login',
+                          lambda self, page, cb: cb(True)), \
+             patch.object(ShotOverlay, '_make_translator', lambda self: _FakeTr()):
+            win._translate_clicked()
+            editor = win._editor
+            self.assertIsNotNone(editor)
+            self.assertTrue(win._tl8n_busy)          # 钉图窗进 loading
+            self.assertTrue(win.isVisible())       # 钉图窗露出来做 loading
+            self.assertFalse(editor.isVisible())     # 编辑窗退到幕后
+            # 等图层构建完：译文压进钉图窗，编辑窗销毁
+            import time
+            t0 = time.time()
+            while time.time() - t0 < 10 and (
+                    win._tl8n_pair is None or win._editor is not None):
+                self.qapp.processEvents()   # deleteLater 也要事件循环才销毁
+                time.sleep(0.01)
+            self.assertIsNotNone(win._tl8n_pair)
+            self.assertFalse(win._tl8n_busy)
+            self.assertIsNone(win._editor)
+
+    def test_edit_image_clears_translation_pair(self):
+        win = self._pin()
+        layer = QImage(win._img.size(), QImage.Format_ARGB32)
+        layer.fill(QColor('#ff0000'))
+        win.finish_translate(layer)
+        self.assertIsNotNone(win._tl8n_pair)
+        win._apply_edited_image(QImage(100, 80, QImage.Format_ARGB32))
+        self.assertIsNone(win._tl8n_pair)
 
 
 if __name__ == '__main__':

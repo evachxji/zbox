@@ -83,8 +83,10 @@ TEXT_RANGE = (10, 32)        # 文字字号滑动条量程（逻辑 px）
 MARKER_DOT_SIZE = 24         # 序号数字圆点固定尺寸（逻辑 px）
 MARKER_TEXT_MIN_W = 64
 MARKER_EDGE_RESERVE_W = 140
-TOOL_SIZE_DEFAULTS = {'rect': 4, 'ellipse': 4, 'arrow': 4, 'text': 16, 'marker': 16}
-ANNOTATION_TOOLS = ('rect', 'ellipse', 'arrow', 'text', 'marker')
+TOOL_SIZE_DEFAULTS = {'rect': 4, 'ellipse': 4, 'arrow': 4, 'pen': 4, 'text': 16,
+                      'mosaic': 24, 'marker': 16}
+MOSAIC_RANGE = (10, 60)      # 马赛克笔刷直径滑动条量程（逻辑 px）
+ANNOTATION_TOOLS = ('rect', 'ellipse', 'arrow', 'pen', 'text', 'mosaic', 'marker')
 HANDLES = ('nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w')
 MIN_SEL = 4                                # 小于这个尺寸视为误点，不成选区
 LONG_MAX_H = 30000                         # 长图物理像素上限，超出自动完成
@@ -92,26 +94,26 @@ LONG_MAX_H = 30000                         # 长图物理像素上限，超出�
 # 两套调色板：随面板主题切换（resolve_theme 把 auto 解析成真主题）
 PALETTES = {
     'nocturne': {
-        'accent': '#e8a33d', 'accent_text': '#1a1610', 'accent_soft': 'rgba(232,163,61,40)',
+        'accent': '#e8a33d', 'accent_text': '#1a1610', 'accent_soft': 'rgba(232,163,61,48)',
         'accent_border': 'rgba(232,163,61,128)',
-        'bar_bg': 'rgba(27,29,36,242)', 'bar_border': 'rgba(255,255,255,18)',
-        'bar_fill': (27, 29, 36, 242), 'bar_edge': (255, 255, 255, 18),
-        'icon': '#7d7a72', 'icon_hov_bg': 'rgba(255,255,255,20)',
-        'sep': 'rgba(255,255,255,26)',
-        'dot_ring': 'rgba(255,255,255,30)', 'dot_ring_on': '#e8a33d',
-        'label_bg': 'rgba(27,29,36,235)', 'label_border': 'rgba(232,163,61,102)',
-        'sel': '#e8a33d', 'handle_bg': '#1b1d24',
+        'bar_bg': 'rgba(32,32,31,245)', 'bar_border': 'rgba(255,255,255,24)',
+        'bar_fill': (32, 32, 31, 245), 'bar_edge': (255, 255, 255, 24),
+        'icon': '#a5a49a', 'icon_hov_bg': 'rgba(255,255,255,15)',
+        'sep': 'rgba(255,255,255,22)',
+        'dot_ring': 'rgba(255,255,255,32)', 'dot_ring_on': '#e8a33d',
+        'label_bg': 'rgba(32,32,31,235)', 'label_border': 'rgba(232,163,61,102)',
+        'sel': '#e8a33d', 'handle_bg': '#20201f',
     },
     'mica': {
-        'accent': '#0067c0', 'accent_text': '#ffffff', 'accent_soft': 'rgba(0,103,192,30)',
-        'accent_border': 'rgba(0,103,192,115)',
-        'bar_bg': 'rgba(247,248,250,245)', 'bar_border': 'rgba(0,0,0,23)',
-        'bar_fill': (247, 248, 250, 245), 'bar_edge': (0, 0, 0, 23),
-        'icon': '#8a8a90', 'icon_hov_bg': 'rgba(0,0,0,15)',
-        'sep': 'rgba(0,0,0,30)',
-        'dot_ring': 'rgba(0,0,0,26)', 'dot_ring_on': '#0067c0',
-        'label_bg': 'rgba(247,248,250,242)', 'label_border': 'rgba(0,103,192,89)',
-        'sel': '#0067c0', 'handle_bg': '#ffffff',
+        'accent': '#e8a33d', 'accent_text': '#1a1610', 'accent_soft': 'rgba(232,163,61,30)',
+        'accent_border': 'rgba(232,163,61,115)',
+        'bar_bg': 'rgba(255,255,255,245)', 'bar_border': 'rgba(0,0,0,20)',
+        'bar_fill': (255, 255, 255, 245), 'bar_edge': (0, 0, 0, 20),
+        'icon': '#6d6b67', 'icon_hov_bg': 'rgba(0,0,0,12)',
+        'sep': 'rgba(0,0,0,24)',
+        'dot_ring': 'rgba(0,0,0,28)', 'dot_ring_on': '#e8a33d',
+        'label_bg': 'rgba(255,255,255,242)', 'label_border': 'rgba(232,163,61,89)',
+        'sel': '#e8a33d', 'handle_bg': '#ffffff',
     },
 }
 
@@ -119,7 +121,8 @@ PALETTES = {
 # 第二列存词典键，构建时按当前语言取文案（模块 import 时语言可能未解析完）。
 SHOT_TOOLBAR_GROUPS = (
     (('rect', 'shot.tool.rect'), ('ellipse', 'shot.tool.ellipse'), ('arrow', 'shot.tool.arrow'),
-     ('text', 'shot.tool.text'), ('marker', 'shot.tool.marker')),
+     ('pen', 'shot.tool.pen'), ('text', 'shot.tool.text'), ('mosaic', 'shot.tool.mosaic'),
+     ('marker', 'shot.tool.marker'), ('undo', 'shot.tool.undo')),
     (('translate', 'shot.tool.translate'),),
     (('long', 'shot.tool.long'), ('pin', 'shot.tool.pin'), ('save', 'shot.tool.save')),
     (('close', 'shot.tool.cancel'), ('confirm', 'shot.copy_tooltip')),
@@ -130,7 +133,7 @@ PIN_TOOLBAR_EXCLUDED = frozenset(('pin', 'long'))
 
 def _icon(kind, color):
     """工具条线性图标：24 虚拟网格矢量绘制（对齐 app.make_cal_icon 的画法）。"""
-    s = ui.sc(20)
+    s = ui.sc(24)
     pm = QPixmap(s, s)
     pm.fill(Qt.transparent)
     p = QPainter(pm)
@@ -148,10 +151,37 @@ def _icon(kind, color):
         p.drawLine(QPointF(12, 6.5), QPointF(12, 18))
         p.drawLine(QPointF(9, 18), QPointF(15, 18))
     elif kind == 'arrow':
-        p.drawLine(QPointF(5, 18), QPointF(18, 6))
+        # 微信同款 ↗：粗斜杆 + 水平/垂直两翼直角箭头
+        p.setPen(QPen(QColor(color), 2.5, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.drawLine(QPointF(6.5, 17.5), QPointF(16.8, 7.2))
+        p.drawLine(QPointF(16.8, 7.2), QPointF(10.8, 7.2))
+        p.drawLine(QPointF(16.8, 7.2), QPointF(16.8, 13.2))
+    elif kind == 'pen':
+        # 微信同款画笔：粗胶囊笔杆 + 锥形笔尖，笔尖朝左下
+        # （杆要够粗、尖要够长——20px 实际尺寸下细杆短尖会缩成一条斜线）
+        p.setPen(QPen(QColor(color), 3.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.drawLine(QPointF(10.2, 13.8), QPointF(17.8, 6.2))
+        p.setPen(Qt.NoPen)
         p.setBrush(QColor(color))
-        p.drawPolygon(QPolygonF([QPointF(19, 5), QPointF(14.5, 6.5),
-                                 QPointF(17.5, 9.5)]))
+        # 斜切凿形尖 + 与笔杆之间抠一条透明缝——小尺寸下「杆+尖」两段结构才读得出是笔
+        p.drawPolygon(QPolygonF([QPointF(7.2, 18.2), QPointF(10.9, 15.9),
+                                 QPointF(8.1, 13.1), QPointF(5.8, 16.8)]))
+        p.setCompositionMode(QPainter.CompositionMode_Clear)
+        p.setPen(QPen(Qt.transparent, 1.1, Qt.SolidLine, Qt.FlatCap))
+        p.drawLine(QPointF(8.9, 15.8), QPointF(11.3, 13.4))
+    elif kind == 'undo':
+        # 向左箭头（撤销）
+        p.drawLine(QPointF(19, 12), QPointF(5.5, 12))
+        p.drawLine(QPointF(5.5, 12), QPointF(11, 6.5))
+        p.drawLine(QPointF(5.5, 12), QPointF(11, 17.5))
+    elif kind == 'mosaic':
+        # 3x3 像素格，交错填充表现打码
+        p.setPen(QPen(QColor(color), 1.4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        cell = 5.0
+        for i in range(3):
+            for j in range(3):
+                p.setBrush(QColor(color) if (i + j) % 2 == 0 else Qt.NoBrush)
+                p.drawRect(QRectF(4.5 + j * cell, 4.5 + i * cell, cell, cell))
     elif kind == 'marker':
         p.drawEllipse(QRectF(5, 5, 14, 14))
         f = QFont('Segoe UI')
@@ -212,19 +242,19 @@ def _icon(kind, color):
 def _qss(pal, cn, num):
     """遮罩子控件（工具条/二级条/尺寸标签/长图条）的局部 QSS，按调色板现拼。"""
     return """
-QFrame#shotBar { background: %(bar_bg)s; border: 1px solid %(bar_border)s; border-radius: 10px; }
-QToolButton#shotBtn { background: transparent; border: none; border-radius: 6px; color: %(icon)s; }
+QFrame#shotBar { background: %(bar_bg)s; border: 1px solid %(bar_border)s; border-radius: 12px; }
+QToolButton#shotBtn { background: transparent; border: none; border-radius: 8px; color: %(icon)s; }
 QToolButton#shotBtn:hover { background: %(icon_hov_bg)s; }
 QToolButton#shotBtn[on="true"] { background: %(accent_soft)s; }
-QToolButton#shotClose { background: transparent; border: none; border-radius: 6px; color: %(icon)s; }
-QToolButton#shotClose:hover { background: #c42b1c; }
+QToolButton#shotClose { background: transparent; border: none; border-radius: 8px; color: %(icon)s; }
+QToolButton#shotClose:hover { background: #dc2626; color: #ffffff; }
 QPushButton#shotConfirm {
-    background: %(accent)s; border: none; border-radius: 6px;
-    color: %(accent_text)s; font: 600 12px "%(cn)s"; padding: 0 14px;
+    background: %(accent)s; border: none; border-radius: 8px;
+    color: %(accent_text)s; font: 600 17px "%(cn)s"; padding: 0 14px;
 }
 QPushButton#shotGhost {
-    background: transparent; border: 1px solid %(bar_border)s; border-radius: 6px;
-    color: %(icon)s; font: 12px "%(cn)s"; padding: 0 12px;
+    background: transparent; border: 1px solid %(bar_border)s; border-radius: 8px;
+    color: %(icon)s; font: 13px "%(cn)s"; padding: 0 14px;
 }
 QPushButton#shotGhost:hover { background: %(icon_hov_bg)s; }
 QFrame#shotSep { background: %(sep)s; }
@@ -242,7 +272,7 @@ QToolButton#shotInvert[on="true"] { background: %(accent)s; color: %(accent_text
 QToolButton#shotInvert:disabled { color: %(icon)s; border-color: %(bar_border)s; }
 QLabel#shotSize {
     background: %(label_bg)s; color: %(accent)s; border: 1px solid %(label_border)s;
-    border-radius: 4px; font: 12px "%(num)s"; padding: 4px 10px;
+    border-radius: 6px; font: 13px "%(num)s"; padding: 5px 12px;
 }
 """ % dict({'cn': cn, 'num': num}, **pal)
 
@@ -261,7 +291,7 @@ class _ShotBar(QFrame):
         r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         p.setPen(QPen(self._edge, 1))
         p.setBrush(self._fill)
-        p.drawRoundedRect(r, 10, 10)
+        p.drawRoundedRect(r, 12, 12)
         p.end()
 
 
@@ -270,8 +300,8 @@ def build_shot_toolbar(parent, pal, callbacks, exclude=()):
     bar = _ShotBar(parent, pal)
     bar.setObjectName('shotBar')
     lay = QHBoxLayout(bar)
-    lay.setContentsMargins(ui.sc(6), ui.sc(6), ui.sc(6), ui.sc(6))
-    lay.setSpacing(2)
+    lay.setContentsMargins(ui.sc(8), ui.sc(8), ui.sc(8), ui.sc(8))
+    lay.setSpacing(ui.sc(4))
     buttons = {}
     previous_group = False
     for group in SHOT_TOOLBAR_GROUPS:
@@ -281,21 +311,21 @@ def build_shot_toolbar(parent, pal, callbacks, exclude=()):
         if previous_group:
             sep = QFrame()
             sep.setObjectName('shotSep')
-            sep.setFixedSize(1, ui.sc(16))
+            sep.setFixedSize(1, ui.sc(20))
             lay.addWidget(sep)
         previous_group = True
         for kind, tip in visible:
             if kind == 'confirm':
                 b = QPushButton(t('shot.done'))
                 b.setObjectName('shotConfirm')
-                b.setFixedHeight(ui.sc(30))
+                b.setFixedHeight(ui.sc(36))
             else:
                 b = QToolButton()
                 b.setObjectName('shotClose' if kind == 'close' else 'shotBtn')
-                b.setFixedSize(ui.sc(30), ui.sc(30))
+                b.setFixedSize(ui.sc(36), ui.sc(36))
                 b._icon_kind = kind
                 b.setIcon(QIcon(_icon(kind, pal['icon'])))
-                b.setIconSize(QSize(ui.sc(16), ui.sc(16)))
+                b.setIconSize(QSize(ui.sc(24), ui.sc(24)))   # 图标铺满 24 网格：大一号，按钮尺寸不变
             b._action_kind = kind
             b.setCursor(Qt.PointingHandCursor)
             b.setFocusPolicy(Qt.NoFocus)
@@ -896,7 +926,8 @@ class ShotOverlay(QWidget):
     sig_tl8n = Signal(str, object)   # 翻译流水线（后台线程）→ 主线程的阶段通知
     sig_layer_ready = Signal(object)   # 后台线程构建好翻译图层 → 主线程回填
 
-    def __init__(self, cfg, pin_image=None, pin_pos=None, initial_tool=None):
+    def __init__(self, cfg, pin_image=None, pin_pos=None, initial_tool=None,
+                 pin_host=None):
         super(ShotOverlay, self).__init__(None, Qt.FramelessWindowHint | Qt.Tool
                                           | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_DeleteOnClose)
@@ -905,6 +936,7 @@ class ShotOverlay(QWidget):
         self.setCursor(Qt.CrossCursor)
         self._cfg = cfg
         self._pin_mode = pin_image is not None
+        self._pin_host = pin_host   # 钉图原位编辑窗的宿主 PinWindow（翻译 loading 委托给它）
         theme = cfg.data.get('theme') if cfg is not None else 'auto'
         self.pal = PALETTES.get(ui.resolve_theme(theme), PALETTES['nocturne'])
         self._cn, self._num = ui.pick_fonts()
@@ -951,11 +983,17 @@ class ShotOverlay(QWidget):
                 value = int(saved_sizes.get(tool, default))
             except (TypeError, ValueError):
                 value = default
-            lo, hi = TEXT_RANGE if tool in ('text', 'marker') else STROKE_RANGE
+            if tool in ('text', 'marker'):
+                lo, hi = TEXT_RANGE
+            elif tool == 'mosaic':
+                lo, hi = MOSAIC_RANGE
+            else:
+                lo, hi = STROKE_RANGE
             self._tool_sizes[tool] = min(max(value, lo), hi)
         self._stroke = self._tool_sizes['rect']
         self._text_size = self._tool_sizes['text']
         self._marker_text_size = self._tool_sizes['marker']
+        self._mosaic_size = self._tool_sizes['mosaic']
         self._marker_edit = None
         self._invert = False
         self._editor = None        # (QPlainTextEdit, QPointF 落点)
@@ -1013,8 +1051,11 @@ class ShotOverlay(QWidget):
             'rect': lambda: self._set_tool('rect'),
             'ellipse': lambda: self._set_tool('ellipse'),
             'arrow': lambda: self._set_tool('arrow'),
+            'pen': lambda: self._set_tool('pen'),
             'text': lambda: self._set_tool('text'),
+            'mosaic': lambda: self._set_tool('mosaic'),
             'marker': lambda: self._set_tool('marker'),
+            'undo': self._undo,
             'translate': self._toggle_translate,
             'long': self._start_long,
             'pin': self._finish_pin,
@@ -1044,7 +1085,8 @@ class ShotOverlay(QWidget):
             d.clicked.connect(lambda _=False, cc=c: self._set_color(cc))
             sl.addWidget(d)
             self._dots.append((c, d))
-        sl.addWidget(self._sep())
+        self._sep1 = self._sep()
+        sl.addWidget(self._sep1)
         self._size_slider = QSlider(Qt.Horizontal)
         self._size_slider.setObjectName('shotSlider')
         self._size_slider.setFixedSize(ui.sc(90), ui.sc(22))
@@ -1085,7 +1127,7 @@ class ShotOverlay(QWidget):
             on = b.property('on') == 'true'
             color = p['accent'] if on else p['icon']
             b.setIcon(QIcon(_icon(kind, color)))
-            b.setIconSize(QSize(ui.sc(16), ui.sc(16)))
+            b.setIconSize(QSize(ui.sc(24), ui.sc(24)))   # 图标铺满 24 网格：大一号，按钮尺寸不变
 
     # ---------- 状态操作 ----------
 
@@ -1103,18 +1145,25 @@ class ShotOverlay(QWidget):
             b.style().polish(b)
         is_text = self._tool == 'text'
         is_marker = self._tool == 'marker'
+        is_mosaic = self._tool == 'mosaic'
         self._invert_btn.setVisible(is_text)   # 反色只有文字工具才有
         self._sep2.setVisible(is_text)
-        self._size_slider.blockSignals(True)   # 滑动条随工具换量程：图形 = 线宽，文字 = 字号
+        for _c, d in self._dots:             # 马赛克没有颜色语义，二级条只留块尺寸
+            d.setVisible(not is_mosaic)
+        self._sep1.setVisible(not is_mosaic)
+        self._size_slider.blockSignals(True)   # 滑动条随工具换量程：图形 = 线宽，文字 = 字号，马赛克 = 块尺寸
         if is_text:
             self._size_slider.setRange(*TEXT_RANGE)
             self._size_slider.setValue(self._text_size)
         elif is_marker:
             self._size_slider.setRange(*TEXT_RANGE)
             self._size_slider.setValue(self._marker_text_size)
+        elif is_mosaic:
+            self._size_slider.setRange(*MOSAIC_RANGE)
+            self._size_slider.setValue(self._mosaic_size)
         else:
             self._size_slider.setRange(*STROKE_RANGE)
-            if self._tool in ('rect', 'ellipse', 'arrow'):
+            if self._tool in ('rect', 'ellipse', 'arrow', 'pen'):
                 self._stroke = self._tool_sizes[self._tool]
             self._size_slider.setValue(self._stroke)
         self._size_slider.blockSignals(False)
@@ -1165,9 +1214,13 @@ class ShotOverlay(QWidget):
                 f.setPixelSize(v)
                 ed.setFont(f)
                 ed.setGeometry(self._marker_text_rect(sh).toRect())
+        elif self._tool == 'mosaic':
+            self._mosaic_size = v
+            self._tool_sizes['mosaic'] = v
+            self._update_cursor(QCursor.pos())
         else:
             self._stroke = v
-            if self._tool in ('rect', 'ellipse', 'arrow'):
+            if self._tool in ('rect', 'ellipse', 'arrow', 'pen'):
                 self._tool_sizes[self._tool] = v
             if self._edit_shape is not None:
                 self._edit_shape['w'] = float(v)
@@ -1427,9 +1480,9 @@ class ShotOverlay(QWidget):
             return
         p.drawPixmap(0, 0, self._ensure_base_pm())
         if self._hover_frame is not None:
-            p.setPen(QPen(QColor(self.pal['sel']), 2))
+            p.setPen(QPen(QColor(self.pal['sel']), 3))
             p.setBrush(Qt.NoBrush)
-            p.drawRect(QRectF(self._hover_frame).adjusted(1, 1, -1, -1))
+            p.drawRect(QRectF(self._hover_frame).adjusted(1.5, 1.5, -1.5, -1.5))
         if self._sel.isValid() and not self._sel.isNull():
             # 选区镂空：把底图在选区内再画一遍（盖住灰罩），再画标注
             hole = self._ensure_hole_pm()
@@ -1448,15 +1501,16 @@ class ShotOverlay(QWidget):
                 p.setBrush(Qt.NoBrush)
                 p.drawRect(self._edit_shape['rect'].adjusted(-4, -4, 4, 4))
                 if self._edit_shape['kind'] in ('rect', 'ellipse'):
-                    p.setPen(QPen(QColor(self.pal['sel']), 1))
+                    p.setPen(QPen(QColor(self.pal['sel']), 2))
                     p.setBrush(QColor(self.pal['handle_bg']))
                     for h in HANDLES:
                         p.drawRect(self._shape_handle_rect(h))
             p.restore()
-            p.setPen(QPen(QColor(self.pal['sel']), 1))
+            p.setPen(QPen(QColor(self.pal['sel']), 2))
             p.setBrush(Qt.NoBrush)
-            p.drawRect(QRectF(self._sel).adjusted(0.5, 0.5, -0.5, -0.5))
+            p.drawRect(QRectF(self._sel).adjusted(1, 1, -1, -1))
             if self._mode == 'ready' and self._long is None:
+                p.setPen(QPen(QColor(self.pal['sel']), 2))
                 p.setBrush(QColor(self.pal['handle_bg']))
                 for h in HANDLES:
                     p.drawRect(self._handle_rect(h))
@@ -1509,6 +1563,17 @@ class ShotOverlay(QWidget):
                 p.setPen(QColor('#ffffff'))
                 p.drawText(tr.adjusted(ui.sc(7), ui.sc(4), -ui.sc(7), -ui.sc(4)),
                            Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap, text)
+        elif sh['kind'] == 'pen':
+            pts = sh.get('points', [])
+            if len(pts) >= 2:
+                p.setPen(QPen(col, sh['w'], Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+                p.setBrush(Qt.NoBrush)
+                p.drawPolyline(QPolygonF(pts))
+        elif sh['kind'] == 'mosaic':
+            mos = self._mosaic_image(sh, p.device().devicePixelRatioF())
+            if mos is not None:
+                img, tl = mos
+                p.drawImage(QPointF(tl), img)
         elif sh['kind'] in ('rect', 'ellipse'):
             p.setPen(QPen(col, sh['w'], Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
             p.setBrush(Qt.NoBrush)
@@ -1542,8 +1607,76 @@ class ShotOverlay(QWidget):
             for i, ln in enumerate(lines):
                 p.drawText(QPointF(pos.x(), pos.y() + i * fm.height() + fm.ascent()), ln)
 
+    def _mosaic_image(self, sh, dpr):
+        """马赛克笔刷：把笔刷包围盒内的底图缩成小块再最近邻放大（块边长随笔刷
+        直径走，越粗码越粗），再用笔刷路径做 alpha 蒙版抠出涂抹到的部分。
+        按 (点数, 末点, size, dpr) 缓存——静止时 paintEvent 不重算，
+        拖动中每帧按最新折线重算一次。"""
+        pts = sh.get('points', [])
+        if len(pts) < 2:
+            return None
+        size = max(2, int(sh.get('size', TOOL_SIZE_DEFAULTS['mosaic'])))
+        xs = [pt.x() for pt in pts]
+        ys = [pt.y() for pt in pts]
+        half = size / 2
+        r = QRectF(min(xs) - half, min(ys) - half,
+                   max(xs) - min(xs) + size,
+                   max(ys) - min(ys) + size).toAlignedRect().intersected(self.rect())
+        key = (len(pts), pts[-1], size, dpr, r)
+        cache = sh.get('_mos')
+        if cache is not None and cache[0] == key:
+            return cache[1]
+        if r.isEmpty():
+            return None
+        w = max(1, int(r.width() * dpr + 0.5))
+        h = max(1, int(r.height() * dpr + 0.5))
+        img = QImage(w, h, QImage.Format_ARGB32)
+        img.fill(Qt.transparent)
+        p = QPainter(img)
+        p.scale(dpr, dpr)
+        p.translate(-QPointF(r.topLeft()))
+        for rect, pm, _d in self._screens:
+            p.drawPixmap(rect, pm)
+        p.end()
+        dev_block = max(1.0, max(4, round(size / 3)) * dpr)
+        img = (img.scaled(max(1, int(w / dev_block)), max(1, int(h / dev_block)),
+                          Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+               .scaled(w, h, Qt.IgnoreAspectRatio, Qt.FastTransformation))
+        mask = QImage(w, h, QImage.Format_ARGB32)   # 笔刷路径蒙版
+        mask.fill(Qt.transparent)
+        mp = QPainter(mask)
+        mp.setRenderHint(QPainter.Antialiasing)
+        mp.scale(dpr, dpr)
+        mp.translate(-QPointF(r.topLeft()))
+        mp.setPen(QPen(QColor(255, 255, 255), size, Qt.SolidLine,
+                       Qt.RoundCap, Qt.RoundJoin))
+        mp.drawPolyline(QPolygonF(pts))
+        mp.end()
+        p = QPainter(img)
+        p.setCompositionMode(QPainter.CompositionMode_DestinationIn)
+        p.drawImage(0, 0, mask)
+        p.end()
+        img.setDevicePixelRatio(dpr)
+        sh['_mos'] = (key, (img, r.topLeft()))
+        return sh['_mos'][1]
+
+    def _brush_cursor(self):
+        """马赛克圆形笔刷光标：灰色实心圆 + 黑色轮廓，深浅底上都醒目，直径 = 笔刷大小。"""
+        dpr = self.devicePixelRatioF()
+        d = max(8, int(round(self._mosaic_size * dpr)))
+        pm = QPixmap(d + 4, d + 4)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(QPen(QColor(0, 0, 0, 255), max(2, int(2 * dpr))))
+        p.setBrush(QColor(150, 150, 150, 200))
+        p.drawEllipse(2, 2, d, d)
+        p.end()
+        pm.setDevicePixelRatio(dpr)
+        return QCursor(pm, pm.width() // 2, pm.height() // 2)
+
     def _handle_rect(self, h):
-        s = ui.sc(7)
+        s = ui.sc(9)
         r = self._sel
         xm = {'w': r.left(), 'e': r.right(), 'n': r.center().x(), 's': r.center().x()}
         ym = {'n': r.top(), 's': r.bottom(), 'w': r.center().y(), 'e': r.center().y()}
@@ -1556,7 +1689,7 @@ class ShotOverlay(QWidget):
         return QRect(int(x - s / 2), int(y - s / 2), s, s)
 
     def _shape_handle_rect(self, h):
-        s = ui.sc(7)
+        s = ui.sc(9)
         r = self._edit_shape['rect']
         xm = {'w': r.left(), 'e': r.right(), 'n': r.center().x(), 's': r.center().x()}
         ym = {'n': r.top(), 's': r.bottom(), 'w': r.center().y(), 'e': r.center().y()}
@@ -1724,6 +1857,16 @@ class ShotOverlay(QWidget):
                         'color': self._color, 'w': float(self._stroke),
                     }
                     self._drag = ('draw', QPointF(pos))
+                elif self._tool == 'pen':
+                    self._edit_shape = None
+                    self._cur = {'kind': 'pen', 'points': [QPointF(pos)],
+                                 'color': self._color, 'w': float(self._stroke)}
+                    self._drag = ('draw', QPointF(pos))
+                elif self._tool == 'mosaic':
+                    self._edit_shape = None
+                    self._cur = {'kind': 'mosaic', 'points': [QPointF(pos)],
+                                 'color': self._color, 'size': self._mosaic_size}
+                    self._drag = ('draw', QPointF(pos))
                 else:
                     h = self._hit_shape_handle(pos)
                     if h:
@@ -1781,6 +1924,10 @@ class ShotOverlay(QWidget):
         elif kind == 'draw':
             if self._cur['kind'] == 'arrow':
                 self._cur['end'] = QPointF(pos)
+            elif self._cur['kind'] in ('pen', 'mosaic'):
+                pts = self._cur['points']
+                if (QPointF(pos) - pts[-1]).manhattanLength() >= 2:
+                    pts.append(QPointF(pos))
             else:
                 self._cur['rect'] = QRectF(data, QPointF(pos)).normalized()
         elif kind == 'text_move':
@@ -1841,6 +1988,8 @@ class ShotOverlay(QWidget):
             if self._cur['kind'] == 'arrow':
                 start, end = self._cur['start'], self._cur['end']
                 keep = (end.x() - start.x()) ** 2 + (end.y() - start.y()) ** 2 >= 16
+            elif self._cur['kind'] in ('pen', 'mosaic'):
+                keep = len(self._cur['points']) >= 2
             else:
                 r = self._cur['rect']
                 keep = r.width() >= 3 and r.height() >= 3
@@ -1921,6 +2070,10 @@ class ShotOverlay(QWidget):
             cur = Qt.ArrowCursor if self._hit_text(pos) else Qt.IBeamCursor
         elif self._tool in ('rect', 'ellipse') and self._mode == 'ready' and self._sel.contains(pos):
             cur = Qt.ArrowCursor if self._hit_shape(pos, self._tool) else Qt.CrossCursor
+        elif self._tool == 'mosaic' and self._mode == 'ready' \
+                and self._sel.contains(pos):
+            self.setCursor(self._brush_cursor())
+            return
         elif self._tool == 'marker' and self._mode == 'ready' \
                 and self._hit_marker(pos) is not None:
             cur = Qt.SizeAllCursor
@@ -2195,13 +2348,38 @@ class ShotOverlay(QWidget):
     def _cancel_tl8n(self):
         st = self._tl8n
         if st is not None:
+            pin = st.get('pin')
+            if pin is not None:
+                st['pin'] = None
+                try:
+                    pin.set_translate_busy(False)   # 流水线被掐断：钉图还原原图
+                except RuntimeError:
+                    pass
             if st.get('cancel') is not None:
                 st['cancel'].set()
             if st.get('session') is not None:
-                st['session'].cancel()
+                close = getattr(st['session'], 'close', None)
+                if close is not None:
+                    close()
+                else:
+                    st['session'].cancel()
             if st.get('login_win') is not None:
                 st['login_win'].close()
             self._tl8n = None
+
+    def _tl8n_pin_finish(self, key=None):
+        """钉图委托态的终态收尾：停 loading、光标处气泡告知原因、关闭幕后遮罩。"""
+        st = self._tl8n
+        pin = (st or {}).get('pin')
+        if pin is not None:
+            st['pin'] = None
+            try:
+                pin.set_translate_busy(False)
+            except RuntimeError:
+                pass
+            if key:
+                QToolTip.showText(QCursor.pos(), t(key))
+        self._close()
 
     def _toggle_translate(self):
         """翻译按钮：未翻译 → 跑流水线；已出译文 → 切换原文/译文；进行中 → 忽略。"""
@@ -2213,7 +2391,7 @@ class ShotOverlay(QWidget):
             return
         self._translate_sel_guard()
         st = self._tl8n
-        if st is not None and st['state'] in ('preparing', 'ocr', 'translating'):
+        if st is not None and st['state'] in ('checking', 'preparing', 'ocr', 'translating'):
             return
         if st is not None and st['state'] == 'ready':
             st['visible'] = not st['visible']
@@ -2241,13 +2419,57 @@ class ShotOverlay(QWidget):
             if not ocr_runtime.ocr_ready():
                 return
         cancel = threading.Event()
-        self._tl8n = {'state': 'preparing', 'sel': QRect(self._sel), 'cancel': cancel,
+        if not self._pin_mode:
+            # 截图模式：先把选区钉在桌面（等同按图钉），遮罩退到幕后跑流水线，
+            # 翻译期间钉图窗做高斯模糊 + loading，终态（成功/拦截/失败）再收遮罩
+            pin = pinshot.pin(self._result_image(), self._global_sel().topLeft(),
+                              '#999999', self._cfg)
+        else:
+            # 钉图窗上点翻译：loading 同样做在钉图窗上，本编辑窗退到幕后
+            pin = self._pin_host
+        if pin is not None:
+            pin.set_translate_busy(True)
+        self._tl8n = {'state': 'checking', 'sel': QRect(self._sel), 'cancel': cancel,
                       'session': None, 'login_win': None, 'base': None, 'paragraphs': None,
-                      'translations': None, 'visible': False, 'layer': None}
-        self._tl8n_hint('shot.translate.preparing')
+                      'translations': None, 'visible': False, 'layer': None,
+                      'login': None, 'precheck_done': False, 'page': None,
+                      'ocr_result': None, 'pin': pin}
+        self._tl8n_hint('shot.translate.translating')
         self._update_tl8n_button()
+        if pin is not None:
+            if self._pin_mode:
+                pin.show()   # _edit_image 把钉图藏了；翻译期间露出来跑跑马灯
+            self.hide()
+        # 重活（底图拷贝、Edge 冷启动 1~2s）让到下一拍：点击后钉图与跑马灯立即渲染，
+        # 否则点击处理器同步阻塞 GUI，钉图窗连第一帧都画不出来（实测明显卡顿）
+        QTimer.singleShot(0, self._tl8n_kickoff)
+
+    def _tl8n_kickoff(self):
+        """翻译流水线启动（点击后下一拍）：OCR 与豆包登录态预检并行——
+        未登录 ~3s 直接退出引导不白等 OCR；已登录则 OCR 与页面加载重叠，
+        预检过的页面直接复用。"""
+        st = self._tl8n
+        if st is None or st.get('cancel') is None or st['cancel'].is_set():
+            return
         base = self._shot_base_image()
-        self._run_ocr_job(lambda: self._tl8n_ocr_work(base, cancel))
+        self._run_ocr_job(lambda: self._tl8n_ocr_work(base, st['cancel']))
+        page = self._make_page()
+        st['page'] = page
+        self._run_warm_job(lambda: self._tl8n_warm_work(page))
+
+    def _run_warm_job(self, job):
+        """Edge 连接预热放后台线程；测试注入同步替身。"""
+        threading.Thread(target=job, daemon=True).start()
+
+    def _tl8n_warm_work(self, page):
+        """headless Edge 冷启动 1~2s：attach/launch 在后台线程完成（_ensure 同步阻塞
+        调用线程），就绪后回主线程进登录态预检——此后 run_js 都是便宜的 WS 收发，
+        钉图窗的跑马灯动画全程不被冻。"""
+        try:
+            page.run_js('1', lambda _v: None)   # 触发 attach/launch
+        except Exception:
+            pass
+        self.sig_tl8n.emit('page_warm', page)
 
     def _run_ocr_job(self, job):
         """OCR/组件下载放后台线程；测试注入同步替身。"""
@@ -2265,7 +2487,7 @@ class ShotOverlay(QWidget):
                 self.sig_tl8n.emit('error', ocr_runtime.OcrRuntimeError(
                     'ocr component not installed'))
                 return
-            self.sig_tl8n.emit('progress', 'shot.translate.recognizing')
+            self.sig_tl8n.emit('progress', 'shot.translate.translating')
             self._tl8n['dpr'] = base.devicePixelRatio() or 1.0
             buf = QBuffer()
             buf.open(QIODevice.WriteOnly)
@@ -2282,13 +2504,26 @@ class ShotOverlay(QWidget):
         """流水线阶段通知（主线程）：更新状态机并驱动豆包翻译。"""
         st = self._tl8n
         if st is None:
+            if stage == 'page_warm':
+                payload.close()   # 遮罩已收，预热页别留孤儿
+            return
+        if stage == 'page_warm':
+            # Edge 预热完成：进登录态预检（取消态直接收页）
+            if st.get('cancel') is not None and st['cancel'].is_set():
+                payload.close()
+                return
+            self._check_login(payload, lambda result: self._on_login_state(result, payload))
             return
         if stage == 'error':
             if st.get('cancel') is not None and st['cancel'].is_set():
                 return
             st['state'] = 'error'
-            st.pop('msg', None)
-            self._tl8n_hint('shot.translate.failed')
+            key = self._tl8n_err_key(payload)
+            st['msg'] = key
+            if st.get('pin') is not None:
+                self._tl8n_pin_finish(key)
+                return
+            self._tl8n_hint(key)
             self._update_tl8n_button()
             return
         if stage == 'progress':
@@ -2299,10 +2534,54 @@ class ShotOverlay(QWidget):
             return
         if st['cancel'].is_set() or st['sel'] != self._sel:
             return
+        if st['login'] is False:
+            return   # 预检已判未登录，退出流程走过了
+        if st['login'] is None and not st['precheck_done']:
+            st['ocr_result'] = payload   # OCR 先完成：等预检结果再决定去向
+            return
+        self._tl8n_start_translate(payload)
+
+    def _make_page(self):
+        """登录预检用的 headless 页（测试注入假货）。"""
+        import doubao_web
+        return doubao_web.make_page(self)
+
+    def _check_login(self, page, cb):
+        import doubao_web
+        doubao_web.check_login(page, cb)
+
+    def _on_login_state(self, result, page):
+        """登录态预检结果：False → 退出截屏 + 登录引导；True → 复用已加载页面接着翻；
+        None（预检失败如断网）→ 等 OCR 完成后走完整 session 流程（会重新 load+probe）。"""
+        st = self._tl8n
+        if st is None:
+            page.close()   # 遮罩已关，预检页别留孤儿
+            return
+        if result is False:
+            st['login'] = False
+            page.close()
+            st['page'] = None
+            self._tl8n_show_login()
+            return
+        st['login'] = True if result else None
+        st['precheck_done'] = True
+        # 已登录（复用预检页）或预检失败（session 完整重走）都继续；OCR 先完成就在这接
+        if st.get('ocr_result') is not None:
+            payload = st.pop('ocr_result')
+            self._tl8n_start_translate(payload)
+
+    def _tl8n_start_translate(self, payload):
+        """OCR 完成且登录态可用：聚类 → 语言判断 → 建 session 翻译。"""
+        st = self._tl8n
+        if st is None or st['cancel'].is_set() or st['sel'] != self._sel:
+            return
         base, regions = payload
         if not regions:
             st['state'] = 'no_text'
             st.pop('msg', None)
+            if st.get('pin') is not None:
+                self._tl8n_pin_finish('shot.translate.no_text')
+                return
             self._tl8n_hint('shot.translate.no_text')
             self._update_tl8n_button()
             return
@@ -2312,6 +2591,9 @@ class ShotOverlay(QWidget):
         if not translation_core.should_translate(source, target):
             st['state'] = 'same_lang'
             st.pop('msg', None)
+            if st.get('pin') is not None:
+                self._tl8n_pin_finish('shot.translate.same_lang')
+                return
             self._tl8n_hint('shot.translate.same_lang')
             self._update_tl8n_button()
             return
@@ -2325,30 +2607,34 @@ class ShotOverlay(QWidget):
             session = self._make_translator()
         except Exception:
             st['state'] = 'error'
+            if st.get('pin') is not None:
+                self._tl8n_pin_finish('shot.translate.failed')
+                return
             self._tl8n_hint('shot.translate.failed')
             self._update_tl8n_button()
             return
         st['session'] = session
         session.on_login_required = self._tl8n_show_login
         session.translate([p.text for p in paras], target,
-                          self._tl8n_done, self._tl8n_error)
+                          self._tl8n_done, self._tl8n_error,
+                          preloaded=st['login'] is True)
 
     def _make_translator(self):
-        """生产豆包会话（延迟 import：WebEngine 到首次翻译才加载）。"""
+        """生产豆包会话：优先复用登录预检已加载的页（跳过一次 load）。"""
         import doubao_web
-        return doubao_web.DoubaoSession(doubao_web.make_page(self))
+        st = self._tl8n
+        page = (st or {}).get('page') or doubao_web.make_page(self)
+        return doubao_web.DoubaoSession(page)
 
     def _tl8n_show_login(self):
+        """豆包未登录/登录过期：退出截屏状态，弹引导窗让用户登录网页版豆包；
+        登录完成后由引导窗告知翻译可用（用户重新截图再翻）。"""
         st = self._tl8n
-        if st is None or st.get('session') is None:
+        if st is None:
             return
-        import doubao_web
-        st['msg'] = 'shot.translate.login_waiting'
-        self._update_tl8n_button()
-        st['login_win'] = doubao_web.open_login_window(
-            on_logged_in=st['session'].notify_logged_in,
-            on_aborted=lambda: self._tl8n_error(
-                doubao_web.DoubaoError('login cancelled')))
+        from translate_guide import show_login_guide
+        show_login_guide()   # 模块级持有：遮罩销毁后引导窗不被 GC（一闪而过修复）
+        self._close()   # _cancel_tl8n 会连 session/headless 工人一起收
 
     def _tl8n_done(self, texts):
         st = self._tl8n
@@ -2397,9 +2683,22 @@ class ShotOverlay(QWidget):
         """后台构建好的图层回填（已在主线程）。选区已变则丢弃。"""
         sel, layer = payload
         st = self._tl8n
-        if st is None or layer is None:
+        if st is None:
+            return
+        pin = st.get('pin')
+        if layer is None:
+            if pin is not None:
+                self._tl8n_pin_finish('shot.translate.failed')
             return
         if st.get('sel') != sel or st.get('sel') != self._sel:
+            return
+        if pin is not None:
+            st['pin'] = None
+            try:
+                pin.finish_translate(layer)
+            except RuntimeError:
+                pass
+            self._close()   # 译文已推给钉图窗，幕后遮罩退场
             return
         st['layer'] = layer
         self.update()
@@ -2427,15 +2726,28 @@ class ShotOverlay(QWidget):
         st['layer'] = layer
         return layer
 
+    def _tl8n_err_key(self, err):
+        """异常 → 具体失败原因词典键（气泡直接告诉用户哪一步挂了）。"""
+        return {'DoubaoNetworkError': 'shot.translate.err_network',
+                'DoubaoTimeout': 'shot.translate.err_timeout',
+                'DoubaoReplyError': 'shot.translate.err_reply',
+                'DoubaoStructureChanged': 'shot.translate.structure_changed',
+                'DoubaoLoginCancelled': 'shot.translate.login_aborted',
+                'OcrRuntimeError': 'shot.translate.err_ocr',
+                'OcrTimeout': 'shot.translate.err_ocr',
+                'OcrDownloadError': 'shot.translate.err_ocr',
+                }.get(type(err).__name__, 'shot.translate.failed')
+
     def _tl8n_error(self, err):
         st = self._tl8n
         if st is None or st['cancel'].is_set():
             return
         st['state'] = 'error'
-        key = ('shot.translate.structure_changed'
-               if type(err).__name__ == 'DoubaoStructureChanged'
-               else 'shot.translate.failed')
+        key = self._tl8n_err_key(err)
         st['msg'] = key
+        if st.get('pin') is not None:
+            self._tl8n_pin_finish(key)
+            return
         self._tl8n_hint(key)
         self._update_tl8n_button()
 
@@ -2444,7 +2756,7 @@ class ShotOverlay(QWidget):
         if btn is None:
             return
         st = self._tl8n
-        busy = st is not None and st['state'] in ('preparing', 'ocr', 'translating')
+        busy = st is not None and st['state'] in ('checking', 'preparing', 'ocr', 'translating')
         on = (st is not None and st['state'] == 'ready' and st.get('visible'))
         btn.setEnabled(not busy)
         btn.setProperty('on', 'true' if on else 'false')
@@ -2465,8 +2777,9 @@ class ShotOverlay(QWidget):
         # 翻译状态气泡：贴主工具条上方；进行中/失败/提示态显示，空闲与就绪隐藏
         lb = self.tl8n_label
         st = self._tl8n
-        keys = {'preparing': 'shot.translate.preparing',
-                'ocr': 'shot.translate.recognizing',
+        keys = {'checking': 'shot.translate.translating',
+                'preparing': 'shot.translate.translating',
+                'ocr': 'shot.translate.translating',
                 'translating': 'shot.translate.translating',
                 'no_text': 'shot.translate.no_text',
                 'same_lang': 'shot.translate.same_lang',
@@ -2489,6 +2802,9 @@ class ShotOverlay(QWidget):
 
     def _tl8n_hint(self, key):
         """翻译状态提示：浮在翻译按钮上方的气泡，不打断操作流程。"""
+        st = self._tl8n
+        if st is not None and st.get('pin') is not None:
+            return   # 钉图委托态：提示走 _tl8n_pin_finish，按钮气泡没意义
         btn = self._toolbar_btns.get('translate')
         if btn is not None:
             QToolTip.showText(btn.mapToGlobal(QPoint(0, -6)), t(key), btn)
@@ -2616,6 +2932,9 @@ class ShotOverlay(QWidget):
             self._stop_long(save=False)
         self.finished.emit()
         self.close()
+        from shiboken6 import isValid   # 从未显示过的窗口 close 不销毁（Qt 怪癖），兜底删
+        if isValid(self):
+            self.deleteLater()
 
     # ---------- 截长图 ----------
 
@@ -2872,10 +3191,13 @@ class HotkeyManager(object):
 _active = []   # 进行中的会话：防止热键连按叠第二个遮罩
 
 
-def start_pin_edit(cfg, image, pos, tool=None):
+def start_pin_edit(cfg, image, pos, tool=None, pin_host=None):
     """在钉图原位打开复用截图标注能力的编辑窗。"""
-    o = ShotOverlay(cfg, pin_image=image, pin_pos=pos, initial_tool=tool)
+    o = ShotOverlay(cfg, pin_image=image, pin_pos=pos, initial_tool=tool,
+                    pin_host=pin_host)
     o.show()
+    if (o._tl8n or {}).get('pin') is not None:
+        o.hide()   # 翻译委托态编辑窗不露面；先 show 过一次，close 才会销毁（Qt 怪癖）
     return o
 
 
@@ -2887,6 +3209,7 @@ def start_session(cfg):
             if prev.isVisible() or prev._long is not None:
                 prev._cancel()   # 截图中再按热键 = 退出截图（热键走线程消息队列，
                 return None      # 即便遮罩输入被模态挡住，nativeEventFilter 照样能收到）
+            prev._cancel()   # 幕后跑翻译的遮罩：停掉流水线（钉图还原）再放行新会话
         except RuntimeError:
             pass
     # 应用级模态弹窗（exec() 的 QDialog：cookie 引导 / 关于 / 传输与视频说明窗等）

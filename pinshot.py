@@ -2,10 +2,11 @@
 """钉图：把截图钉在桌面上的无边框贴图窗（Snipaste F3 / QQ 钉在桌面同款）。
 点击/拖拽显示截图工具条、拖拽移动、滚轮等比缩放、双击关闭；置顶 Tool 窗——故意不挂桌面带（挂带会被应用窗口压住，
 贴图的意义就是浮在最上面随时对照）；不持久化，进程退出即消失。"""
+import math
 from datetime import datetime
 
-from PySide6.QtCore import QEvent, Qt
-from PySide6.QtGui import QPainter, QColor, QPen
+from PySide6.QtCore import QEvent, QRectF, Qt, QTimer
+from PySide6.QtGui import QPainter, QColor, QImage, QPen
 from PySide6.QtWidgets import QApplication, QFileDialog, QWidget
 
 from i18n import t
@@ -36,6 +37,13 @@ class PinWindow(QWidget):
         self._toolbar_btns = {}
         self._editor = None
         self._closing = False
+        self._tl8n_busy = False     # 翻译中：沿边框跑淡蓝色跑马灯
+        self._tl8n_pair = None      # (原图, 译文图)：工具条翻译键切换
+        self._mq_phase = 0.0
+        self._mq_timer = QTimer(self)
+        self._mq_timer.setInterval(50)           # 与 GlowCard 同节奏（约 2.5s 一圈）
+        self._mq_timer.timeout.connect(self._mq_tick)
+        self._mq_poly = None        # 边框折线缓存：(尺寸键, 线段表, 周长)
         self._filter_installed = False
         app = QApplication.instance()
         if app is not None:
@@ -46,10 +54,97 @@ class PinWindow(QWidget):
         if self in _pins:
             _pins.remove(self)
 
+    def set_translate_busy(self, on):
+        """翻译进行中：沿窗口边框跑淡蓝色跑马灯（画面本体不动）。"""
+        if on:
+            if self._tl8n_busy:
+                return
+            self._tl8n_busy = True
+            self._mq_timer.start()
+        else:
+            self._tl8n_busy = False
+            self._mq_timer.stop()
+        self.update()
+
+    def _mq_tick(self):
+        self._mq_phase = (self._mq_phase + 0.025) % 1.0
+        self.update()
+
+    _MQ_PENS = None   # 60 档淡蓝 QPen 类级缓存：亮度沿周长余弦起伏成追跑光带
+
+    @classmethod
+    def _marquee_pens(cls):
+        if cls._MQ_PENS is None:
+            cls._MQ_PENS = [QPen(QColor.fromHsv(214, 165,  # 对齐视频卡呼吸灯的淡蓝色相
+                                                int(90 + 165 * (0.5 + 0.5 * math.cos(
+                                                    2 * math.pi * i / 60.0)))),
+                                 3, Qt.SolidLine, Qt.RoundCap)
+                            for i in range(60)]
+        return cls._MQ_PENS
+
+    def _marquee_segments(self):
+        """窗口边框的折线段 + 各段起点累计周长（尺寸不变时缓存）。"""
+        key = (self.width(), self.height())
+        if self._mq_poly is None or self._mq_poly[0] != key:
+            r = QRectF(self.rect()).adjusted(2, 2, -3, -3)
+            pts = [r.topLeft(), r.topRight(), r.bottomRight(), r.bottomLeft(),
+                   r.topLeft()]
+            segs = []
+            acc = 0.0
+            for i in range(4):
+                a, b = pts[i], pts[i + 1]
+                seg_len = math.hypot(b.x() - a.x(), b.y() - a.y())
+                n = max(1, int(seg_len / 6))   # 6px 一段，光带才能沿边连续流动
+                for k in range(n):
+                    t0, t1 = k / n, (k + 1) / n
+                    segs.append((acc + seg_len * t0,
+                                 a + (b - a) * t0, a + (b - a) * t1))
+                acc += seg_len
+            self._mq_poly = (key, segs, acc)
+        return self._mq_poly[1], self._mq_poly[2]
+
+    def _paint_marquee(self, p):
+        """沿边框逐段取色：「累计周长位置 - 相位」映射到淡蓝亮度档，相位推进即追跑。"""
+        segs, total = self._marquee_segments()
+        if not total:
+            return
+        pens = self._marquee_pens()
+        for start, a, b in segs:
+            frac = ((start / total) - self._mq_phase) % 1.0
+            p.setPen(pens[int(frac * 60) % 60])
+            p.drawLine(a, b)
+
+    def finish_translate(self, layer):
+        """翻译成功：译文图层压到图上（保留原图，工具条翻译键可切回原文）。"""
+        img = QImage(self._img)
+        p = QPainter(img)
+        p.drawImage(0, 0, layer)
+        p.end()
+        self._tl8n_pair = (self._img, img)
+        self._img = img
+        self.set_translate_busy(False)
+
+    def _translate_clicked(self):
+        """工具条翻译键：已有译文 = 切换原文/译文；否则进编辑窗跑翻译。"""
+        if self._tl8n_pair is not None:
+            orig, translated = self._tl8n_pair
+            self._img = translated if self._img is orig else orig
+            btn = self._toolbar_btns.get('translate')
+            if btn is not None:
+                btn.setToolTip(t('shot.translate.show_original'
+                                 if self._img is translated
+                                 else 'shot.translate.show_translation'))
+            self.update()
+            return
+        self._edit_image('translate')
+
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.SmoothPixmapTransform)   # 滚轮缩放后重采样不发虚
         p.drawImage(self.rect(), self._img)
+        if self._tl8n_busy:
+            p.setRenderHint(QPainter.Antialiasing)
+            self._paint_marquee(p)
         p.setPen(QPen(self._border, 1))
         p.drawRect(self.rect().adjusted(0, 0, -1, -1))
         p.end()
@@ -121,15 +216,17 @@ class PinWindow(QWidget):
             'rect': lambda: self._edit_image('rect'),
             'ellipse': lambda: self._edit_image('ellipse'),
             'arrow': lambda: self._edit_image('arrow'),
+            'pen': lambda: self._edit_image('pen'),
             'text': lambda: self._edit_image('text'),
+            'mosaic': lambda: self._edit_image('mosaic'),
             'marker': lambda: self._edit_image('marker'),
-            'translate': lambda: self._edit_image('translate'),
+            'translate': self._translate_clicked,
             'save': self._save_image,
             'close': self._hide_toolbar,
             'confirm': self._copy_image,
         }
         self._toolbar, self._toolbar_btns = make_shot_toolbar(
-            self, self._cfg, callbacks, exclude=PIN_TOOLBAR_EXCLUDED)
+            self, self._cfg, callbacks, exclude=PIN_TOOLBAR_EXCLUDED | {'undo'})
         self._toolbar.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint
                                      | Qt.WindowStaysOnTopHint)
         self._toolbar.setAttribute(Qt.WA_ShowWithoutActivating)
@@ -173,12 +270,15 @@ class PinWindow(QWidget):
         from screenshot import start_pin_edit
 
         self._hide_toolbar()
-        self._editor = start_pin_edit(self._cfg, self._img, self.pos(), tool)
+        self._editor = start_pin_edit(self._cfg, self._img, self.pos(), tool,
+                                      pin_host=self)
         self._editor.pin_result.connect(self._apply_edited_image)
         self._editor.destroyed.connect(self._editor_closed)
-        self.hide()
+        if (self._editor._tl8n or {}).get('pin') is not self:
+            self.hide()   # 翻译委托态：钉图要露出来做 loading，不藏
 
     def _apply_edited_image(self, image):
+        self._tl8n_pair = None   # 编辑后译文对应的是旧图，作废
         self._img = image
         dpr = image.devicePixelRatio() or 1.0
         self._base_w = max(1, int(round(image.width() / dpr)))
