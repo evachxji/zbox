@@ -165,7 +165,7 @@ class DoubaoLoginGuideDialog(QDialog):
         lay.setContentsMargins(20, 18, 20, 16)
         lay.setSpacing(12)
         self.state_label = QLabel(t('shot.login.guide.desc'))
-        self.state_label.setObjectName('setLabel')
+        self.state_label.setObjectName('loginGuideText')   # 高亮白字，更显眼
         self.state_label.setWordWrap(True)
         lay.addWidget(self.state_label)
 

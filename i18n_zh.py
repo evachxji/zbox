@@ -470,7 +470,7 @@ CATALOG = {
     'shot.login.guide.desc': '仅首次翻译需要登录网页版豆包一次，之后翻译无需再登录。识别出的文字会发送至豆包，截图不会上传。',
     'shot.login.guide.open': '打开登录窗口',
     'shot.login.guide.waiting': '等待登录完成…（登录成功后本窗会自动更新）',
-    'shot.login.guide.done': '✓ 登录成功，翻译功能已可用，请重新截图后再点翻译',
+    'shot.login.guide.done': '✓ 登录成功，翻译功能已可用，请再次点击翻译按钮',
     'shot.translate.unsupported': '当前系统架构不支持翻译',
     'shot.translate.structure_changed': '豆包页面已更新，请等待版本适配',
     'shot.translate.no_edge': '未检测到 Microsoft Edge 浏览器，翻译不可用',

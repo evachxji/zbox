@@ -117,6 +117,7 @@ QWidget#settingsPanel {
 }
 QLabel#setTitle { color: #f0ede6; font: 600 13px "%CN%"; }
 QLabel#setLabel { color: #6d6a62; font: 12px "%CN%"; }
+QLabel#loginGuideText { color: #ffffff; font: 600 13px "%CN%"; }
 QLabel#setUrl {
     color: #e8a33d; background: rgba(255,255,255,16); border-radius: 6px;
     font: 11px "%NUM%"; padding: 5px 8px;
@@ -469,6 +470,7 @@ QWidget#settingsPanel {
 }
 QLabel#setTitle { color: #1b1b1f; font: 600 13px "%CN%"; }
 QLabel#setLabel { color: #8a8a90; font: 12px "%CN%"; }
+QLabel#loginGuideText { color: #1a1c20; font: 600 13px "%CN%"; }
 QLabel#setUrl {
     color: #0067c0; background: rgba(0,0,0,6); border-radius: 6px;
     font: 11px "%NUM%"; padding: 5px 8px;

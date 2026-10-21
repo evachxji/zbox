@@ -323,12 +323,13 @@ class EdgePage(object):
     进程断了（被 kill_owned 收掉等）下次调用自动重连/重启，对上层透明。"""
 
     def __init__(self, headless=True, profile_dir=None, launcher=None,
-                 conn_factory=None, target_factory=None):
+                 conn_factory=None, target_factory=None, cookie_provider=None):
         self._headless = headless
         self._profile = profile_dir
         self._launcher = launcher or attach_or_launch
         self._conn_factory = conn_factory or CdpConnection
         self._target_factory = target_factory or _create_target
+        self._cookie_provider = cookie_provider   # () -> list[dict]|None，见 doubao_web
         self._conn = None
         self._proc = None
         self._target = None
@@ -341,6 +342,15 @@ class EdgePage(object):
         self._proc = proc
         self._target, ws_url = self._target_factory(port)
         self._conn = self._conn_factory(ws_url)
+        if self._cookie_provider is not None:
+            try:
+                cookies = self._cookie_provider()
+            except Exception:
+                cookies = None
+            if cookies:
+                # WS 发送有序：先 setCookies 后 navigate，恢复先于页面加载生效
+                self._conn.send('Network.setCookies', {'cookies': cookies},
+                                lambda _m: None)
 
     def _teardown_conn(self):
         if self._conn is not None:
@@ -398,6 +408,23 @@ class EdgePage(object):
         self._conn.send('Runtime.evaluate',
                         {'expression': script, 'returnByValue': True,
                          'awaitPromise': True}, _on_resp)
+
+    def get_cookies(self, urls, cb):
+        """cb(list[dict] | None)：指定 URL 命中的 cookie 快照（含 session cookie）。
+        Chromium 不把 session cookie 写盘，登录态要持久化只能靠这个抓下来自己存。"""
+        try:
+            self._ensure()
+        except EdgeUnavailableError:
+            cb(None)
+            return
+
+        def _on(msg):
+            if 'error' in msg:
+                cb(None)
+                return
+            cb((msg.get('result') or {}).get('cookies'))
+
+        self._conn.send('Network.getCookies', {'urls': urls}, _on)
 
     def alive(self):
         """页面还活着吗：连接断开（标签页/窗口被关）或我们拉起的进程退出都算死。"""

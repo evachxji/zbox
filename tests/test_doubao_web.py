@@ -242,6 +242,7 @@ class _LoginFakePage(object):
         self.closed = False
         self._alive = True
         self._proc = None   # 无进程对象：跳过抢前台逻辑
+        self.cookies_to_serve = None
 
     def load(self, url, cb):
         cb(self.load_ok)
@@ -260,6 +261,9 @@ class _LoginFakePage(object):
 
     def close(self):
         self.closed = True
+
+    def get_cookies(self, urls, cb):
+        cb(self.cookies_to_serve)
 
 
 class LoginWindowDedupTest(unittest.TestCase):
@@ -306,6 +310,103 @@ class LoginWindowDedupTest(unittest.TestCase):
         w2 = self._open(pages, events, 'b')
         self.assertIsNot(w1, w2)
         self.assertEqual(len(pages), 2)
+
+
+class CookieJarTest(unittest.TestCase):
+    # session cookie 本地罐：登录成功时抓进 DPAPI 加密文件，下次启动 Edge 恢复
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix='zbox_jar_')
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.jar = os.path.join(self.tmp, 'edge_cookies.bin')
+
+    def _entry(self, **kw):
+        base = {'name': 'sessionid', 'value': 'abc', 'domain': '.doubao.com',
+                'path': '/', 'secure': True, 'httpOnly': True, 'session': True}
+        base.update(kw)
+        return base
+
+    def test_roundtrip_session_cookie_kept_and_expires_dropped(self):
+        dw._save_cookie_jar([self._entry()], path=self.jar)
+        jar = dw._load_cookie_jar(path=self.jar)
+        self.assertEqual(len(jar), 1)
+        c = jar[0]
+        self.assertEqual(c['name'], 'sessionid')
+        self.assertEqual(c['value'], 'abc')
+        self.assertNotIn('expires', c)   # session cookie 恢复时不带 expires
+        self.assertTrue(c['httpOnly'])
+
+    def test_non_doubao_cookies_filtered_out(self):
+        dw._save_cookie_jar([self._entry(),
+                             self._entry(name='x', domain='.example.com')],
+                            path=self.jar)
+        jar = dw._load_cookie_jar(path=self.jar)
+        self.assertEqual([c['name'] for c in jar], ['sessionid'])
+
+    def test_expired_persistent_cookie_dropped(self):
+        import time
+        dw._save_cookie_jar(
+            [self._entry(session=False, expires=time.time() - 10),
+             self._entry(name='keep', session=False, expires=time.time() + 86400)],
+            path=self.jar)
+        jar = dw._load_cookie_jar(path=self.jar)
+        self.assertEqual([c['name'] for c in jar], ['keep'])
+        self.assertGreater(jar[0]['expires'], 0)
+
+    def test_missing_or_corrupt_jar_returns_none(self):
+        self.assertIsNone(dw._load_cookie_jar(path=self.jar))
+        with open(self.jar, 'wb') as f:
+            f.write(b'junk')
+        self.assertIsNone(dw._load_cookie_jar(path=self.jar))
+
+    def test_jar_file_is_not_plaintext(self):
+        dw._save_cookie_jar([self._entry()], path=self.jar)
+        raw = open(self.jar, 'rb').read()
+        self.assertNotIn(b'abc', raw)   # DPAPI 加密（或至少不是明文 json）
+
+
+class LoginWindowCookieDumpTest(unittest.TestCase):
+    # 登录成功时把 cookie 抓进本地罐（含 session cookie），放弃/失败不抓
+
+    def setUp(self):
+        import os as _os
+        _os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+        from PySide6.QtWidgets import QApplication
+        self.qapp = QApplication.instance() or QApplication([])
+        self.tmp = tempfile.mkdtemp(prefix='zbox_jar_')
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.jar = os.path.join(self.tmp, 'edge_cookies.bin')
+        self._orig = dw._cookies_file
+        dw._cookies_file = lambda: self.jar
+        self.addCleanup(setattr, dw, '_cookies_file', self._orig)
+
+    def _make(self, collects, cookies=None, load_ok=True):
+        page = _LoginFakePage(collects, load_ok=load_ok)
+        page.cookies_to_serve = cookies
+        events = []
+        with patch('edge_driver.kill_profile_instances'), \
+             patch('edge_driver.EdgePage', lambda **kw: page):
+            win = dw.DoubaoLoginWindow(
+                on_logged_in=lambda: events.append('login'),
+                on_aborted=lambda: events.append('abort'),
+                timer=immediate_timer)
+        return win, events
+
+    def test_login_success_dumps_cookies_to_jar(self):
+        ok = json.dumps({'settled': True, 'logged_in': True, 'input': True})
+        jar_cookies = [{'name': 'sessionid', 'value': 'abc', 'domain': '.doubao.com',
+                        'path': '/', 'secure': True, 'httpOnly': True,
+                        'session': True}]
+        win, events = self._make([ok], cookies=jar_cookies)
+        self.assertEqual(events, ['login'])
+        jar = dw._load_cookie_jar(path=self.jar)
+        self.assertIsNotNone(jar)
+        self.assertEqual(jar[0]['name'], 'sessionid')
+
+    def test_abort_does_not_dump(self):
+        win, events = self._make([], cookies=None, load_ok=False)
+        self.assertEqual(events, ['abort'])
+        self.assertIsNone(dw._load_cookie_jar(path=self.jar))
 
 
 class LoginWindowTest(unittest.TestCase):

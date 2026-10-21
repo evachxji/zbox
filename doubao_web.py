@@ -11,6 +11,7 @@
 WebPage / DoubaoLoginDialog 是 Qt WebEngine 实现，延迟到功能启用时才 import。
 """
 
+import ctypes
 import json
 import os
 import shutil
@@ -71,6 +72,104 @@ def clear_profile():
     shutil.rmtree(profile_dir(), ignore_errors=True)
     shutil.rmtree(os.path.join(sysutil.appdata_dir(), 'doubao_profile'),
                   ignore_errors=True)
+    try:
+        os.remove(_cookies_file())
+    except OSError:
+        pass
+
+
+# ---------------- 登录态 cookie 罐 ----------------
+# Chromium 不把 session cookie 写盘（实测：登录后 Cookies DB 仍是空壳，
+# Edge 全关再开登录态就丢）。登录成功时经 CDP 把内存里的 cookie 抓进
+# 本地罐（DPAPI 加密），每次启动 Edge 连接后、页面加载前恢复。
+
+def _cookies_file():
+    import sysutil
+    return os.path.join(sysutil.appdata_dir(), 'edge_cookies.bin')
+
+
+class _Blob(ctypes.Structure):
+    _fields_ = [('cbData', ctypes.c_ulong),
+                ('pbData', ctypes.POINTER(ctypes.c_byte))]
+
+
+def _dpapi(raw, protect):
+    """Windows DPAPI 加/解密（仅当前用户可解）；失败返回 None。"""
+    try:
+        crypt32 = ctypes.windll.crypt32
+        blob_p = ctypes.POINTER(_Blob)
+        for fn_name in ('CryptProtectData', 'CryptUnprotectData'):
+            fn = getattr(crypt32, fn_name)
+            fn.argtypes = [blob_p, ctypes.c_wchar_p, blob_p,
+                           ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong, blob_p]
+            fn.restype = ctypes.c_int
+        buf = ctypes.create_string_buffer(raw, len(raw))
+        ib = _Blob(len(raw), ctypes.cast(buf, ctypes.POINTER(ctypes.c_byte)))
+        ob = _Blob()
+        fn = crypt32.CryptProtectData if protect else crypt32.CryptUnprotectData
+        if not fn(ctypes.byref(ib), None, None, None, None, 0, ctypes.byref(ob)):
+            return None
+        try:
+            return ctypes.string_at(ob.pbData, ob.cbData)
+        finally:
+            ctypes.windll.kernel32.LocalFree(ctypes.cast(ob.pbData, ctypes.c_void_p))
+    except Exception:
+        return None
+
+
+def _jar_entry(c):
+    """CDP cookie dict → 可恢复的最简 CookieParam；已过期的丢弃（None），
+    session cookie 恢复时不带 expires。"""
+    import time
+    exp = c.get('expires')
+    if not c.get('session') and exp and exp <= time.time():
+        return None   # 已过期的持久 cookie 直接丢
+    e = {'name': c['name'], 'value': c['value'], 'domain': c.get('domain', ''),
+         'path': c.get('path', '/'), 'secure': bool(c.get('secure')),
+         'httpOnly': bool(c.get('httpOnly'))}
+    ss = c.get('sameSite')
+    if ss in ('Lax', 'Strict', 'None'):
+        e['sameSite'] = ss
+    if not c.get('session') and exp:
+        e['expires'] = exp
+    return e
+
+
+def _save_cookie_jar(cookies, path=None):
+    """把豆包域 cookie 写进本地罐（DPAPI 加密；加密失败不存，宁可重新登录）。"""
+    jar = [e for e in (_jar_entry(c) for c in cookies
+                       if (c.get('domain') or '').endswith('.doubao.com')
+                       or c.get('domain') == 'doubao.com')
+           if e is not None]
+    if not jar:
+        return
+    blob = _dpapi(json.dumps(jar).encode('utf-8'), True)
+    if blob is None:
+        return
+    try:
+        with open(path or _cookies_file(), 'wb') as f:
+            f.write(b'DP1\n' + blob)
+    except OSError:
+        pass
+
+
+def _load_cookie_jar(path=None):
+    """读本地罐 → list[CookieParam]；没有/损坏/解密失败 → None。"""
+    try:
+        with open(path or _cookies_file(), 'rb') as f:
+            raw = f.read()
+        if not raw.startswith(b'DP1\n'):
+            return None
+        data = _dpapi(raw[4:], False)
+        if data is None:
+            return None
+        jar = json.loads(data.decode('utf-8'))
+        return jar if isinstance(jar, list) and jar else None
+    except Exception:
+        return None
+
+
+_DOUBAO_COOKIE_URLS = ['https://www.doubao.com/', 'https://accounts.doubao.com/']
 
 
 # ---------------- JS 构建 ----------------
@@ -390,7 +489,8 @@ def _gui_dispatcher():
 def make_page(parent=None):
     """生产 page：headless Edge 标签页，回调经 dispatcher 转回 GUI 线程。"""
     dispatcher = _gui_dispatcher()
-    edge_page = edge_driver.EdgePage(headless=True, profile_dir=profile_dir())
+    edge_page = edge_driver.EdgePage(headless=True, profile_dir=profile_dir(),
+                                     cookie_provider=_load_cookie_jar)
 
     class _Page(object):
         def load(self, url, cb):
@@ -457,7 +557,8 @@ class DoubaoLoginWindow(object):
         # 清掉本 profile 的所有实例（含父进程死后残留的 headless——attach 分不出
         # 有头无头，连上残留 headless 登录窗就"隐形"了），再开有头窗口
         edge_driver.kill_profile_instances(profile_dir())
-        self._page = edge_driver.EdgePage(headless=False, profile_dir=profile_dir())
+        self._page = edge_driver.EdgePage(headless=False, profile_dir=profile_dir(),
+                                          cookie_provider=_load_cookie_jar)
         self._phase = 'start'
         self._page.load(CHAT_URL, self._post(self._on_loaded))
         if self._page._proc is not None:
@@ -529,6 +630,17 @@ class DoubaoLoginWindow(object):
         global _active_login
         if _active_login is self:
             _active_login = None
+        get_ck = getattr(self._page, 'get_cookies', None)
+        if logged_in and get_ck is not None:
+            # session cookie 不落盘（Chromium 不持久化）：先抓进本地罐再关窗
+            get_ck(_DOUBAO_COOKIE_URLS,
+                   lambda cs: self._finish_close(logged_in, cs))
+            return
+        self._finish_close(logged_in, None)
+
+    def _finish_close(self, logged_in, cookies):
+        if cookies:
+            _save_cookie_jar(cookies)
         self._page.close()
         cbs = self._cbs_ok if logged_in else self._cbs_abort
         for cb in cbs:

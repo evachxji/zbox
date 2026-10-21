@@ -493,7 +493,7 @@ CATALOG = {
     'shot.login.guide.desc': 'Only the first translation requires signing in to Doubao web once; later translations skip sign-in entirely. Only the recognized text is sent to Doubao; the screenshot never leaves this device.',
     'shot.login.guide.open': 'Open sign-in window',
     'shot.login.guide.waiting': 'Waiting for sign-in... (this window updates automatically when done)',
-    'shot.login.guide.done': '\u2713 Signed in - translation is ready. Capture again and click Translate',
+    'shot.login.guide.done': '\u2713 Signed in - translation is ready. Click Translate again.',
     'shot.translate.unsupported': 'Translation is not supported on this architecture',
     'shot.translate.structure_changed': 'Doubao page has changed; please wait for an app update',
     'shot.translate.no_edge': 'Microsoft Edge was not found; translation is unavailable',
