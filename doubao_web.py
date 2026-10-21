@@ -78,11 +78,20 @@ def clear_profile():
 def build_probe_js():
     """启动登录态探测：fetch 是异步的，结果落地 window.__zbox_login
     （Qt runJavaScript 不等待 Promise 解析，实测回调拿到空——必须分两步）。
-    注意接口对匿名也返回 200：必须解析响应体 code===0 才算已登录。"""
+    2026-10 起 /alice/profile/self 只认 POST（GET 已 404，实测），且 body 必须带
+    visit_id=localStorage.flow_tea_user_id——空 visit_id 即使已登录也报
+    710010202「系统错误」（实测）。接口对匿名也返回 200（code=710010202），
+    必须解析响应体 code===0 才算已登录。"""
     return TAG_PROBE + """
 (() => {
   window.__zbox_login = null;
-  fetch('/alice/profile/self', {credentials: 'include'})
+  fetch('/alice/profile/self?version_code=20800&language=zh&device_platform=web'
+        + '&doubao_device_platform=web&aid=497858&real_aid=497858&pkg_type=release_version', {
+    method: 'POST', credentials: 'include',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({visit_id: localStorage.getItem('flow_tea_user_id') || '',
+                          avatar_format: 'png'}),
+  })
     .then(async r => {
       let logged = false;
       try { logged = (await r.json()).code === 0; } catch (e) {}
@@ -439,8 +448,8 @@ class DoubaoLoginWindow(object):
     POLL_MS = 2000
 
     def __init__(self, on_logged_in, on_aborted=None, timer=None):
-        self._on_logged_in = on_logged_in
-        self._on_aborted = on_aborted
+        self._cbs_ok = [on_logged_in]
+        self._cbs_abort = [on_aborted] if on_aborted is not None else []
         self._timer = timer or DoubaoSession._qt_timer
         self._done = False
         self._empty = 0
@@ -501,21 +510,48 @@ class DoubaoLoginWindow(object):
                 self._phase = 'start'
         self._next()
 
+    def add_callbacks(self, on_logged_in, on_aborted=None):
+        """去重复用存活窗口时，把新调用方的回调挂上来。"""
+        self._cbs_ok.append(on_logged_in)
+        if on_aborted is not None:
+            self._cbs_abort.append(on_aborted)
+
+    def bring_to_front(self):
+        """把已开的登录窗重新抢到前台（去重命中时用户可能在找它）。"""
+        if self._page._proc is not None:
+            threading.Thread(target=edge_driver.bring_window_to_front,
+                             args=(self._page._proc.pid,), daemon=True).start()
+
     def _finish(self, logged_in):
         if self._done:
             return
         self._done = True
+        global _active_login
+        if _active_login is self:
+            _active_login = None
         self._page.close()
-        if logged_in:
-            self._on_logged_in()
-        elif self._on_aborted is not None:
-            self._on_aborted()
+        cbs = self._cbs_ok if logged_in else self._cbs_abort
+        for cb in cbs:
+            cb()
 
     def close(self):
         """外部取消（截图窗已关等）：关窗且不回调登录成功。"""
         self._finish(False)
 
 
-def open_login_window(on_logged_in, on_aborted=None):
-    """截图翻译的登录入口：有头 Edge 登录窗控制器（非 Qt 窗口）。"""
-    return DoubaoLoginWindow(on_logged_in, on_aborted)
+_active_login = None
+
+
+def open_login_window(on_logged_in, on_aborted=None, timer=None):
+    """截图翻译的登录入口：有头 Edge 登录窗控制器（非 Qt 窗口）。
+    已有存活登录窗时不重复开（用户连点也不会开一排 Edge）：
+    把既有窗口抢到前台，回调挂到它上面一起通知。"""
+    global _active_login
+    win = _active_login
+    if win is not None and not win._done and win._page.alive():
+        win.add_callbacks(on_logged_in, on_aborted)
+        win.bring_to_front()
+        return win
+    win = DoubaoLoginWindow(on_logged_in, on_aborted, timer=timer)
+    _active_login = win
+    return win

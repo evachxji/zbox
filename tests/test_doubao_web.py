@@ -61,6 +61,15 @@ class PureJsTest(unittest.TestCase):
         self.assertIn(dw.TAG_PROBE, js)
         self.assertIn('/alice/profile/self', js)
 
+    def test_probe_js_posts_with_visit_id(self):
+        # 2026-10 起 /alice/profile/self 只认 POST（GET 404，实测），
+        # 且 body 必须带 visit_id=localStorage.flow_tea_user_id——
+        # 空 visit_id 即使已登录也报 710010202（实测）
+        js = dw.build_probe_js()
+        self.assertIn("method: 'POST'", js)
+        self.assertIn('flow_tea_user_id', js)
+        self.assertIn('visit_id', js)
+
     def test_collect_js_evaluates_selectors(self):
         js = dw.build_probe_collect_js()
         self.assertIn('chat_input', js)
@@ -251,6 +260,52 @@ class _LoginFakePage(object):
 
     def close(self):
         self.closed = True
+
+
+class LoginWindowDedupTest(unittest.TestCase):
+    # open_login_window 去重：已有存活登录窗时不重复开，回调挂到既有窗口
+
+    def setUp(self):
+        import os as _os
+        _os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+        from PySide6.QtWidgets import QApplication
+        self.qapp = QApplication.instance() or QApplication([])
+        dw._active_login = None
+        self.addCleanup(setattr, dw, '_active_login', None)
+
+    def _open(self, pages, events, tag, collects=None, timer=None):
+        with patch('edge_driver.kill_profile_instances'),              patch('edge_driver.EdgePage',
+                   lambda **kw: pages.append(_LoginFakePage(collects or [])) or pages[-1]):
+            return dw.open_login_window(
+                on_logged_in=lambda: events.append(tag + ':login'),
+                on_aborted=lambda: events.append(tag + ':abort'),
+                timer=timer or immediate_timer)
+
+    def test_second_open_reuses_alive_window(self):
+        pages, events = [], []
+        w1 = self._open(pages, events, 'a')
+        w2 = self._open(pages, events, 'b')
+        self.assertIs(w1, w2)
+        self.assertEqual(len(pages), 1)   # 没开第二个 Edge 窗口
+
+    def test_reused_window_notifies_all_callers(self):
+        pages, events = [], []
+        timer, tasks = queued_timer()   # 队列定时器：w2 挂上后才推进轮询
+        ok = json.dumps({'settled': True, 'logged_in': True, 'input': True})
+        w1 = self._open(pages, events, 'a', collects=[ok], timer=timer)
+        w2 = self._open(pages, events, 'b')
+        self.assertIs(w1, w2)
+        tasks.pop(0)()   # start
+        tasks.pop(0)()   # collect -> 已登录，两家回调都通知
+        self.assertEqual(sorted(events), ['a:login', 'b:login'])
+
+    def test_open_after_window_closed_creates_new(self):
+        pages, events = [], []
+        w1 = self._open(pages, events, 'a')
+        pages[0]._alive = False   # 用户把上一个登录窗关了
+        w2 = self._open(pages, events, 'b')
+        self.assertIsNot(w1, w2)
+        self.assertEqual(len(pages), 2)
 
 
 class LoginWindowTest(unittest.TestCase):
