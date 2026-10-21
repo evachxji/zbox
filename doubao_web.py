@@ -443,6 +443,7 @@ class DoubaoLoginWindow(object):
         self._on_aborted = on_aborted
         self._timer = timer or DoubaoSession._qt_timer
         self._done = False
+        self._empty = 0
         self._dispatcher = _gui_dispatcher()
         # 清掉本 profile 的所有实例（含父进程死后残留的 headless——attach 分不出
         # 有头无头，连上残留 headless 登录窗就"隐形"了），再开有头窗口
@@ -485,10 +486,19 @@ class DoubaoLoginWindow(object):
     def _on_collect(self, raw):
         result = _decode(raw)
         if isinstance(result, dict):
+            self._empty = 0
             if result.get('logged_in'):
                 self._finish(True)
                 return
             self._phase = 'start'
+        else:
+            # fetch 未落地：可能是慢，也可能是登录成功后的页面跳转/重载把
+            # window.__zbox_login 清了（实测：扫码登录成功回到 chat 会导航）——
+            # 连续空收就重发探测，否则永远停在 collect 相位探不到登录
+            self._empty += 1
+            if self._empty >= 2:
+                self._empty = 0
+                self._phase = 'start'
         self._next()
 
     def _finish(self, logged_in):

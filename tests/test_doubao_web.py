@@ -223,5 +223,95 @@ class SessionFlowTest(unittest.TestCase):
         self.assertEqual(out, {})
 
 
+class _LoginFakePage(object):
+    """登录窗假页：区分探测启动（含 fetch）与收取，收取按队列脚本化应答。"""
+
+    def __init__(self, collects, load_ok=True):
+        self.collects = list(collects)
+        self.load_ok = load_ok
+        self.probe_starts = 0
+        self.closed = False
+        self._alive = True
+        self._proc = None   # 无进程对象：跳过抢前台逻辑
+
+    def load(self, url, cb):
+        cb(self.load_ok)
+
+    def run_js(self, script, cb):
+        if dw.TAG_PROBE in script and 'fetch(' in script:
+            self.probe_starts += 1
+            cb(True)
+        elif dw.TAG_PROBE in script:
+            cb(self.collects.pop(0) if self.collects else '')
+        else:
+            cb(None)
+
+    def alive(self):
+        return self._alive
+
+    def close(self):
+        self.closed = True
+
+
+class LoginWindowTest(unittest.TestCase):
+    """DoubaoLoginWindow 轮询状态机：探测重发、关窗放弃、加载失败。"""
+
+    def _make_window(self, collects, load_ok=True):
+        import os as _os
+        _os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+        from PySide6.QtWidgets import QApplication
+        self.qapp = QApplication.instance() or QApplication([])
+        page = _LoginFakePage(collects, load_ok=load_ok)
+        events = []
+        timer, tasks = queued_timer()
+        with patch('edge_driver.kill_profile_instances'), \
+             patch('edge_driver.EdgePage', lambda **kw: page):
+            win = dw.DoubaoLoginWindow(
+                on_logged_in=lambda: events.append('login'),
+                on_aborted=lambda: events.append('abort'),
+                timer=timer)
+        return win, page, tasks, events
+
+    def _pump(self, tasks, n=1):
+        for _ in range(n):
+            tasks.pop(0)()
+
+    def test_reissues_probe_after_navigation_wipes_result(self):
+        """登录跳转/重载会清掉 window.__zbox_login：连续空收必须重发探测，
+        否则永远停在 collect 相位探不到登录（实测缺陷）。"""
+        ok = json.dumps({'settled': True, 'logged_in': True, 'input': True})
+        win, page, tasks, events = self._make_window(['', '', ok])
+        self._pump(tasks)        # start：首发探测
+        self._pump(tasks)        # collect 空 1（fetch 未落地/被清了）
+        self._pump(tasks)        # collect 空 2 → 标记重发
+        self._pump(tasks)        # start：重发探测
+        self.assertEqual(page.probe_starts, 2)
+        self._pump(tasks)        # collect：已登录
+        self.assertEqual(events, ['login'])
+        self.assertTrue(page.closed)
+
+    def test_settled_not_logged_in_reissues_probe(self):
+        win, page, tasks, events = self._make_window(
+            [json.dumps({'settled': True, 'logged_in': False, 'input': True}),
+             json.dumps({'settled': True, 'logged_in': True, 'input': True})])
+        self._pump(tasks, 2)     # start + collect（未登录）→ 标记重发
+        self.assertEqual(events, [])
+        self._pump(tasks)        # start：重发探测
+        self.assertEqual(page.probe_starts, 2)
+        self._pump(tasks)        # collect：已登录
+        self.assertEqual(events, ['login'])
+
+    def test_user_closing_window_aborts(self):
+        win, page, tasks, events = self._make_window([])
+        page._alive = False
+        self._pump(tasks)
+        self.assertEqual(events, ['abort'])
+        self.assertTrue(page.closed)
+
+    def test_load_failure_aborts(self):
+        win, page, tasks, events = self._make_window([], load_ok=False)
+        self.assertEqual(events, ['abort'])
+
+
 if __name__ == '__main__':
     unittest.main()
