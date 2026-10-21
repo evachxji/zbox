@@ -32,7 +32,7 @@ from i18n import t, t_data
 from snapping import (SNAP_ENGAGE, SNAP_RELEASE, SnapGuideOverlay,
                       guide_segments, snap_move)
 from themes import THEMES, THEME_ORDER, THEME_CHOICES, AUTO, build_qss
-from version import APP_VERSION, GITHUB_URL
+from version import APP_VERSION, WEBSITE_URL
 
 SHADOW = 0  # 不透明窗口：无边距，圆角由 DWM/遮罩实现
 SINGLE_W, PANEL_H = 344, 370   # 370 ≈ 428 − 一周行高：日历五周条带恰好撑满
@@ -2799,8 +2799,12 @@ class SettingsDialog(QDialog):
 
 
 class AboutDialog(QDialog):
-    """「关于」弹窗：图标 + 简介 + 版本号 + GitHub 链接，样式跟随当前主题。
-    版本号与开源地址取自 version.py（发新版只改那个文件）。"""
+    """「关于」弹窗：图标 + 简介 + 版本号 + 官网链接 + 检查更新，样式跟随当前主题。
+    版本号与官网地址取自 version.py（发新版只改那个文件）。
+    每日首次进入自动检查一次更新（config 记 about_check_date）；检测到新版本时
+    「检查更新」变「下载新版本」，按钮左侧显示检测到的版本号，点击直接下载安装包。"""
+
+    sig_upd = Signal(object)    # 检查更新/下载状态（后台线程 → 主线程）
 
     def __init__(self, panel):
         super(AboutDialog, self).__init__(panel)
@@ -2808,6 +2812,7 @@ class AboutDialog(QDialog):
         self.setWindowTitle(t('about.title'))
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self._drag = None
+        self._upd_rel = None   # 检测到的新版本 release（None = 未检测/已是最新）
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -2863,28 +2868,41 @@ class AboutDialog(QDialog):
         intro.setContentsMargins(sc(2), sc(2), sc(6), sc(6))
         lay.addWidget(intro)
 
-        # GitHub 地址（可点击跳转）；链接颜色随主题，写在行内样式里（QSS 管不到 <a>）
+        # 官网地址（可点击跳转）；链接颜色随主题，写在行内样式里（QSS 管不到 <a>）
         accent = '#0067c0' if resolve_theme(panel._theme) == 'mica' else '#e8a33d'
-        gh = QHBoxLayout()
-        gh.setContentsMargins(sc(2), 0, sc(6), 0)
-        gh.setSpacing(sc(8))
-        gh_label = QLabel(t('about.source'))
-        gh_label.setObjectName('setLabel')
-        gh.addWidget(gh_label)
+        site = QHBoxLayout()
+        site.setContentsMargins(sc(2), 0, sc(6), 0)
+        site.setSpacing(sc(8))
+        site_label = QLabel(t('about.website'))
+        site_label.setObjectName('setLabel')
+        site.addWidget(site_label)
         link = QLabel('<a href="%s" style="color:%s; text-decoration:none;">%s</a>'
-                      % (GITHUB_URL, accent, GITHUB_URL))
+                      % (WEBSITE_URL, accent, WEBSITE_URL))
         link.setObjectName('setUrl')
         link.setOpenExternalLinks(True)
         link.setCursor(Qt.PointingHandCursor)
         link.setToolTip(t('about.open_browser'))
-        gh.addWidget(link)
-        gh.addStretch(1)
-        lay.addLayout(gh)
+        site.addWidget(link)
+        site.addStretch(1)
+        lay.addLayout(site)
 
-        # 右下角关闭按钮
+        # 右下角：检测到新版本文案（默认隐藏）+ 检查更新 + 关闭
         btn_row = QHBoxLayout()
         btn_row.setContentsMargins(0, sc(12), sc(4), 0)
+        btn_row.setSpacing(sc(8))
         btn_row.addStretch(1)
+        self.upd_label = QLabel()
+        self.upd_label.setObjectName('setLabel')
+        self.upd_label.setVisible(False)
+        btn_row.addWidget(self.upd_label)
+        # 检查更新：与设置窗同一套流程（updater.py），检测到新版本时变「下载新版本」
+        self.btn_update = QPushButton(t('update.check'))
+        self.btn_update.setObjectName('setBtn')
+        self.btn_update.setCursor(Qt.PointingHandCursor)
+        self.btn_update.setToolTip(t('update.check_tooltip'))
+        self.btn_update.clicked.connect(self._update_clicked)
+        btn_row.addWidget(self.btn_update)
+        self.sig_upd.connect(self._on_upd)
         done = QPushButton(t('common.close'))
         done.setObjectName('setSave')
         done.setCursor(Qt.PointingHandCursor)
@@ -2901,6 +2919,96 @@ class AboutDialog(QDialog):
         g = self.frameGeometry()
         g.moveCenter(ag.center())
         self.move(g.topLeft())
+
+        # 每日首次进入自动点一次检查更新；自检态（ZBOX_SHOT）不联网、不写配置
+        if not os.environ.get('ZBOX_SHOT'):
+            today = date.today().isoformat()
+            if panel.cfg.data.get('about_check_date') != today:
+                panel.cfg.set('about_check_date', today)
+                QTimer.singleShot(0, self._update_clicked)
+
+    # ---------------- 检查更新 ----------------
+
+    def _update_clicked(self):
+        """点击即 loading + 禁用；已检测到新版本时按钮是「下载新版本」，点击直接下载。"""
+        self.btn_update.setEnabled(False)
+        if self._upd_rel is not None:
+            self.btn_update.setText(t('common.downloading'))
+            threading.Thread(target=self._upd_dl_work, args=(self._upd_rel,),
+                             daemon=True).start()
+            return
+        self.upd_label.setVisible(False)
+        self.btn_update.setText(t('update.checking'))
+        threading.Thread(target=self._upd_check_work, daemon=True).start()
+
+    def _upd_check_work(self):
+        try:
+            rel = updater.latest_release()
+        except Exception:
+            rel = None
+        self.sig_upd.emit({'phase': 'check', 'rel': rel})
+
+    def _upd_dl_work(self, rel):
+        try:
+            path = updater.download_setup(
+                rel, sysutil.download_dir(),
+                lambda done, total: self.sig_upd.emit(
+                    {'phase': 'progress', 'done': done, 'total': total}))
+            self.sig_upd.emit({'phase': 'done', 'path': path})
+        except Exception as e:
+            self.sig_upd.emit({'phase': 'done', 'err': str(e)})
+
+    def _upd_reset(self):
+        """回到可点状态：已检测到新版本保持「下载新版本」，否则恢复「检查更新」。"""
+        self.btn_update.setEnabled(True)
+        self.btn_update.setText(t('update.download_new') if self._upd_rel else t('update.check'))
+
+    def _show_msg(self, text):
+        """检查/下载结果提示：不用居中浮窗，在按钮左侧用普通灰色文本显示
+        （短文案单行显示，窗口宽度与位置保持不变）。"""
+        self.upd_label.setText(text)
+        self.upd_label.setVisible(True)
+
+    def _show_detected(self, rel):
+        """检测到新版本：按钮变「下载新版本」，左侧展示版本号。"""
+        self._upd_rel = rel
+        self._show_msg(t('update.detected', version=rel['tag']))
+        self._upd_reset()
+
+    def _on_upd(self, p):
+        """更新流程（主线程）：检查 → 有新版本切「下载新版本」形态 → 按钮上显示进度 → 下完确认安装。"""
+        try:
+            phase = p.get('phase')
+            if phase == 'progress':
+                done, total = p['done'], p['total']
+                self.btn_update.setText(t('update.download_progress', percent=done * 100 // total)
+                                        if total else t('common.downloading'))
+                return
+            if phase == 'check':
+                rel = p.get('rel')
+                if rel is None:
+                    self._upd_reset()
+                    self._show_msg(t('update.check_failed_short'))
+                elif not updater.has_update(rel['tag']):
+                    self._upd_reset()
+                    self._show_msg(t('update.latest_short'))
+                else:
+                    self._show_detected(rel)
+                return
+            if phase == 'done':
+                self._upd_reset()
+                if not p.get('path'):
+                    self._show_msg(t('update.download_failed_short'))
+                    return
+                box = video_ui._ConfirmDialog(
+                    self, title=t('update.download_done'),
+                    text=t('update.install_hint'),
+                    ok_text=t('update.install_now'))
+                if box.exec() == QDialog.Accepted:
+                    os.startfile(p['path'])
+                    QApplication.instance().quit()
+        except RuntimeError:
+            pass  # 关于窗已关，控件随窗口销毁
 
     def showEvent(self, e):
         super(AboutDialog, self).showEvent(e)

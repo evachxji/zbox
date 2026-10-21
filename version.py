@@ -5,3 +5,4 @@
 """
 APP_VERSION = '0.4.2.1'
 GITHUB_URL = 'https://github.com/evachxji/zbox'
+WEBSITE_URL = 'https://zbox.wzyjc.cn/'
