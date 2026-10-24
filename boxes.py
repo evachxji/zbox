@@ -2252,8 +2252,8 @@ class BoxWindow(QWidget):
 
     def _ensure_band(self):
         hwnd = int(self.winId())
-        progman = ui._u32.FindWindowW('Progman', None)
-        if progman and ui._u32.GetAncestor(hwnd, ui._GA_ROOT) != progman:
+        dv = ui.find_desktop_defview()
+        if dv and ui._u32.GetAncestor(hwnd, ui._GA_PARENT) != dv:
             self._repin()
 
     def _repin(self):

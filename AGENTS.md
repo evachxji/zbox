@@ -633,6 +633,11 @@ IPC 通道（与 `--pick-folder` 同一条）发回面板建格子；`new_folder
 - **层级策略（踩坑三轮后的终态，2026-10 再修订）：挂桌面带（`pin_to_desktop`，免疫 Win+D）
   + 永不主动沉底。** 带内窗口点击激活会浮到应用窗口之上（实测确认），只要不主动 sink
   它就一直在，这就是「格子永不消失」的关键。
+  桌面图标窗由 `find_desktop_defview()` 定位：通常是 `Progman → SHELLDLL_DefView`，
+  Wallpaper Engine 等动态壁纸分层后会变成 `WorkerW → SHELLDLL_DefView`；是否已挂带
+  必须比较 `GetAncestor(hwnd, GA_PARENT)` 与实际 DefView，不能比较根窗口是否 Progman
+  （WorkerW 结构下会每 500ms 误重挂），也不能用 `GetParent`（这些 WS_POPUP 窗口挂带后
+  它仍可能返回 0，实测）。
   ❌ 不要学面板在失焦时沉底：格子会被拖到任何位置，沉到应用窗口之下 = 用户眼里的消失。
 - **桌面整理软件兼容层已整体移除（2026-10）**：原来的 WinEvent 钩子 + 每 500ms 表层探测
   （`_covered_by_surface` / `probe_desktop` 的多点 WindowFromPoint，面板 tick 每秒 12 次、

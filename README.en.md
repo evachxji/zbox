@@ -68,6 +68,7 @@ Run from source: double-click `run.cmd` (it will offer to install PySide6 if mis
 ## Compatibility
 
 PySide6 (Qt 6.8 LTS), Python 3.10+, Windows 10 / 11.
+Desktop boxes and the panel support the `WorkerW` layering used by dynamic wallpaper apps such as Wallpaper Engine, and remain visible when Win+D shows the desktop.
 
 ## Acknowledgments
 

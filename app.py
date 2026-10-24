@@ -1736,6 +1736,7 @@ _u32.SetFocus.restype = ctypes.c_void_p
 _u32.SetFocus.argtypes = [ctypes.c_void_p]
 _GW_HWNDPREV = 3
 _GW_HWNDNEXT = 2
+_GA_PARENT = 1
 _GA_ROOT = 2
 _GWL_STYLE = -16
 _GWL_EXSTYLE = -20
@@ -1810,6 +1811,22 @@ def _class_name(hwnd):
 _PROG_FAMILY = ('Progman', 'SHELLDLL_DefView', 'WorkerW')
 
 
+def find_desktop_defview():
+    """桌面图标窗：通常在 Progman 下；Wallpaper Engine 等壁纸分层后移到某个 WorkerW 下。"""
+    progman = _u32.FindWindowW('Progman', None)
+    dv = _u32.FindWindowExW(progman, None, 'SHELLDLL_DefView', None) if progman else None
+    if dv:
+        return dv
+    worker = None
+    while True:
+        worker = _u32.FindWindowExW(None, worker, 'WorkerW', None)
+        if not worker:
+            return None
+        dv = _u32.FindWindowExW(worker, None, 'SHELLDLL_DefView', None)
+        if dv:
+            return dv
+
+
 def pin_to_desktop(win):
     """把窗口的属主设为桌面图标窗（SHELLDLL_DefView）：加入「桌面带」，
     Win+D / 显示桌面会跳过桌面带（Win11 24H2 上顶层窗口一律被收，桌面带成员豁免——
@@ -1818,17 +1835,17 @@ def pin_to_desktop(win):
     成功返回 True。"""
     try:
         hwnd = int(win.winId())
-        progman = _u32.FindWindowW('Progman', None)
-        dv = _u32.FindWindowExW(progman, None, 'SHELLDLL_DefView', None) if progman else None
+        dv = find_desktop_defview()
         if not hwnd or not dv:
             return False
-        if _u32.GetAncestor(hwnd, _GA_ROOT) != progman:
+        # WS_POPUP 挂带后 GetParent 仍可能返回 0，GA_PARENT 才能拿到实际桌面父窗
+        if _u32.GetAncestor(hwnd, _GA_PARENT) != dv:
             vis = bool(_u32.IsWindowVisible(hwnd))
             _u32.SetParent(hwnd, dv)
             if vis:
                 _u32.ShowWindow(hwnd, 8)   # SW_SHOWNA：SetParent 挂带会丢 WS_VISIBLE，
                                            # Qt 仍认为可见不重绘（boxes._repin 同款坑）
-        return _u32.GetAncestor(hwnd, _GA_ROOT) == progman
+        return _u32.GetAncestor(hwnd, _GA_PARENT) == dv
     except Exception:
         return False
 
@@ -3348,14 +3365,14 @@ class FloatingPanel(QWidget):
         if self._drag is not None:
             return   # 拖拽期间故意脱离桌面带（见 eventFilter），别补挂
         hwnd = int(self.winId())
-        progman = _u32.FindWindowW('Progman', None)
-        if not progman:
+        dv = find_desktop_defview()
+        if not dv:
             return
-        if _u32.GetAncestor(hwnd, _GA_ROOT) != progman:
+        if _u32.GetAncestor(hwnd, _GA_PARENT) != dv:
             self._desk_pinned = pin_to_desktop(self)
         # 顶部栏窗同属桌面带：它是无属主的普通顶层窗口，不挂带的话悬停弹出时会
         # 盖住压在面板之上的应用窗口（面板被部分遮挡时尤其明显）
-        if _u32.GetAncestor(int(self.titlebar.winId()), _GA_ROOT) != progman:
+        if _u32.GetAncestor(int(self.titlebar.winId()), _GA_PARENT) != dv:
             pin_to_desktop(self.titlebar)
 
     def _desktop_mode_tick(self):

@@ -68,6 +68,7 @@ Windows 桌面整理工具：桌面格子 + 悬浮面板（日历 / 待办 / 传
 ## 兼容性
 
 PySide6（Qt 6.8 LTS），Python 3.10+，Win10 / Win11。
+桌面格子与面板兼容 Wallpaper Engine 等动态壁纸的 `WorkerW` 分层结构，按 Win+D 显示桌面时保持可见。
 
 ## 开源致谢
 
