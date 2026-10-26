@@ -2,8 +2,8 @@
   "app": {
     "bundleName": "com.zbox.transfer",
     "vendor": "zbox",
-    "versionCode": 6,
-    "versionName": "0.4.1",
+    "versionCode": 7,
+    "versionName": "0.5",
     "icon": "$media:app_icon",
     "label": "$string:app_name"
   }
