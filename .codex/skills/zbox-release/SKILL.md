@@ -5,13 +5,15 @@ description: "发布 zbox 新版本 release 的完整流程：改版本号 → �
 
 # zbox-release —— zbox 发版流程说明书
 
-发版 = 改版本号 → 全量构建 → tag → GitHub release（带安装包 assets）→ 官网同步并上线。
+发版 = 询问是否发布鸿蒙端 → 改版本号 → 全量构建 → tag → GitHub release（带安装包 assets）→ 官网同步并上线 →（可选）AppGallery Connect 提交审核。
 全程在仓库根目录操作，工具链要求：Python+PySide6+PyInstaller、JDK 17、DevEco Studio（D:\Program Files\Huawei）+ devecocli、gh CLI（已登录 evachxji）。
 
 ## 0. 确认版本号（必须先做）
 
 **用户没给新版本号就必须问，不许自己编。** 当前版本在 `version.py` 的 `APP_VERSION`（唯一来源）。
 把用户给的版本记为 `<VER>`（如 `0.4.2`），tag 名 `v<VER>`。先确认该 tag 不存在：`git tag -l "v<VER>"` 应为空。
+
+**每次发版都必须询问用户本次是否需要同步发布鸿蒙端到 AppGallery Connect**；用户已经明确说明时直接记录选择，不重复询问。需要时执行第 7 步，不需要时跳过，不要默认发布。
 
 ## 1. 改版本号并提交
 
@@ -28,7 +30,10 @@ io.open(p, 'w', encoding='utf-8', newline='').write(s.replace("APP_VERSION = '<�
 "@ | python -
 ```
 
-- 验证：`git diff version.py` 只有一行变化。提交：`git commit -m "chore: 版本号更新至 v<VER>"`。
+- 同步移动端包内版本，避免只改安装包文件名：
+  - `harmony/AppScope/app.json5`：`versionName = <VER>`，`versionCode` 比上一版 +1。
+  - `android/app/build.gradle.kts`：`versionName = <VER>`，`versionCode` 比上一版 +1。
+- 验证：`git diff version.py` 只有一行变化，移动端 `versionName` 均为 `<VER>` 且 `versionCode` 已递增。提交：`git commit -m "chore: 版本号更新至 v<VER>"`。
 
 ## 2. 全量构建（Win exe + Android APK + 鸿蒙 HAP + APP）
 
@@ -65,6 +70,8 @@ Copy-Item harmony\build\outputs\default\harmony-default-signed.app "dist\release
 
 验证产物（4 个，都在 `dist\release\`）：
 `zbox-Setup-v<VER>-x64.exe`、`zbox-Android-v<VER>.apk`、`zbox-HarmonyOS-v<VER>-unsigned.hap`、`zbox-HarmonyOS-v<VER>.app`。
+
+还要验证包内版本而不是只看文件名：Android 用 SDK `aapt dump badging` 检查 `versionName/versionCode`；鸿蒙用 Python `zipfile` 读取 `.app` 内 `pack.info`，确认 `summary.app.version` 为 `<VER>` 和新的构建号。
 
 ## 3. 推送 + 打 tag
 
@@ -161,9 +168,21 @@ CRC64 完整性比对脚本见 `.claude/skills/site-deploy/SKILL.md` 下载 CDN 
   然后 curl 验证 `https://zbox.wzyjc.cn/` 返回 200 且页面里是新版版本号。
 - 提交：`git commit -m "feat(website): 版本号与下载链接更新至 v<VER>"` 并 push。
 
+## 7.（可选）鸿蒙端发布到 AppGallery Connect
+
+仅当第 0 步用户选择发布鸿蒙端时执行；上传的是 release 签名的 `dist\release\zbox-HarmonyOS-v<VER>.app`，不是 unsigned.hap 或 app.zip。
+
+1. 先检查本机是否有支持发布的 CLI（`devecocli --help`）。当前 `@deveco/deveco-cli@1.3.0-stable` 只有构建、运行、签名等命令，**没有 AppGallery 发布命令**；不要臆造 `publish` 子命令。没有可用 CLI 时，用已登录开发者账号的浏览器进入 AppGallery Connect。
+2. 进入「应用管理 → Zbox 传输（com.zbox.transfer）→ 分发 → 应用上架 → 版本/升级」，在新版本页点「去选择 → 上传新版本」，上传上述 `.app`。
+3. 上传后选中版本名为 `<VER>`、构建号为新 `versionCode` 的包，填写「新版本特性」，保留上一版发布国家或地区等设置，复核后点「提交审核」。
+4. 记录页面状态。**提交审核不等于已上架**；只有页面明确显示已上架才能宣称发布完成，审核中/待审核要如实说明。
+5. 需要手动操作时，把页面保留给用户并交代具体动作：登录华为开发者账号、完成验证码，或在 Chrome 扩展详情中开启「允许访问文件网址」后重试上传。不要索取账号密码或验证码。
+
+验收（仅发布鸿蒙端时）：开发者中心的新版本页显示 `<VER>` / 新构建号，软件包已选中；最终状态至少为「提交审核/审核中」，并记录实际状态。
+
 ## 验收清单
 
-- [ ] `version.py` = 新版本，一行 diff，已提交已推送
+- [ ] `version.py` = 新版本，一行 diff；Android / 鸿蒙包内 `versionName` 同步且 `versionCode` 递增，已提交已推送
 - [ ] `dist\release\` 四个 v<VER> 产物齐全，`.app` 与上一版 hash 不同
 - [ ] `git ls-remote --tags origin` 有 `v<VER>`，指向版本号提交
 - [ ] `gh release view v<VER>`：非 draft，4 个 assets（exe/apk/hap/app.zip），大小与本地一致；
