@@ -1,14 +1,11 @@
 # -*- coding: utf-8 -*-
-"""豆包网页翻译适配层：登录检测、提示词注入、回复轮询，全部选择器集中维护。
+"""豆包网页翻译适配层：Edge CDP 页面准备、流式接口调用和登录引导。
 
-设计约束（已批准计划）：
-- 只把 OCR 出的文字发给豆包，截图本身不出本机。
-- 登录态走独立持久 profile（%APPDATA%\\zbox\\doubao_profile），Cookie 不进 config/日志。
-- 页面结构签名不匹配时返回明确的「豆包页面已更新」错误，绝不猜测回复。
-- 译文按编号 JSON 严格解析（translation_core.parse_translations）。
+只把 OCR 识别出的文字发给豆包，不上传截图；按网页版 SSE 响应中的编号还原译文。
+仅当翻译接口返回认证错误时才引导登录。Edge profile 与 session Cookie 罐均保存在
+%APPDATA%\\zbox 下，不写入应用配置或日志。
 
-分层：DoubaoSession 是纯 Python 状态机（page/timer 可注入，便于单测）；
-WebPage / DoubaoLoginDialog 是 Qt WebEngine 实现，延迟到功能启用时才 import。
+DoubaoSession 是可注入 page/timer 的纯 Python 状态机；Edge CDP 驱动延迟到功能使用时导入。
 """
 
 import ctypes
@@ -17,23 +14,13 @@ import os
 import shutil
 import threading
 
-import translation_core
 
 CHAT_URL = 'https://www.doubao.com/chat/'
-
-# 豆包 DOM 钩子（2026-10 实测稳定）；页面改版只需改这里
-SELECTORS = {
-    'input': '[data-testid="chat_input"] .ProseMirror',
-    'send': '[data-testid="chat_input_send_button"]',
-    'assistant_message': '[data-testid="receive_message"]',
-    'stop_button': '[data-testid="chat_input_stop_button"]',
-}
+TRANSLATE_URL = '/samantha/plugin/stream_article_translate'
+LAUNCH_URL = '/alice/user/launch'
 
 # JS 标记串：FakePage 测试按标记路由应答，生产 JS 里是无害注释
-TAG_PROBE = '/*ZBOX_PROBE*/'
-TAG_FILL = '/*ZBOX_FILL*/'
-TAG_POLL = '/*ZBOX_POLL*/'
-TAG_SEND = '/*ZBOX_SEND*/'
+TAG_TRANSLATE = '/*ZBOX_TRANSLATE*/'
 
 
 class DoubaoError(RuntimeError):
@@ -58,6 +45,10 @@ class DoubaoTimeout(DoubaoError):
 
 class DoubaoLoginCancelled(DoubaoError):
     """用户关掉了登录窗口（未登录）：提示点击重试重新引导。"""
+
+
+class DoubaoLoginRequired(DoubaoError):
+    """豆包流式接口返回需要登录的错误码。"""
 
 
 def profile_dir():
@@ -174,52 +165,8 @@ _DOUBAO_COOKIE_URLS = ['https://www.doubao.com/', 'https://accounts.doubao.com/'
 
 # ---------------- JS 构建 ----------------
 
-def build_probe_js():
-    """启动登录态探测：fetch 是异步的，结果落地 window.__zbox_login
-    （Qt runJavaScript 不等待 Promise 解析，实测回调拿到空——必须分两步）。
-    2026-10 起 /alice/profile/self 只认 POST（GET 已 404，实测），且 body 必须带
-    visit_id=localStorage.flow_tea_user_id——空 visit_id 即使已登录也报
-    710010202「系统错误」（实测）。接口对匿名也返回 200（code=710010202），
-    必须解析响应体 code===0 才算已登录。"""
-    return TAG_PROBE + """
-(() => {
-  window.__zbox_login = null;
-  fetch('/alice/profile/self?version_code=20800&language=zh&device_platform=web'
-        + '&doubao_device_platform=web&aid=497858&real_aid=497858&pkg_type=release_version', {
-    method: 'POST', credentials: 'include',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({visit_id: localStorage.getItem('flow_tea_user_id') || '',
-                          avatar_format: 'png'}),
-  })
-    .then(async r => {
-      let logged = false;
-      try { logged = (await r.json()).code === 0; } catch (e) {}
-      window.__zbox_login = logged;
-    })
-    .catch(() => { window.__zbox_login = false; });
-  return true;
-})()
-"""
-
-
-def build_probe_collect_js():
-    """读取探测结果（JSON 字符串）；fetch 未落地返回空串，由调用方轮询。
-    选择器在收取时求值（SPA 晚渲染；loadFinished 时控件可能还没挂上）。
-    注意：当前 Qt/PySide6 组合的 runJavaScript 只封送标量，对象/数组到手是空串，
-    结构化结果必须 JSON.stringify。"""
-    return TAG_PROBE + """
-(() => {
-  const login = window.__zbox_login;
-  if (login === undefined || login === null) return '';
-  const q = (s) => !!document.querySelector(s);
-  return JSON.stringify({settled: true, logged_in: login,
-                         input: q(%(input)s)});
-})()
-""" % {'input': json.dumps(SELECTORS['input'])}
-
-
 def _decode(raw):
-    """JS 侧 JSON 字符串 → dict；空串/None = 未就绪，返回 None。"""
+    """JS 侧 JSON 字符串 → dict。"""
     if not raw:
         return None
     if isinstance(raw, str):
@@ -230,97 +177,153 @@ def _decode(raw):
     return raw if isinstance(raw, dict) else 'malformed'
 
 
-def build_fill_js(prompt):
-    """把提示词写进输入框；返回是否写入成功。发送按钮要输入文字后才渲染（实测），
-    点击发送由 build_send_js 单独负责（会话隔一拍再点）。"""
-    return TAG_FILL + """
-(() => {
-  const ed = document.querySelector(%(input)s);
-  if (!ed) return false;
-  ed.focus();
-  ed.textContent = '';
-  document.execCommand('insertText', false, %(text)s);
-  return (ed.textContent || '').length > 0;
-})()
-""" % {'input': json.dumps(SELECTORS['input']), 'text': json.dumps(prompt)}
+def build_translate_js(texts, target_lang):
+    """按 CometixTranslate 的网页版流式接口协议发起翻译。"""
+    return TAG_TRANSLATE + r"""
+(async () => {
+  const key = '__zbox_doubao_tea_uuid';
+  let teaUuid = localStorage.getItem(key);
+  if (!/^\d{18}$/.test(teaUuid || '')) {
+    const r = new Uint32Array(2);
+    crypto.getRandomValues(r);
+    teaUuid = String(100000000 + Math.floor(r[0] / 4294967296 * 900000000))
+            + String(100000000 + Math.floor(r[1] / 4294967296 * 900000000));
+    localStorage.setItem(key, teaUuid);
+  }
+  const tabId = window.__zbox_doubao_tab_id ||
+                (window.__zbox_doubao_tab_id = crypto.randomUUID());
+  const params = (deviceId, webId, country) => new URLSearchParams({
+    language: 'zh', browser_language: navigator.language || 'zh-CN',
+    device_platform: 'web', aid: '586864', real_aid: '586864',
+    pkg_type: 'release_version', device_id: deviceId, tea_uuid: teaUuid,
+    web_id: webId, is_new_user: '0', region: country, sys_region: country,
+    'use-olympus-account': '1', samantha_web: '1', version: '1.38.0',
+    version_code: '20800', pc_version: '1.38.0', web_tab_id: tabId,
+  });
+  let deviceId = '0', webId = teaUuid, country = '';
+  try {
+    const boot = await fetch(%(launch)s + '?' + params('0', teaUuid, ''), {
+      method: 'POST', credentials: 'include',
+      headers: {'Content-Type': 'application/json'},
+    });
+    const data = await boot.json();
+    if (data.code === 0 && data.data) {
+      const config = data.data.config || {};
+      country = typeof data.data.country === 'string' ? data.data.country : '';
+      if (config.ttwid && config.web_id) {
+        webId = String(config.web_id).slice(0, 64);
+        deviceId = webId;
+      }
+    }
+  } catch (e) {}
+  const response = await fetch(%(endpoint)s + '?' + params(deviceId, webId, country), {
+    method: 'POST', credentials: 'include',
+    headers: {'Content-Type': 'application/json', 'Accept': 'text/event-stream'},
+    body: JSON.stringify({raw_text: %(texts)s, target_lang: %(target)s,
+                          translate_service: '1'}),
+  });
+  return JSON.stringify({status: response.status, body: await response.text()});
+})().catch(e => JSON.stringify({networkError: String(e)}))
+""" % {'launch': json.dumps(LAUNCH_URL),
+       'endpoint': json.dumps(TRANSLATE_URL),
+       'texts': json.dumps(list(texts), ensure_ascii=False),
+       'target': json.dumps(target_lang, ensure_ascii=False)}
 
 
-def build_send_js():
-    """点发送；按钮还没渲染/禁用返回 false，由会话在宽限期内重试。"""
-    return TAG_SEND + """
-(() => {
-  const b = document.querySelector(%(send)s);
-  if (!b || b.disabled) return false;
-  b.click();
-  return true;
-})()
-""" % {'send': json.dumps(SELECTORS['send'])}
+_AUTH_CODES = {'710012000', '710012001', '710022013'}
 
 
-def build_poll_js():
-    """抓最新一条助手回复：{done, text}；回复流式中 done=false。"""
-    return TAG_POLL + '''
-(() => {
-  const msgs = document.querySelectorAll(%(msg)r);
-  if (!msgs.length) return {done: false, text: null};
-  const last = msgs[msgs.length - 1];
-  const text = (last.innerText || '').trim();
-  const stopping = !!document.querySelector(%(stop)r);
-  return JSON.stringify({done: !stopping && text.length > 0, text: text || null});
-})()
-''' % {'msg': json.dumps(SELECTORS['assistant_message']),
-       'stop': json.dumps(SELECTORS['stop_button'])}
+def _raise_api_error(code):
+    code = str(code)
+    if code in _AUTH_CODES:
+        raise DoubaoLoginRequired('doubao login required (%s)' % code)
+    raise DoubaoError('doubao rejected translation (%s)' % code)
+
+
+def parse_stream_response(raw, expected_count):
+    """解析 CometixTranslate 同款 SSE 响应，按 index 还原译文顺序。"""
+    response = _decode(raw)
+    if not isinstance(response, dict):
+        raise DoubaoReplyError('invalid stream response')
+    if response.get('networkError'):
+        raise DoubaoNetworkError('doubao request failed')
+    status = response.get('status')
+    if status == 401:
+        raise DoubaoLoginRequired('doubao login required (HTTP 401)')
+    if status == 403:
+        raise DoubaoError('doubao request forbidden (HTTP 403)')
+    if not isinstance(status, int) or not 200 <= status < 300:
+        raise DoubaoNetworkError('doubao request failed (HTTP %s)' % status)
+    body = response.get('body')
+    if not isinstance(body, str):
+        raise DoubaoReplyError('invalid stream body')
+
+    translations = [None] * expected_count
+    body = body.replace('\r\n', '\n').replace('\r', '\n')
+    for block in body.split('\n\n'):
+        event = 'message'
+        data_lines = []
+        for line in block.split('\n'):
+            if line.startswith('event:'):
+                event = line[6:].strip()
+            elif line.startswith('data:'):
+                data_lines.append(line[5:].lstrip())
+        if event not in ('json', 'err') or not data_lines:
+            continue
+        try:
+            payload = json.loads('\n'.join(data_lines))
+        except ValueError:
+            raise DoubaoReplyError('invalid stream event')
+        if not isinstance(payload, dict):
+            raise DoubaoReplyError('invalid stream event')
+        code = payload.get('code')
+        if code not in (0, '0'):
+            _raise_api_error(code)
+        if event == 'err':
+            raise DoubaoError('doubao stream failed')
+        data = payload.get('data')
+        items = data.get('items') if isinstance(data, dict) else None
+        if not isinstance(items, list):
+            raise DoubaoReplyError('invalid translation items')
+        for item in items:
+            if not isinstance(item, dict):
+                raise DoubaoReplyError('invalid translation item')
+            index, text = item.get('index'), item.get('res')
+            if (not isinstance(index, int) or isinstance(index, bool)
+                    or index < 0 or index >= expected_count
+                    or not isinstance(text, str) or not text.strip()):
+                raise DoubaoReplyError('invalid translation item')
+            translations[index] = text
+    if any(text is None for text in translations):
+        raise DoubaoReplyError('doubao returned incomplete translations')
+    return translations
 
 
 # ---------------- 会话状态机 ----------------
 
 class DoubaoSession(object):
-    """一次翻译任务的流程编排：加载 → 探测 → 填发 → 轮询 → 严格解析。
-    page 接口：load(url, cb(ok)) / run_js(script, cb(value))；
-    timer(ms, fn) 调度器（生产 = QTimer.singleShot，测试可同步/队列注入）。"""
-
-    def __init__(self, page, timer=None, poll_interval_ms=1000, poll_timeout_s=120):
-        self._page = page
-        self._timer = timer or self._qt_timer
-        self._interval = poll_interval_ms
-        self._timeout_ms = poll_timeout_s * 1000
-        self._cancelled = False
-        self._finished = False
-        self.on_login_required = None     # 未登录时回调；登录完成后应调 notify_logged_in()
+    """一次翻译任务：加载豆包页面 → 调用网页版 SSE 翻译接口。"""
 
     @staticmethod
     def _qt_timer(ms, fn):
         from PySide6.QtCore import QTimer
         QTimer.singleShot(ms, fn)
 
+    def __init__(self, page):
+        self._page = page
+        self._cancelled = False
+        self._finished = False
+        self._texts = []
+        self._target = 'zh'
+        self._on_done = None
+        self._on_error = None
+        self.on_login_required = None
+
     def cancel(self):
         self._cancelled = True
-
-    def close(self):
-        """取消并收掉底层 page（headless Edge 工人随会话结束，不留孤儿进程）。"""
-        self.cancel()
         close = getattr(self._page, 'close', None)
-        if close is not None:
+        if close:
             close()
-
-    def notify_logged_in(self):
-        """登录窗口回报成功后重走整个流程。"""
-        if not self._cancelled and not self._finished:
-            self._start()
-
-    def translate(self, texts, target_lang, on_done, on_error, preloaded=False):
-        """preloaded=True：页面已加载过（登录预检同款页），跳过 load 直接探测。"""
-        self._texts = list(texts)
-        self._target = target_lang
-        self._on_done = on_done
-        self._on_error = on_error
-        if preloaded:
-            self._page.run_js(build_probe_js(), self._on_probe_started)
-        else:
-            self._start()
-
-    def _start(self):
-        self._page.load(CHAT_URL, self._on_loaded)
 
     def _alive(self):
         return not self._cancelled and not self._finished
@@ -335,9 +338,16 @@ class DoubaoSession(object):
             self._finished = True
             self._on_done(texts)
 
-    PROBE_TIMEOUT_MS = 15000
-    PROBE_INTERVAL_MS = 500
-    STRUCTURE_GRACE_MS = 8000   # 已落地但控件未渲染的宽限期：SPA 加载慢，别误判结构变化
+    def translate(self, texts, target_lang, on_done, on_error, preloaded=False):
+        """页面预加载时跳过导航，随后直接发送流式翻译请求。"""
+        self._texts = list(texts)
+        self._target = target_lang
+        self._on_done = on_done
+        self._on_error = on_error
+        if preloaded:
+            self._translate()
+        else:
+            self._page.load(CHAT_URL, self._on_loaded)
 
     def _on_loaded(self, ok):
         if not self._alive():
@@ -345,115 +355,28 @@ class DoubaoSession(object):
         if not ok:
             self._fail(DoubaoNetworkError('doubao page load failed'))
             return
-        self._page.run_js(build_probe_js(), self._on_probe_started)
+        self._translate()
 
-    def _on_probe_started(self, started):
+    def _translate(self):
+        if self._alive():
+            self._page.run_js(build_translate_js(self._texts, self._target),
+                              self._on_translated)
+
+    def _on_translated(self, raw):
         if not self._alive():
-            return
-        if not started:
-            self._fail(DoubaoStructureChanged('probe failed to start'))
-            return
-        self._probe_elapsed = 0
-        self._probe_missing_sel = False
-        self._timer(self.PROBE_INTERVAL_MS, self._probe_tick)
-
-    def _probe_tick(self):
-        if not self._alive():
-            return
-        self._probe_elapsed += self.PROBE_INTERVAL_MS
-        if self._probe_elapsed > self.PROBE_TIMEOUT_MS:
-            if self._probe_missing_sel:
-                self._fail(DoubaoStructureChanged('input/send selector missing'))
-            else:
-                self._fail(DoubaoTimeout('probe not settled within %ds'
-                                         % (self.PROBE_TIMEOUT_MS // 1000)))
-            return
-        self._page.run_js(build_probe_collect_js(), self._on_probe)
-
-    def _on_probe(self, raw):
-        if not self._alive():
-            return
-        probe = _decode(raw)
-        if probe is None or (isinstance(probe, dict) and not probe.get('settled')):
-            self._timer(self.PROBE_INTERVAL_MS, self._probe_tick)   # 未落地，继续轮询
-            return
-        if not isinstance(probe, dict):
-            self._fail(DoubaoStructureChanged('probe returned %r' % (raw,)))
-            return
-        if not probe.get('logged_in'):
-            if self.on_login_required is not None:
-                self.on_login_required()   # 由 UI 开登录窗；成功后 notify_logged_in()
-            else:
-                self._fail(DoubaoError('not logged in'))
-            return
-        if not probe.get('input'):
-            # 控件还没渲染（SPA 慢）：宽限期内继续等，超期才报结构变化
-            self._probe_missing_sel = True
-            if self._probe_elapsed > self.STRUCTURE_GRACE_MS:
-                self._fail(DoubaoStructureChanged('input selector missing'))
-            else:
-                self._timer(self.PROBE_INTERVAL_MS, self._probe_tick)
-            return
-        prompt = translation_core.build_prompt(self._texts, self._target)
-        self._page.run_js(build_fill_js(prompt), self._on_filled)
-
-    SEND_GRACE_MS = 5000
-    SEND_INTERVAL_MS = 400
-
-    def _on_filled(self, ok):
-        if not self._alive():
-            return
-        if not ok:
-            self._fail(DoubaoStructureChanged('failed to fill prompt'))
-            return
-        self._send_elapsed = 0
-        self._timer(self.SEND_INTERVAL_MS, self._send_tick)
-
-    def _send_tick(self):
-        if not self._alive():
-            return
-        self._send_elapsed += self.SEND_INTERVAL_MS
-        if self._send_elapsed > self.SEND_GRACE_MS:
-            self._fail(DoubaoStructureChanged('send button missing'))
-            return
-        self._page.run_js(build_send_js(), self._on_sent)
-
-    def _on_sent(self, ok):
-        if not self._alive():
-            return
-        if not ok:   # 按钮还没渲染出来，宽限期内继续等
-            self._timer(self.SEND_INTERVAL_MS, self._send_tick)
-            return
-        self._elapsed = 0
-        self._schedule_poll()
-
-    def _schedule_poll(self):
-        self._timer(self._interval, self._poll_tick)
-
-    def _poll_tick(self):
-        if not self._alive():
-            return
-        self._elapsed += self._interval
-        if self._elapsed > self._timeout_ms:
-            self._fail(DoubaoTimeout('no completed reply within %ds'
-                                     % (self._timeout_ms // 1000)))
-            return
-        self._page.run_js(build_poll_js(), self._on_polled)
-
-    def _on_polled(self, raw):
-        if not self._alive():
-            return
-        result = _decode(raw)
-        if not isinstance(result, dict) or not result.get('done'):
-            self._schedule_poll()
             return
         try:
-            texts = translation_core.parse_translations(result.get('text') or '',
-                                                        len(self._texts))
-        except translation_core.TranslationParseError as e:
-            self._fail(DoubaoReplyError(str(e)))
-            return
-        self._succeed(texts)
+            texts = parse_stream_response(raw, len(self._texts))
+        except DoubaoLoginRequired as e:
+            if self.on_login_required is not None:
+                self._finished = True
+                self.on_login_required()
+            else:
+                self._fail(e)
+        except DoubaoError as e:
+            self._fail(e)
+        else:
+            self._succeed(texts)
 
 
 # ---------------- Edge CDP 实现（系统浏览器驱动，省 Qt WebEngine 的 ~200MB） ----------------
@@ -510,40 +433,13 @@ def make_page(parent=None):
     return _Page()
 
 
-def check_login(page, cb, timer=None):
-    """登录态预检（headless 页，不建 session）：load → 两阶段探测 →
-    cb(True=已登录 / False=未登录 / None=检查失败如断网)。与 DoubaoSession 共享
-    同一套 JS 与 _decode，但不动状态机本体。"""
-    timer = timer or DoubaoSession._qt_timer
-    state = {'elapsed': 0}
-
-    def on_loaded(ok):
-        if not ok:
-            cb(None)
-            return
-        page.run_js(build_probe_js(), lambda _started: timer(500, tick))
-
-    def tick():
-        state['elapsed'] += 500
-        if state['elapsed'] > 10000:
-            cb(None)
-            return
-        page.run_js(build_probe_collect_js(), on_collect)
-
-    def on_collect(raw):
-        v = _decode(raw)
-        if not isinstance(v, dict) or not v.get('settled'):
-            timer(500, tick)
-            return
-        cb(bool(v.get('logged_in')))
-
-    page.load(CHAT_URL, on_loaded)
+def prepare_page(page, cb):
+    """加载豆包页面供同源流式接口调用；此接口当前不要求先登录。"""
+    page.load(CHAT_URL, lambda ok: cb(True if ok else None))
 
 
 class DoubaoLoginWindow(object):
-    """有头 Edge 打开豆包登录页，后台两阶段探测登录态：
-    登录成功（code===0）→ 关窗并 on_logged_in()；用户直接关窗/加载失败 → on_aborted()。
-    开窗前先收掉同 profile 的 headless 工人（两进程不能同时开同一 profile）。"""
+    """有头 Edge 登录窗：用同一翻译接口确认服务可用，避免依赖旧登录探测接口。"""
 
     POLL_MS = 2000
 
@@ -552,17 +448,12 @@ class DoubaoLoginWindow(object):
         self._cbs_abort = [on_aborted] if on_aborted is not None else []
         self._timer = timer or DoubaoSession._qt_timer
         self._done = False
-        self._empty = 0
         self._dispatcher = _gui_dispatcher()
-        # 清掉本 profile 的所有实例（含父进程死后残留的 headless——attach 分不出
-        # 有头无头，连上残留 headless 登录窗就"隐形"了），再开有头窗口
         edge_driver.kill_profile_instances(profile_dir())
         self._page = edge_driver.EdgePage(headless=False, profile_dir=profile_dir(),
                                           cookie_provider=_load_cookie_jar)
-        self._phase = 'start'
         self._page.load(CHAT_URL, self._post(self._on_loaded))
         if self._page._proc is not None:
-            # 截图遮罩是全屏置顶窗：登录窗必须抢到它前面
             threading.Thread(target=edge_driver.bring_window_to_front,
                              args=(self._page._proc.pid,), daemon=True).start()
 
@@ -581,35 +472,19 @@ class DoubaoLoginWindow(object):
         if self._done:
             return
         if not self._page.alive():
-            self._finish(False)      # 用户把浏览器窗口关了
+            self._finish(False)
             return
-        if self._phase == 'start':
-            self._phase = 'collect'
-            self._page.run_js(build_probe_js(), self._post(lambda _ok: self._next()))
-        else:
-            self._page.run_js(build_probe_collect_js(), self._post(self._on_collect))
+        self._page.run_js(build_translate_js(['.'], 'zh'),
+                          self._post(self._on_probe))
 
-    def _next(self):
-        if not self._done:
-            self._timer(self.POLL_MS, self._tick)
-
-    def _on_collect(self, raw):
-        result = _decode(raw)
-        if isinstance(result, dict):
-            self._empty = 0
-            if result.get('logged_in'):
-                self._finish(True)
-                return
-            self._phase = 'start'
-        else:
-            # fetch 未落地：可能是慢，也可能是登录成功后的页面跳转/重载把
-            # window.__zbox_login 清了（实测：扫码登录成功回到 chat 会导航）——
-            # 连续空收就重发探测，否则永远停在 collect 相位探不到登录
-            self._empty += 1
-            if self._empty >= 2:
-                self._empty = 0
-                self._phase = 'start'
-        self._next()
+    def _on_probe(self, raw):
+        try:
+            parse_stream_response(raw, 1)
+        except DoubaoError:
+            if not self._done:
+                self._timer(self.POLL_MS, self._tick)
+            return
+        self._finish(True)
 
     def add_callbacks(self, on_logged_in, on_aborted=None):
         """去重复用存活窗口时，把新调用方的回调挂上来。"""
@@ -632,7 +507,6 @@ class DoubaoLoginWindow(object):
             _active_login = None
         get_ck = getattr(self._page, 'get_cookies', None)
         if logged_in and get_ck is not None:
-            # session cookie 不落盘（Chromium 不持久化）：先抓进本地罐再关窗
             get_ck(_DOUBAO_COOKIE_URLS,
                    lambda cs: self._finish_close(logged_in, cs))
             return

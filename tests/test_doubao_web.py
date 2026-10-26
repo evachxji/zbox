@@ -11,16 +11,14 @@ import doubao_web as dw
 
 
 class FakePage(object):
-    """按 JS 标记串脚本化应答：probe / fill / poll 各有一队列，load 可设成败。"""
+    """会话假页：导航和流式翻译应答可脚本化。"""
 
-    def __init__(self, load_ok=True, probes=(), fills=(), sends=(True,), polls=()):
+    def __init__(self, load_ok=True, translations=()):
         self.load_ok = load_ok
-        self.probes = list(probes)
-        self.fills = list(fills)
-        self.sends = list(sends)
-        self.polls = list(polls)
+        self.translations = list(translations)
         self.loaded = []
         self.scripts = []
+        self.pending_translation = None
 
     def load(self, url, cb):
         self.loaded.append(url)
@@ -28,14 +26,11 @@ class FakePage(object):
 
     def run_js(self, script, cb):
         self.scripts.append(script)
-        if dw.TAG_PROBE in script:
-            cb(self.probes.pop(0) if self.probes else None)
-        elif dw.TAG_FILL in script:
-            cb(self.fills.pop(0))
-        elif dw.TAG_SEND in script:
-            cb(self.sends.pop(0) if self.sends else None)
-        elif dw.TAG_POLL in script:
-            cb(self.polls.pop(0))
+        if dw.TAG_TRANSLATE in script:
+            if self.translations:
+                cb(self.translations.pop(0))
+            else:
+                self.pending_translation = cb
         else:
             cb(None)
 
@@ -52,44 +47,27 @@ def queued_timer():
     return _timer, tasks
 
 
-OK_PROBE = json.dumps({'settled': True, 'logged_in': True, 'input': True})
+def stream_response(items, code=0):
+    payload = json.dumps({'code': code, 'data': {'items': items}}, ensure_ascii=False)
+    body = 'event:json\ndata:' + payload + '\n\nevent:done\ndata:\n\n'
+    return json.dumps({'status': 200, 'body': body})
 
 
-class PureJsTest(unittest.TestCase):
-    def test_probe_js_has_tag_and_login_endpoint(self):
-        js = dw.build_probe_js()
-        self.assertIn(dw.TAG_PROBE, js)
-        self.assertIn('/alice/profile/self', js)
+class StreamingApiTest(unittest.TestCase):
+    def test_builds_cometix_stream_request_with_escaped_text(self):
+        js = dw.build_translate_js(['line 1\n"quoted"'], 'zh')
+        self.assertIn('stream_article_translate', js)
+        self.assertIn('raw_text', js)
+        self.assertIn(json.dumps(['line 1\n"quoted"'], ensure_ascii=False), js)
+        self.assertIn('/alice/user/launch', js)
+        self.assertNotIn('/alice/profile/self', js)
 
-    def test_probe_js_posts_with_visit_id(self):
-        # 2026-10 起 /alice/profile/self 只认 POST（GET 404，实测），
-        # 且 body 必须带 visit_id=localStorage.flow_tea_user_id——
-        # 空 visit_id 即使已登录也报 710010202（实测）
-        js = dw.build_probe_js()
-        self.assertIn("method: 'POST'", js)
-        self.assertIn('flow_tea_user_id', js)
-        self.assertIn('visit_id', js)
-
-    def test_collect_js_evaluates_selectors(self):
-        js = dw.build_probe_collect_js()
-        self.assertIn('chat_input', js)
-
-    def test_send_js_has_tag_and_selector(self):
-        js = dw.build_send_js()
-        self.assertIn(dw.TAG_SEND, js)
-        self.assertIn('chat_input_send_button', js)
-
-    def test_fill_js_escapes_prompt(self):
-        prompt = '第一行\n带"引号"和\\反斜杠'
-        js = dw.build_fill_js(prompt)
-        self.assertIn(dw.TAG_FILL, js)
-        # prompt 以 JSON 字符串字面量嵌入，原始换行/引号不能直接出现在 JS 里
-        body = js.split(dw.TAG_FILL, 1)[1]
-        self.assertNotIn('第一行\n带"引号"', body)
-        self.assertIn(json.dumps(prompt), js)
-
-    def test_poll_js_has_tag(self):
-        self.assertIn(dw.TAG_POLL, dw.build_poll_js())
+    def test_parses_cometix_sse_items_by_index(self):
+        payload = json.dumps({'code': 0, 'data': {'items': [
+            {'index': 1, 'res': '世界'}, {'index': 0, 'res': '你好'}]}})
+        raw = json.dumps({'status': 200, 'body':
+                          'event:json\ndata:' + payload + '\n\nevent:done\ndata:\n\n'})
+        self.assertEqual(dw.parse_stream_response(raw, 2), ['你好', '世界'])
 
 
 class ProfileTest(unittest.TestCase):
@@ -105,154 +83,103 @@ class ProfileTest(unittest.TestCase):
 
 
 class SessionFlowTest(unittest.TestCase):
-    def _run(self, page, timer=immediate_timer):
+    _stream = staticmethod(stream_response)
+
+    def _run(self, page, preloaded=False):
         results = {}
-
-        def on_done(texts):
-            results['done'] = texts
-
-        def on_error(err):
-            results['error'] = err
-
-        session = dw.DoubaoSession(page, timer=timer)
-        session.translate(['Hello'], 'zh', on_done, on_error)
+        session = dw.DoubaoSession(page)
+        session.translate(['Hello'], 'zh',
+                          lambda texts: results.setdefault('done', texts),
+                          lambda err: results.setdefault('error', err),
+                          preloaded=preloaded)
         return results
 
     def test_happy_path(self):
-        reply = json.dumps([{'id': 1, 'text': '你好'}], ensure_ascii=False)
-        page = FakePage(probes=[True, OK_PROBE], fills=[True],
-                        polls=[json.dumps({'done': False, 'text': None}),
-                               json.dumps({'done': True, 'text': reply})])
+        page = FakePage(translations=[self._stream([{'index': 0, 'res': '你好'}])])
         out = self._run(page)
         self.assertEqual(out.get('done'), ['你好'])
         self.assertEqual(page.loaded, [dw.CHAT_URL])
+        self.assertIn(dw.TAG_TRANSLATE, page.scripts[0])
+
+    def test_preloaded_page_skips_navigation(self):
+        page = FakePage(translations=[self._stream([{'index': 0, 'res': '你好'}])])
+        out = self._run(page, preloaded=True)
+        self.assertEqual(out.get('done'), ['你好'])
+        self.assertEqual(page.loaded, [])
 
     def test_network_load_failure(self):
         page = FakePage(load_ok=False)
         out = self._run(page)
         self.assertIsInstance(out.get('error'), dw.DoubaoNetworkError)
 
-    def test_not_logged_in_triggers_login_then_retries(self):
-        reply = json.dumps([{'id': 1, 'text': '你好'}], ensure_ascii=False)
-        page = FakePage(probes=[True, json.dumps({'settled': True, 'logged_in': False, 'input': True}),
-                                True, OK_PROBE],
-                        fills=[True], polls=[{'done': True, 'text': reply}])
-        out = {}
-        session = dw.DoubaoSession(page, timer=immediate_timer)
-        session.on_login_required = lambda: session.notify_logged_in()
-        session.translate(['Hello'], 'zh',
-                          lambda texts: out.setdefault('done', texts),
-                          lambda err: out.setdefault('error', err))
-        self.assertEqual(out.get('done'), ['你好'])
-        self.assertEqual(len(page.loaded), 2)   # 登录成功后重新走了一遍流程
+    def test_auth_error_triggers_login_handler(self):
+        page = FakePage(translations=[self._stream([], code=710012000)])
+        session = dw.DoubaoSession(page)
+        events = []
+        session.on_login_required = lambda: events.append('login')
+        session.translate(['Hello'], 'zh', lambda _: None,
+                          lambda err: events.append(type(err).__name__))
+        self.assertEqual(events, ['login'])
 
-    def test_structure_changed(self):
-        page = FakePage(probes=[True, json.dumps({'settled': True, 'logged_in': True, 'input': False})])
+    def test_auth_error_without_handler_is_reported(self):
+        page = FakePage(translations=[self._stream([], code=710012000)])
         out = self._run(page)
-        self.assertIsInstance(out.get('error'), dw.DoubaoStructureChanged)
+        self.assertIsInstance(out.get('error'), dw.DoubaoLoginRequired)
 
-    def test_fill_failure_is_structure_error(self):
-        page = FakePage(probes=[True, OK_PROBE], fills=[False])
-        out = self._run(page)
-        self.assertIsInstance(out.get('error'), dw.DoubaoStructureChanged)
+    def test_http_401_triggers_login_handler(self):
+        page = FakePage(translations=[json.dumps({'status': 401, 'body': ''})])
+        session = dw.DoubaoSession(page)
+        events = []
+        session.on_login_required = lambda: events.append('login')
+        session.translate(['Hello'], 'zh', lambda _: events.append('done'),
+                          lambda err: events.append(type(err).__name__))
+        self.assertEqual(events, ['login'])
 
-    def test_bad_reply_json(self):
-        page = FakePage(probes=[True, OK_PROBE], fills=[True],
-                        polls=[json.dumps({'done': True, 'text': '不是 JSON'})])
+    def test_http_403_does_not_trigger_login_guide(self):
+        page = FakePage(translations=[json.dumps({'status': 403, 'body': ''})])
+        session = dw.DoubaoSession(page)
+        events = []
+        session.on_login_required = lambda: events.append('login')
+        session.translate(['Hello'], 'zh', lambda _: events.append('done'),
+                          lambda err: events.append(type(err).__name__))
+        self.assertEqual(events, ['DoubaoError'])
+
+    def test_bad_stream_is_reply_error(self):
+        page = FakePage(translations=[json.dumps({'status': 200, 'body': 'not SSE'})])
         out = self._run(page)
         self.assertIsInstance(out.get('error'), dw.DoubaoReplyError)
 
-    def test_send_button_never_appears_is_structure_error(self):
-        page = FakePage(probes=[True, OK_PROBE], fills=[True], sends=[None] * 50)
-        timer, tasks = queued_timer()
-        session = dw.DoubaoSession(page, timer=timer)
+    def test_cancel_ignores_late_translation(self):
+        page = FakePage()
+        session = dw.DoubaoSession(page)
         out = {}
         session.translate(['Hello'], 'zh',
                           lambda texts: out.setdefault('done', texts),
-                          lambda err: out.setdefault('error', err))
-        for _ in range(100):
-            if not tasks:
-                break
-            tasks.pop(0)()
-        self.assertIsInstance(out.get('error'), dw.DoubaoStructureChanged)
-
-    def test_poll_timeout(self):
-        timer, tasks = queued_timer()
-        page = FakePage(probes=[True, OK_PROBE], fills=[True],
-                        polls=[json.dumps({'done': False, 'text': None})] * 200)
-        session = dw.DoubaoSession(page, timer=timer, poll_timeout_s=5)
-        out = {}
-        session.translate(['Hello'], 'zh',
-                          lambda texts: out.setdefault('done', texts),
-                          lambda err: out.setdefault('error', err))
-        for _ in range(200):
-            if not tasks:
-                break
-            tasks.pop(0)()
-        self.assertIsInstance(out.get('error'), dw.DoubaoTimeout)
-
-    def test_unsettled_probe_keeps_polling(self):
-        import json as _json
-        page = FakePage(probes=[True,
-                                _json.dumps({'settled': False}),
-                                _json.dumps({'settled': False}),
-                                OK_PROBE],
-                        fills=[True],
-                        polls=[_json.dumps({'done': True,
-                                            'text': _json.dumps([{'id': 1, 'text': '你好'}])})])
-        out = self._run(page)
-        self.assertEqual(out.get('done'), ['你好'])
-
-    def test_probe_never_settles_times_out(self):
-        page = FakePage(probes=[True])   # start 成功，collect 永远 None
-        session = dw.DoubaoSession(page, timer=immediate_timer)
-        out = {}
-        session.translate(['Hello'], 'zh',
-                          lambda texts: out.setdefault('done', texts),
-                          lambda err: out.setdefault('error', err))
-        self.assertIsInstance(out.get('error'), dw.DoubaoTimeout)
-
-    def test_collect_js_has_tag(self):
-        self.assertIn(dw.TAG_PROBE, dw.build_probe_collect_js())
-        self.assertIn('__zbox_login', dw.build_probe_collect_js())
-
-    def test_late_result_ignored_after_cancel(self):
-        timer, tasks = queued_timer()
-        page = FakePage(probes=[True, OK_PROBE], fills=[True],
-                        polls=[json.dumps({'done': True,
-                                'text': json.dumps([{'id': 1, 'text': 'x'}])})])
-        session = dw.DoubaoSession(page, timer=timer)
-        out = {}
-        session.translate(['Hello'], 'zh',
-                          lambda texts: out.setdefault('done', texts),
-                          lambda err: out.setdefault('error', err))
+                          lambda err: out.setdefault('error', err), preloaded=True)
         session.cancel()
-        while tasks:
-            tasks.pop(0)()
+        page.pending_translation(self._stream([{'index': 0, 'res': '你好'}]))
         self.assertEqual(out, {})
 
 
 class _LoginFakePage(object):
-    """登录窗假页：区分探测启动（含 fetch）与收取，收取按队列脚本化应答。"""
+    """登录窗假页：把同一 SSE API 的结果按队列返回。"""
 
-    def __init__(self, collects, load_ok=True):
-        self.collects = list(collects)
+    def __init__(self, responses=(), load_ok=True):
+        self.responses = list(responses)
         self.load_ok = load_ok
-        self.probe_starts = 0
         self.closed = False
         self._alive = True
-        self._proc = None   # 无进程对象：跳过抢前台逻辑
+        self._proc = None
         self.cookies_to_serve = None
+        self.probe_starts = 0
 
     def load(self, url, cb):
         cb(self.load_ok)
 
     def run_js(self, script, cb):
-        if dw.TAG_PROBE in script and 'fetch(' in script:
+        if dw.TAG_TRANSLATE in script:
             self.probe_starts += 1
-            cb(True)
-        elif dw.TAG_PROBE in script:
-            cb(self.collects.pop(0) if self.collects else '')
+            cb(self.responses.pop(0) if self.responses else stream_response([], 710012000))
         else:
             cb(None)
 
@@ -277,37 +204,40 @@ class LoginWindowDedupTest(unittest.TestCase):
         dw._active_login = None
         self.addCleanup(setattr, dw, '_active_login', None)
 
-    def _open(self, pages, events, tag, collects=None, timer=None):
-        with patch('edge_driver.kill_profile_instances'),              patch('edge_driver.EdgePage',
-                   lambda **kw: pages.append(_LoginFakePage(collects or [])) or pages[-1]):
+    def _open(self, pages, events, tag, responses=(), timer=None):
+        with patch('edge_driver.kill_profile_instances'), \
+             patch('edge_driver.EdgePage',
+                   lambda **kw: pages.append(_LoginFakePage(responses)) or pages[-1]):
             return dw.open_login_window(
                 on_logged_in=lambda: events.append(tag + ':login'),
                 on_aborted=lambda: events.append(tag + ':abort'),
-                timer=timer or immediate_timer)
+                timer=timer)
 
     def test_second_open_reuses_alive_window(self):
         pages, events = [], []
-        w1 = self._open(pages, events, 'a')
-        w2 = self._open(pages, events, 'b')
+        timer, tasks = queued_timer()
+        w1 = self._open(pages, events, 'a', timer=timer)
+        w2 = self._open(pages, events, 'b', timer=timer)
         self.assertIs(w1, w2)
-        self.assertEqual(len(pages), 1)   # 没开第二个 Edge 窗口
+        self.assertEqual(len(pages), 1)
+        self.assertEqual(len(tasks), 1)
 
     def test_reused_window_notifies_all_callers(self):
         pages, events = [], []
-        timer, tasks = queued_timer()   # 队列定时器：w2 挂上后才推进轮询
-        ok = json.dumps({'settled': True, 'logged_in': True, 'input': True})
-        w1 = self._open(pages, events, 'a', collects=[ok], timer=timer)
-        w2 = self._open(pages, events, 'b')
+        timer, tasks = queued_timer()
+        ok = stream_response([{'index': 0, 'res': '.'}])
+        w1 = self._open(pages, events, 'a', responses=[ok], timer=timer)
+        w2 = self._open(pages, events, 'b', timer=timer)
         self.assertIs(w1, w2)
-        tasks.pop(0)()   # start
-        tasks.pop(0)()   # collect -> 已登录，两家回调都通知
+        tasks.pop(0)()
         self.assertEqual(sorted(events), ['a:login', 'b:login'])
 
     def test_open_after_window_closed_creates_new(self):
         pages, events = [], []
-        w1 = self._open(pages, events, 'a')
-        pages[0]._alive = False   # 用户把上一个登录窗关了
-        w2 = self._open(pages, events, 'b')
+        timer, _tasks = queued_timer()
+        w1 = self._open(pages, events, 'a', timer=timer)
+        pages[0]._alive = False
+        w2 = self._open(pages, events, 'b', timer=timer)
         self.assertIsNot(w1, w2)
         self.assertEqual(len(pages), 2)
 
@@ -380,8 +310,8 @@ class LoginWindowCookieDumpTest(unittest.TestCase):
         dw._cookies_file = lambda: self.jar
         self.addCleanup(setattr, dw, '_cookies_file', self._orig)
 
-    def _make(self, collects, cookies=None, load_ok=True):
-        page = _LoginFakePage(collects, load_ok=load_ok)
+    def _make(self, responses, cookies=None, load_ok=True):
+        page = _LoginFakePage(responses, load_ok=load_ok)
         page.cookies_to_serve = cookies
         events = []
         with patch('edge_driver.kill_profile_instances'), \
@@ -393,7 +323,7 @@ class LoginWindowCookieDumpTest(unittest.TestCase):
         return win, events
 
     def test_login_success_dumps_cookies_to_jar(self):
-        ok = json.dumps({'settled': True, 'logged_in': True, 'input': True})
+        ok = stream_response([{'index': 0, 'res': '.'}])
         jar_cookies = [{'name': 'sessionid', 'value': 'abc', 'domain': '.doubao.com',
                         'path': '/', 'secure': True, 'httpOnly': True,
                         'session': True}]
@@ -410,14 +340,14 @@ class LoginWindowCookieDumpTest(unittest.TestCase):
 
 
 class LoginWindowTest(unittest.TestCase):
-    """DoubaoLoginWindow 轮询状态机：探测重发、关窗放弃、加载失败。"""
+    """登录窗轮询同一流式接口，直到成功或用户关闭窗口。"""
 
-    def _make_window(self, collects, load_ok=True):
+    def _make_window(self, responses, load_ok=True):
         import os as _os
         _os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
         from PySide6.QtWidgets import QApplication
         self.qapp = QApplication.instance() or QApplication([])
-        page = _LoginFakePage(collects, load_ok=load_ok)
+        page = _LoginFakePage(responses, load_ok=load_ok)
         events = []
         timer, tasks = queued_timer()
         with patch('edge_driver.kill_profile_instances'), \
@@ -432,30 +362,16 @@ class LoginWindowTest(unittest.TestCase):
         for _ in range(n):
             tasks.pop(0)()
 
-    def test_reissues_probe_after_navigation_wipes_result(self):
-        """登录跳转/重载会清掉 window.__zbox_login：连续空收必须重发探测，
-        否则永远停在 collect 相位探不到登录（实测缺陷）。"""
-        ok = json.dumps({'settled': True, 'logged_in': True, 'input': True})
-        win, page, tasks, events = self._make_window(['', '', ok])
-        self._pump(tasks)        # start：首发探测
-        self._pump(tasks)        # collect 空 1（fetch 未落地/被清了）
-        self._pump(tasks)        # collect 空 2 → 标记重发
-        self._pump(tasks)        # start：重发探测
-        self.assertEqual(page.probe_starts, 2)
-        self._pump(tasks)        # collect：已登录
-        self.assertEqual(events, ['login'])
-        self.assertTrue(page.closed)
-
-    def test_settled_not_logged_in_reissues_probe(self):
+    def test_retries_auth_error_until_api_accepts_translation(self):
+        ok = stream_response([{'index': 0, 'res': '.'}])
         win, page, tasks, events = self._make_window(
-            [json.dumps({'settled': True, 'logged_in': False, 'input': True}),
-             json.dumps({'settled': True, 'logged_in': True, 'input': True})])
-        self._pump(tasks, 2)     # start + collect（未登录）→ 标记重发
+            [stream_response([], 710012000), ok])
+        self._pump(tasks)
         self.assertEqual(events, [])
-        self._pump(tasks)        # start：重发探测
-        self.assertEqual(page.probe_starts, 2)
-        self._pump(tasks)        # collect：已登录
+        self._pump(tasks)
         self.assertEqual(events, ['login'])
+        self.assertEqual(page.probe_starts, 2)
+        self.assertTrue(page.closed)
 
     def test_user_closing_window_aborts(self):
         win, page, tasks, events = self._make_window([])

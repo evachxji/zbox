@@ -7,16 +7,15 @@
   WM_HOTKEY；配置为空 = 不注册；apply() 即时注销重注册。
 - 截长图：灰罩由静态全屏窗 _LongMask 贴出（选区裁剪留空透出活页面——抓帧抓
   合成屏，选区内画任何东西都会污染拼接帧；全屏分层窗只画一次，会动的内容
-  放进来每次 repaint 整窗上传 DWM 会卡鼠标）；默认手动滚轮（守卫令牌桶限速），
-  或点「自动下滚」由 PostMessageW 直投 WM_MOUSEWHEEL 驱动页面；定时器抓选区帧、
-  按行签名纵向拼接；✓ 完成导出，Esc 退出（键盘钩子拦截）。
+  放进来每次 repaint 整窗上传 DWM 会卡鼠标）；默认手动滚轮原样放行，检测到无法
+  可靠拼接时提示返回断点继续；自动下滚由 PostMessageW 直投 WM_MOUSEWHEEL 驱动页面；
+  定时器抓选区帧、按行签名纵向拼接；✓ 完成导出，Esc 退出（键盘钩子拦截）。
 """
 import ctypes
 import io
 import os
 import threading
 from operator import sub
-import time
 import traceback
 from ctypes import wintypes
 from datetime import datetime
@@ -66,13 +65,14 @@ _dwm = ctypes.windll.dwmapi
 _dwm.DwmGetWindowAttribute.restype = ctypes.c_long
 _dwm.DwmGetWindowAttribute.argtypes = [
     wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
-_u32.mouse_event.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.DWORD,
-                             wintypes.DWORD, ctypes.c_size_t]
 _u32.SetWindowsHookExW.restype = ctypes.c_void_p
 _u32.UnhookWindowsHookEx.argtypes = [ctypes.c_void_p]
 _u32.CallNextHookEx.restype = wintypes.LPARAM
 _u32.CallNextHookEx.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_size_t, ctypes.c_ssize_t]
 _u32.GetMessageW.restype = ctypes.c_int
+_u32.PeekMessageW.restype = wintypes.BOOL
+_u32.PeekMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND,
+                              wintypes.UINT, wintypes.UINT, wintypes.UINT]
 _u32.PostThreadMessageW.argtypes = [wintypes.DWORD, wintypes.UINT,
                                     ctypes.c_size_t, ctypes.c_ssize_t]
 
@@ -252,6 +252,7 @@ QPushButton#shotConfirm {
     background: %(accent)s; border: none; border-radius: 8px;
     color: %(accent_text)s; font: 600 17px "%(cn)s"; padding: 0 14px;
 }
+QPushButton#shotConfirm:disabled { background: %(bar_border)s; color: %(icon)s; }
 QPushButton#shotGhost {
     background: transparent; border: 1px solid %(bar_border)s; border-radius: 8px;
     color: %(icon)s; font: 13px "%(cn)s"; padding: 0 14px;
@@ -274,6 +275,7 @@ QLabel#shotSize {
     background: %(label_bg)s; color: %(accent)s; border: 1px solid %(label_border)s;
     border-radius: 6px; font: 13px "%(num)s"; padding: 5px 12px;
 }
+QLabel#shotLongHint { color: %(accent)s; font: 12px "%(cn)s"; }
 """ % dict({'cn': cn, 'num': num}, **pal)
 
 
@@ -452,11 +454,65 @@ def _find_shift(prev, cur):
     return best_s, best_d
 
 
+def _long_feed_frame(state, frame, wheel_pending):
+    """将一帧并入长图；断点期间只在原锚点重新出现后恢复。"""
+    sig = _row_sig(frame)
+    if state['prev_img'] is None:
+        state['chunks'].append(frame)
+        state['prev_img'] = frame
+        state['prev_sig'] = sig
+        state['wheel_stable'] = 0
+        return 'seed', frame
+
+    s, d = _find_shift(state['prev_sig'], sig)
+    if state.get('interrupted'):
+        if _same_frame(state['prev_img'], frame):
+            state['prev_img'] = frame
+            state['prev_sig'] = sig
+            state['interrupted'] = False
+            state['wheel_pending'] = False
+            state['wheel_stable'] = 0
+            return 'recovered', None
+        return 'interrupted', None
+
+    shift = s * _SIG_ROW
+    if 0 < shift < frame.height() and d <= 10:
+        new = frame.copy(0, frame.height() - shift, frame.width(), shift)
+        state['chunks'].append(new)
+        state['prev_img'] = frame
+        state['prev_sig'] = sig
+        state['wheel_pending'] = False
+        state['wheel_stable'] = 0
+        return 'appended', new
+    if s == 0 and d <= 10:
+        if wheel_pending:
+            if not _same_frame(state['prev_img'], frame):
+                state['interrupted'] = True
+                return 'interrupted', None
+            stable = state.get('wheel_stable', 0) + 1
+            if stable >= 2:
+                state['wheel_pending'] = False
+                state['wheel_stable'] = 0
+                return 'settled', None
+            state['wheel_stable'] = stable
+            return 'pending', None
+        return 'steady', None
+    if wheel_pending:
+        state['interrupted'] = True
+        return 'interrupted', None
+    return 'ignored', None
+
+
+def _same_frame(a, b):
+    """确认断点锚点完全相同，避免有损行签名把近似画面误当成已恢复。"""
+    return a.size() == b.size() and a == b
+
+
 # ---------------- 长图控制条 ----------------
 
 class _LongBar(QWidget):
     """截长图模式的悬浮控制条：遮罩隐藏后它是会话唯一的可见 UI——
-    「自动下滚」+「✓ 完成」，摆在选区底部（空间不够换顶部）；取消走 Esc（_WheelGuard 拦截）。"""
+    「自动下滚」+「✓ 完成」，断点时显示提示并禁用操作；摆在选区底部（空间不够换顶部），取消走 Esc。"""
 
     done = Signal()
     canceled = Signal()
@@ -474,6 +530,10 @@ class _LongBar(QWidget):
         row = QHBoxLayout(card)
         row.setContentsMargins(ui.sc(6), ui.sc(6), ui.sc(6), ui.sc(6))
         row.setSpacing(ui.sc(6))
+        self._hint = QLabel(t('shot.long.interrupted'))
+        self._hint.setObjectName('shotLongHint')
+        self._hint.hide()
+        row.addWidget(self._hint)
         self._auto_btn = QPushButton(t('shot.long.auto'))
         self._auto_btn.setObjectName('shotGhost')
         self._auto_btn.setFixedHeight(ui.sc(28))
@@ -482,14 +542,14 @@ class _LongBar(QWidget):
         self._auto_btn.setToolTip(t('shot.long.auto_tooltip'))
         self._auto_btn.clicked.connect(self.auto_clicked)
         row.addWidget(self._auto_btn)
-        ok = QPushButton(t('shot.long.done'))
-        ok.setObjectName('shotConfirm')
-        ok.setFixedHeight(ui.sc(28))
-        ok.setCursor(Qt.PointingHandCursor)
-        ok.setFocusPolicy(Qt.NoFocus)
-        ok.setToolTip(t('shot.long.done_tooltip'))
-        ok.clicked.connect(self.done)
-        row.addWidget(ok)
+        self._done_btn = QPushButton(t('shot.long.done'))
+        self._done_btn.setObjectName('shotConfirm')
+        self._done_btn.setFixedHeight(ui.sc(28))
+        self._done_btn.setCursor(Qt.PointingHandCursor)
+        self._done_btn.setFocusPolicy(Qt.NoFocus)
+        self._done_btn.setToolTip(t('shot.long.done_tooltip'))
+        self._done_btn.clicked.connect(self.done)
+        row.addWidget(self._done_btn)
         self.setStyleSheet(qss)
         # 两个状态的文案宽度都量一遍：切换只换文字、不重排窗口，
         # 宽度按较长的那个预留，避免英文 "Stop scrolling" 被裁。
@@ -504,6 +564,19 @@ class _LongBar(QWidget):
 
     def set_auto_on(self, on):
         self._auto_btn.setText(t('shot.long.stop') if on else t('shot.long.auto'))
+
+    def set_interrupted(self, on):
+        self._hint.setText(t('shot.long.interrupted'))
+        self._hint.setVisible(on)
+        self._auto_btn.setEnabled(not on)
+        self._done_btn.setEnabled(not on)
+        self.adjustSize()
+
+    def set_pending(self, on):
+        self._hint.setText(t('shot.long.pending'))
+        self._hint.setVisible(on)
+        self._done_btn.setEnabled(not on)
+        self.adjustSize()
 
     def showEvent(self, e):
         super(_LongBar, self).showEvent(e)
@@ -680,10 +753,6 @@ class _LongChrome(QWidget):
 # ---------------- 截长图自动滚动 ----------------
 
 _WM_MOUSEWHEEL = 0x020A
-_MOUSEEVENTF_WHEEL = 0x0800
-_WHEEL_MAGIC = 0x5A09     # 自补发事件的 dwExtraInfo 标记，钩子见到直接放行
-_WHEEL_MAX = 120          # 手动期滚轮限速：令牌桶容量（一格）
-_WHEEL_RATE = 400.0       # 令牌桶回补速度（delta/秒）≈ 一格/300ms，与 280ms 抓帧节奏匹配
 _GWL_EXSTYLE = -20
 _WS_EX_PASS_THROUGH = 0x00080020   # WS_EX_LAYERED | WS_EX_TRANSPARENT
 _CWP_SKIP = 0x0007                 # CWP_SKIPINVISIBLE | SKIPDISABLED | SKIPTRANSPARENT
@@ -812,10 +881,8 @@ def _guard_log():
 
 class _WheelGuard(object):
     """截长图期间的输入守卫（WH_MOUSE_LL + WH_KEYBOARD_LL，仅截长图期间安装）：
-    - 手动期（默认）：滚轮令牌桶限速（容量一格，~一格/300ms 回补）——
-      滚得再快页面也只慢慢走（快了 280ms 一帧的签名匹配跟不上）；
-      预算够原样放行（慢滚零延迟），超预算吞掉原事件按余量立即补发
-      （即时补发不迟滞；自补发带 dwExtraInfo 标记放行）；
+    - 手动期（默认）：首帧锚点建立前暂时吞掉滚轮，之后原样放行；
+      拼接无法确认连续时保留上一个锚点，提示用户返回断点后继续，避免静默导出缺段长图；
     - 自动下滚期：滚轮不滚页面（页面由 PostMessageW 驱动）——向下吞掉，
       向上吞掉并置 stop_auto（用户想接管）；点击落在截图区域内也置 stop_auto，
       点击本身放行；
@@ -827,9 +894,12 @@ class _WheelGuard(object):
                                wintypes.WPARAM, wintypes.LPARAM)
 
     def __init__(self):
-        self.manual = True       # 主线程维护：True = 手动期（滚轮限速）
-        self._budget = float(_WHEEL_MAX)
-        self._last_t = 0.0
+        self.manual = True       # 主线程维护：True = 手动滚轮期
+        self.capture_ready = False  # 初始锚点建立前暂时吞掉滚轮
+        self.wheel_seq = 0        # 手动滚轮事件计数，供抓帧线程识别是否有未匹配滚动
+        self.finishing = False    # 收尾/导出期间吞掉滚轮，避免最终帧后目标继续移动
+        self._mouse_ready = False
+        self._stop_requested = False
         self.stop_auto = False   # 钩子线程置位（往回滚/点击截图区域），主线程消费
         self.esc = False         # Esc 标志（钩子线程置位，主线程消费）
         self.sel_phys = None     # 截图区域物理坐标 (l, t, r, b)，点击命中判定用
@@ -842,20 +912,35 @@ class _WheelGuard(object):
 
     def start(self):
         threading.Thread(target=self._run, daemon=True).start()
-        self._ready.wait(2)
+        if not self._ready.wait(2) or not self._mouse_ready:
+            self.stop()
+            return False
+        return True
 
     def stop(self):
+        self._stop_requested = True
         if self._tid:
             _u32.PostThreadMessageW(self._tid, 0x0012, 0, 0)   # WM_QUIT
 
     def _run(self):
         self._tid = ctypes.windll.kernel32.GetCurrentThreadId()
         self._cb = self._PROC(self._wheel_callback)
-        self._hook = _u32.SetWindowsHookExW(14, self._cb, None, 0)      # WH_MOUSE_LL
-        self._kcb = self._PROC(self._key_callback)
-        self._khook = _u32.SetWindowsHookExW(13, self._kcb, None, 0)    # WH_KEYBOARD_LL
+        try:
+            self._hook = _u32.SetWindowsHookExW(14, self._cb, None, 0)      # WH_MOUSE_LL
+            self._mouse_ready = bool(self._hook)
+            self._kcb = self._PROC(self._key_callback)
+            self._khook = _u32.SetWindowsHookExW(13, self._kcb, None, 0)    # WH_KEYBOARD_LL
+        except Exception:
+            _guard_log()
+        msg = wintypes.MSG()
+        _u32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 0)  # 建立队列后再允许 start() 发 WM_QUIT
         self._ready.set()
-        if not self._hook and not self._khook:
+        if self._stop_requested or (not self._hook and not self._khook):
+            if self._hook:
+                _u32.UnhookWindowsHookEx(self._hook)
+            if self._khook:
+                _u32.UnhookWindowsHookEx(self._khook)
+            self._hook = self._khook = self._tid = None
             return
         try:
             msg = wintypes.MSG()
@@ -868,34 +953,21 @@ class _WheelGuard(object):
                 _u32.UnhookWindowsHookEx(self._khook)
             self._hook = self._khook = self._tid = None
 
-    def _throttle(self, amount, now=None):
-        """令牌桶限速：返回本次允许放行的滚动量（delta）。容量一格，按速率回补。"""
-        now = time.monotonic() if now is None else now
-        self._budget = min(float(_WHEEL_MAX),
-                           self._budget + (now - self._last_t) * _WHEEL_RATE)
-        self._last_t = now
-        take = min(amount, self._budget)
-        self._budget -= take
-        return int(round(take))
-
     def _wheel_callback(self, nCode, wParam, lParam):
         try:
             if nCode == 0 and wParam == _WM_MOUSEWHEEL:
                 st = _MSLLHOOKSTRUCT.from_address(lParam)
-                if st.dwExtraInfo != _WHEEL_MAGIC:
-                    delta = ctypes.c_short(st.mouseData >> 16).value
-                    if self.manual:
-                        allow = self._throttle(abs(delta))
-                        if allow < abs(delta):   # 超预算：吞掉原事件，按余量立即补发
-                            if allow > 0:
-                                emit = allow if delta > 0 else -allow
-                                _u32.mouse_event(_MOUSEEVENTF_WHEEL, 0, 0,
-                                                 emit & 0xFFFFFFFF, _WHEEL_MAGIC)
-                            return 1
-                    else:
-                        if delta > 0:
-                            self.stop_auto = True   # 往回滚：用户想接管
-                        return 1   # 自动下滚期滚轮不滚页面
+                delta = ctypes.c_short(st.mouseData >> 16).value
+                if self.finishing:
+                    return 1
+                if self.manual:
+                    if not self.capture_ready:
+                        return 1
+                    self.wheel_seq += 1
+                else:
+                    if delta > 0:
+                        self.stop_auto = True   # 往回滚：用户想接管
+                    return 1   # 自动下滚期滚轮不滚页面
             elif nCode == 0 and wParam in (0x0201, 0x0204) and not self.manual:
                 # 左/右键按下落在截图区域内：回退手动（点击本身放行给目标窗口）
                 sp = self.sel_phys
@@ -2432,7 +2504,7 @@ class ShotOverlay(QWidget):
         self._tl8n = {'state': 'checking', 'sel': QRect(self._sel), 'cancel': cancel,
                       'session': None, 'login_win': None, 'base': None, 'paragraphs': None,
                       'translations': None, 'visible': False, 'layer': None,
-                      'login': None, 'precheck_done': False, 'page': None,
+                      'page_ready': None, 'page_ready_done': False, 'page': None,
                       'ocr_result': None, 'pin': pin}
         self._tl8n_hint('shot.translate.translating')
         self._update_tl8n_button()
@@ -2445,9 +2517,7 @@ class ShotOverlay(QWidget):
         QTimer.singleShot(0, self._tl8n_kickoff)
 
     def _tl8n_kickoff(self):
-        """翻译流水线启动（点击后下一拍）：OCR 与豆包登录态预检并行——
-        未登录 ~3s 直接退出引导不白等 OCR；已登录则 OCR 与页面加载重叠，
-        预检过的页面直接复用。"""
+        """翻译流水线启动（点击后下一拍）：并行准备网页上下文并运行本地 OCR。"""
         st = self._tl8n
         if st is None or st.get('cancel') is None or st['cancel'].is_set():
             return
@@ -2508,11 +2578,11 @@ class ShotOverlay(QWidget):
                 payload.close()   # 遮罩已收，预热页别留孤儿
             return
         if stage == 'page_warm':
-            # Edge 预热完成：进登录态预检（取消态直接收页）
+            # Edge 预热完成：加载网页 API 宿主页（取消态直接收页）
             if st.get('cancel') is not None and st['cancel'].is_set():
                 payload.close()
                 return
-            self._check_login(payload, lambda result: self._on_login_state(result, payload))
+            self._prepare_page(payload, lambda result: self._on_page_ready(result, payload))
             return
         if stage == 'error':
             if st.get('cancel') is not None and st['cancel'].is_set():
@@ -2534,44 +2604,34 @@ class ShotOverlay(QWidget):
             return
         if st['cancel'].is_set() or st['sel'] != self._sel:
             return
-        if st['login'] is False:
-            return   # 预检已判未登录，退出流程走过了
-        if st['login'] is None and not st['precheck_done']:
-            st['ocr_result'] = payload   # OCR 先完成：等预检结果再决定去向
+        if not st['page_ready_done']:
+            st['ocr_result'] = payload   # OCR 先完成：等网页加载结果再决定是否复用页面
             return
         self._tl8n_start_translate(payload)
 
     def _make_page(self):
-        """登录预检用的 headless 页（测试注入假货）。"""
+        """豆包流式接口用的 headless 页（测试注入假货）。"""
         import doubao_web
         return doubao_web.make_page(self)
 
-    def _check_login(self, page, cb):
+    def _prepare_page(self, page, cb):
         import doubao_web
-        doubao_web.check_login(page, cb)
+        doubao_web.prepare_page(page, cb)
 
-    def _on_login_state(self, result, page):
-        """登录态预检结果：False → 退出截屏 + 登录引导；True → 复用已加载页面接着翻；
-        None（预检失败如断网）→ 等 OCR 完成后走完整 session 流程（会重新 load+probe）。"""
+    def _on_page_ready(self, result, page):
+        """页面加载成功后复用同源上下文；失败时由翻译会话重试加载。"""
         st = self._tl8n
         if st is None:
-            page.close()   # 遮罩已关，预检页别留孤儿
+            page.close()   # 遮罩已关，预热页别留孤儿
             return
-        if result is False:
-            st['login'] = False
-            page.close()
-            st['page'] = None
-            self._tl8n_show_login()
-            return
-        st['login'] = True if result else None
-        st['precheck_done'] = True
-        # 已登录（复用预检页）或预检失败（session 完整重走）都继续；OCR 先完成就在这接
+        st['page_ready'] = True if result else None
+        st['page_ready_done'] = True
         if st.get('ocr_result') is not None:
             payload = st.pop('ocr_result')
             self._tl8n_start_translate(payload)
 
     def _tl8n_start_translate(self, payload):
-        """OCR 完成且登录态可用：聚类 → 语言判断 → 建 session 翻译。"""
+        """OCR 完成且页面可用：聚类 → 语言判断 → 建 session 翻译。"""
         st = self._tl8n
         if st is None or st['cancel'].is_set() or st['sel'] != self._sel:
             return
@@ -2617,17 +2677,17 @@ class ShotOverlay(QWidget):
         session.on_login_required = self._tl8n_show_login
         session.translate([p.text for p in paras], target,
                           self._tl8n_done, self._tl8n_error,
-                          preloaded=st['login'] is True)
+                          preloaded=st['page_ready'] is True)
 
     def _make_translator(self):
-        """生产豆包会话：优先复用登录预检已加载的页（跳过一次 load）。"""
+        """生产豆包会话：优先复用准备阶段已加载的页（跳过一次 load）。"""
         import doubao_web
         st = self._tl8n
         page = (st or {}).get('page') or doubao_web.make_page(self)
         return doubao_web.DoubaoSession(page)
 
     def _tl8n_show_login(self):
-        """豆包未登录/登录过期：退出截屏状态，弹引导窗让用户登录网页版豆包；
+        """豆包接口要求登录时：退出截屏状态，弹引导窗让用户登录网页版豆包；
         登录完成后由引导窗告知翻译可用（用户重新截图再翻）。"""
         st = self._tl8n
         if st is None:
@@ -2939,21 +2999,32 @@ class ShotOverlay(QWidget):
     # ---------- 截长图 ----------
 
     def _start_long(self):
-        """进入长图模式：锁选区、本体藏起（灰罩由 _LongChrome 贴出）。默认用户手动滚轮（守卫限长），点「自动下滚」才自动滚。"""
+        """进入长图模式：锁选区、本体藏起；默认手动滚轮原样放行，自动下滚按固定节奏驱动。"""
         if self._editor:
             self._commit_editor()
         if not (self._mode == 'ready' and self._sel.isValid()):
             return
         g = self._global_sel()
         scr = QGuiApplication.screenAt(g.center()) or QGuiApplication.primaryScreen()
+        vg = self.geometry()
+        dpr = scr.devicePixelRatio() or 1.0
         self._long = {'screen': scr, 'chunks': [], 'prev_img': None, 'prev_sig': None,
-                      'timer': QTimer(self)}
+                      'interrupted': False, 'wheel_seq': 0, 'wheel_pending': False,
+                      'bounds': vg, 'timer': QTimer(self)}
+        guard = _WheelGuard()
+        # 输入守卫先安装；首帧锚点建立前暂时吞掉选区内滚轮，避免启动时漏掉顶部。
+        guard.sel_phys = (int(g.left() * dpr), int(g.top() * dpr),
+                          int(g.right() * dpr), int(g.bottom() * dpr))
+        self._long['guard'] = guard
+        if not guard.start():
+            self._long = None
+            QToolTip.showText(QCursor.pos(), t('shot.long.guard_failed'), self)
+            return
         self.hide()   # 遮罩本体藏起（画的是冻结底图，留着会污染抓帧）；灰罩由 _LongChrome 贴出
         bar = _LongBar(_qss(self.pal, self._cn, self._num))
         bar.done.connect(lambda: self._stop_long(save=True))
         bar.canceled.connect(lambda: self._stop_long(save=False))
         bar.adjustSize()
-        vg = self.geometry()
         bx = min(max(g.right() - bar.width(), vg.left()),
                  max(vg.left(), vg.right() - bar.width() + 1))
         by = g.bottom() + ui.sc(8)
@@ -2964,20 +3035,20 @@ class ShotOverlay(QWidget):
         mask = _LongMask(g, vg)
         self._long['mask'] = mask
         mask.show()     # 灰罩最底（静态窗，只画一次）
-        chrome = _LongChrome(g, self.pal, avoid_g=bar.geometry())
+        bar.set_interrupted(True)
+        avoid_width = bar.width()
+        avoid_height = bar.height()
+        bar.set_interrupted(False)
+        avoid_x = min(max(g.right() - avoid_width, vg.left()),
+                      max(vg.left(), vg.right() - avoid_width + 1))
+        bar.move(bx, max(vg.top(), by))
+        avoid_g = QRect(avoid_x, bar.y(), avoid_width, avoid_height)
+        chrome = _LongChrome(g, self.pal, avoid_g=avoid_g)
         self._long['chrome'] = chrome
         chrome.show()   # 轮廓/预览其上，完成按钮条最上
-        bar.show()
-        guard = _WheelGuard()
-        dpr = scr.devicePixelRatio() or 1.0
-        # 守卫用物理坐标判定「点击落在截图区域内」（自动期回退手动的条件之一）
-        guard.sel_phys = (int(g.left() * dpr), int(g.top() * dpr),
-                          int(g.right() * dpr), int(g.bottom() * dpr))
-        self._long['guard'] = guard
-        guard.start()
         bar.auto_clicked.connect(self._toggle_auto)
         self._long['timer'].timeout.connect(self._long_tick)
-        self._long['timer'].start(280)
+        self._long_capture_initial()
 
     def _toggle_auto(self):
         """自动下滚开关：开 = 向选区中心下的窗口定时投递滚轮消息（借鉴 SnowShot，
@@ -3012,6 +3083,48 @@ class ShotOverlay(QWidget):
         if not _post_wheel(target, pt):
             self._toggle_auto()   # 目标窗口没了：回退手动
 
+    def _long_place_bar(self):
+        L = self._long
+        bar = L['bar']
+        g = self._global_sel()
+        bounds = L['bounds']
+        x = min(max(g.right() - bar.width(), bounds.left()),
+                max(bounds.left(), bounds.right() - bar.width() + 1))
+        bar.move(x, bar.y())
+
+    def _long_set_interrupted(self, on):
+        L = self._long
+        if L is None:
+            return
+        L['bar'].set_interrupted(on)
+        self._long_place_bar()
+
+    def _long_set_pending(self, on):
+        L = self._long
+        if L is None:
+            return
+        L['bar'].set_pending(on)
+        self._long_place_bar()
+
+    def _long_capture_initial(self):
+        try:
+            self._long_tick()
+            L = self._long
+            if L is None:
+                return False
+            if L['prev_img'] is None:
+                self._stop_long(save=False)
+                return False
+            L['guard'].capture_ready = True
+            L['bar'].show()
+            L['timer'].start(280)
+            return True
+        except Exception:
+            _guard_log()
+            if self._long is not None:
+                self._stop_long(save=False)
+            return False
+
     def _long_tick(self):
         L = self._long
         if L is None:
@@ -3023,6 +3136,10 @@ class ShotOverlay(QWidget):
                 return
             if guard.stop_auto and 'auto' in L:   # 往回滚/点击截图区域 = 回退手动
                 self._toggle_auto()
+            if guard.wheel_seq != L['wheel_seq']:
+                L['wheel_seq'] = guard.wheel_seq
+                L['wheel_pending'] = True
+                L['wheel_stable'] = 0
         scr = L['screen']
         full = scr.grabWindow(0).toImage()
         dpr = scr.devicePixelRatio() or 1.0
@@ -3033,53 +3150,64 @@ class ShotOverlay(QWidget):
         if px.width() < 8 or px.height() < 8:
             return
         frame = full.copy(px)
-        if L['prev_img'] is None:
-            L['chunks'].append(frame)
-            L['chrome'].append_chunk(frame)
-            L['prev_img'] = frame
-            L['prev_sig'] = _row_sig(frame)
-            return
-        sig = _row_sig(frame)
-        s, d = _find_shift(L['prev_sig'], sig)
-        shift = s * _SIG_ROW
-        if 0 < shift < frame.height() and d <= 10:
-            # 向下滚动了 shift 物理像素：帧的底部 shift 高是新内容，接上去
-            new = frame.copy(0, frame.height() - shift, frame.width(), shift)
-            L['chunks'].append(new)
-            L['chrome'].append_chunk(new)
-            L['prev_img'] = frame
-            L['prev_sig'] = sig
+        was_interrupted = L['interrupted']
+        was_pending = L['wheel_pending']
+        status, chunk = _long_feed_frame(L, frame, L['wheel_pending'])
+        if chunk is not None:
+            L['chrome'].append_chunk(chunk)
+        if was_interrupted != L['interrupted']:
+            self._long_set_interrupted(L['interrupted'])
+        elif was_pending != L['wheel_pending']:
+            self._long_set_pending(L['wheel_pending'])
+        if status in ('seed', 'appended'):
             total = sum(c.height() for c in L['chunks'])
             if total >= LONG_MAX_H:
                 self._stop_long(save=True)
-        # 匹配不上（动画/跳变/反向）与画面未动都只跳过本帧，不提示也不硬拼
 
     def _stop_long(self, save):
         L = self._long
         if L is None:
             return
+        guard = L.get('guard')
+        if save and guard is not None and guard.esc:
+            save = False
+        if save and L.get('interrupted'):
+            return
+        if save and guard is not None and guard.wheel_seq != L['wheel_seq']:
+            L['wheel_seq'] = guard.wheel_seq
+            L['wheel_pending'] = True
+            L['wheel_stable'] = 0
+        if save and L.get('wheel_pending'):
+            self._long_set_pending(True)
+            return
         self._long = None
         L['timer'].stop()
         if L.get('auto'):
             L['auto'].stop()
-        L['guard'].stop()
+        if guard is not None:
+            guard.finishing = True
         L['bar'].close()
         L['chrome'].close()
         L['mask'].close()
-        if save and L['chunks']:
-            dpr = L['screen'].devicePixelRatio() or 1.0
-            w = L['chunks'][0].width()
-            total = sum(c.height() for c in L['chunks'])
-            img = QImage(w, total, QImage.Format_RGB32)
-            p = QPainter(img)
-            y = 0
-            for c in L['chunks']:
-                p.drawImage(0, y, c)
-                y += c.height()
-            p.end()
-            img.setDevicePixelRatio(dpr)
-            QApplication.clipboard().setImage(img)   # 完成即进剪贴板
-        self._close()
+        try:
+            if save and L['chunks']:
+                dpr = L['screen'].devicePixelRatio() or 1.0
+                w = L['chunks'][0].width()
+                total = sum(c.height() for c in L['chunks'])
+                img = QImage(w, total, QImage.Format_RGB32)
+                p = QPainter(img)
+                y = 0
+                for c in L['chunks']:
+                    p.drawImage(0, y, c)
+                    y += c.height()
+                p.end()
+                img.setDevicePixelRatio(dpr)
+                if not (guard and guard.esc):
+                    QApplication.clipboard().setImage(img)   # 完成即进剪贴板
+        finally:
+            if guard is not None:
+                guard.stop()
+            self._close()
 
 
 # ---------------- 全局热键 ----------------

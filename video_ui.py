@@ -931,6 +931,7 @@ class VideoWidget(QWidget):
     sig_prep_done = Signal(bool, str, int)          # 组件准备结束 ok, err, 批次序号
     sig_ver = Signal(str, object, str, object)      # 版本查询：yt本地, yt最新, ff本地, ff最新(None=失败)
     sig_msg = Signal(str, str)                      # 全局状态行提示 state, text（组件更新完成等）
+    sig_update = Signal(str, str, str, str)         # 组件更新：名称, 大小, 剩余时间, 速度
 
     def __init__(self, cfg, parent=None, auto_start=True):
         super(VideoWidget, self).__init__(parent)
@@ -946,6 +947,7 @@ class VideoWidget(QWidget):
         self._ff_new = False         # 有 ffmpeg 新版
         self._versions_queried = False   # 是否已查过远端版本（首次打开视频页时）
         self._updating = False       # 正在更新 yt-dlp
+        self._update_stat = None     # 组件更新的速度计算基准
         self._prep_seq = 0           # 组件准备批次：关功能后迟到的结果要丢弃
         self._prep_running = False   # 有组件下载线程在跑（防并发下载同一组件）
         self._prep_cancel = False    # 用户关了视频功能 → 中断进行中的下载
@@ -1003,6 +1005,15 @@ class VideoWidget(QWidget):
         self.state_lab.setAlignment(Qt.AlignRight | Qt.AlignVCenter)   # 单行右对齐
         self.state_lab.hide()                # 空文本不占位，_set_state 有文本才显示
         state_row.addWidget(self.state_lab)
+        self.update_size_lab = QLabel()
+        self.update_eta_lab = QLabel()
+        self.update_speed_lab = QLabel()
+        self.update_labs = (self.update_size_lab, self.update_eta_lab, self.update_speed_lab)
+        for lab in self.update_labs:
+            lab.setObjectName('videoState')
+            lab.setProperty('state', 'busy')
+            lab.hide()                       # 仅组件更新下载期间显示
+            state_row.addWidget(lab)
         self.cookie_link = QToolButton()
         self.cookie_link.setObjectName('linkBtn')
         self.cookie_link.setText(t('video.cookie.help_link'))
@@ -1072,6 +1083,7 @@ class VideoWidget(QWidget):
         self.sig_prep_done.connect(self._on_prep_done)
         self.sig_ver.connect(self._on_ver)
         self.sig_msg.connect(self._set_state)
+        self.sig_update.connect(self._on_update_progress)
 
         # ---- 门禁层：未开启时盖住整页（内容高斯模糊）----
         self._build_gate()
@@ -1244,7 +1256,9 @@ class VideoWidget(QWidget):
             self._updating = True
             self.update_btn.setEnabled(False)
             if has_new:
-                self._set_state('busy', t('video.ver.updating'))
+                self._update_stat = None
+                what = 'yt-dlp' if self._yt_new else 'ffmpeg'
+                self._set_state('busy', t('video.ver.updating', name=what), updating=True)
                 threading.Thread(target=self._update_work, daemon=True).start()
             else:
                 self.ver_lab.setText(t('video.ver.checking'))
@@ -1262,13 +1276,42 @@ class VideoWidget(QWidget):
         self.sig_ver.emit(video_dl.local_version(), latest,
                           video_dl.ffmpeg_version(), ff_latest)
 
+    def _update_progress(self, what, done, total):
+        """组件下载回调（后台线程）：按字节样本算平均速度与剩余时间。"""
+        now = time.monotonic()
+        stat = self._update_stat
+        if not stat or stat['what'] != what or done <= stat['last']:
+            # 换组件或换源重试时重新起算，首帧只建立速度基准
+            stat = {'what': what, 'ts': now, 'base': done, 'last': done, 'speed': 0.0}
+            self._update_stat = stat
+        else:
+            elapsed = now - stat['ts']
+            if elapsed > 0:
+                stat['speed'] = (done - stat['base']) / elapsed
+            stat['last'] = done
+        speed = stat['speed']
+        size = '%s/%s' % (_fmt_size(done), _fmt_size(total) if total else '?')
+        eta = _fmt_dur((total - done) / speed) if total and speed > 0 else ''
+        self.sig_update.emit(what, size, eta, _fmt_size(speed) + '/s' if speed > 0 else '')
+
+    def _on_update_progress(self, what, size, eta, speed):
+        try:
+            self._set_state('busy', t('video.ver.updating', name=what), updating=True)
+            self.update_size_lab.setText(size)
+            self.update_eta_lab.setText(eta)
+            self.update_speed_lab.setText(speed)
+            for lab in self.update_labs:
+                lab.setToolTip(lab.text())   # 窄面板软压缩时悬停看完整数值
+        except Exception:
+            pass
+
     def _update_work(self):
         ok = True
         try:
             if self._yt_new:
-                video_dl.download_ytdlp()
+                video_dl.download_ytdlp(self._update_progress)
             if self._ff_new:
-                video_dl.download_ffmpeg(ver=self._ff_latest)
+                video_dl.download_ffmpeg(self._update_progress, ver=self._ff_latest)
         except Exception:
             ok = False
         local = video_dl.local_version()
@@ -1326,7 +1369,7 @@ class VideoWidget(QWidget):
             t.deleteLater()
         self.tasks = []
 
-    def _set_state(self, state, text):
+    def _set_state(self, state, text, updating=False):
         if hasattr(self, 'cookie_link'):
             self.cookie_link.hide()
         self.state_lab.setProperty('state', state)
@@ -1336,6 +1379,11 @@ class VideoWidget(QWidget):
         self.state_lab.setVisible(bool(text))
         self.state_lab.style().unpolish(self.state_lab)
         self.state_lab.style().polish(self.state_lab)
+        for lab in self.update_labs:
+            lab.setVisible(updating)
+            if not updating:
+                lab.clear()
+                lab.setToolTip('')
 
     # ---------------- 保存目录 ----------------
 

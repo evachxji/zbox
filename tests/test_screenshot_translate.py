@@ -93,14 +93,14 @@ class TranslateFlowTest(unittest.TestCase):
                                      'close': lambda self: setattr(self, 'closed', True)})
         self.overlay._fake_page = page()
         self.overlay._make_page = lambda: self.overlay._fake_page
-        self._login_state = True   # 默认已登录
-        self.overlay._check_login = lambda page, cb: cb(self._login_state)
+        self._page_ready = True
+        self.overlay._prepare_page = lambda page, cb: cb(self._page_ready)
 
     def _close_overlay_safely(self):
         try:
             self.overlay.close()
         except RuntimeError:
-            pass   # 已随 WA_DeleteOnClose 销毁（未登录流程会主动 _close）
+            pass   # 已随 WA_DeleteOnClose 销毁
 
     def _translate(self):
         self.overlay._toggle_translate()
@@ -221,26 +221,14 @@ class TranslateFlowTest(unittest.TestCase):
         self.assertEqual(self.overlay.tl8n_label.text(),
                          i18n.t('shot.translate.err_ocr'))
 
-    def test_not_logged_in_exits_overlay_and_shows_guide(self):
-        from unittest.mock import MagicMock, patch as _patch
-        self._login_state = False   # 预检：未登录
-        guide = MagicMock()
-        with _patch('translate_guide.show_login_guide',
-                    MagicMock(return_value=guide)):
-            self._translate()
-            self.qapp.processEvents()
-        from shiboken6 import isValid
-        self.assertFalse(isValid(self.overlay))        # 截屏状态已退出（遮罩销毁）
-        self.assertEqual(_FakeTranslator.instances, [])   # 没建翻译会话（没白等 OCR）
-
-    def test_precheck_pass_reuses_loaded_page(self):
-        self._login_state = True
+    def test_ready_page_is_reused(self):
+        self._page_ready = True
         self._translate()
         self.assertEqual(self.overlay._tl8n['state'], 'ready')
         self.assertTrue(_FakeTranslator.instances[0].preloaded)
 
-    def test_precheck_unknown_falls_back_to_full_flow(self):
-        self._login_state = None   # 预检失败（断网等）：回落完整 load+probe
+    def test_page_prepare_failure_falls_back_to_session_load(self):
+        self._page_ready = None
         self._translate()
         self.assertEqual(self.overlay._tl8n['state'], 'ready')
         self.assertFalse(_FakeTranslator.instances[0].preloaded)
@@ -320,7 +308,7 @@ class TranslateFlowTest(unittest.TestCase):
 
 class TranslatePinDelegationTest(unittest.TestCase):
     """截图模式点翻译：钉住选区（钉图窗进 loading 态），遮罩退到幕后跑流水线，
-    成功把译文压进钉图窗，未登录/失败则还原钉图并退出截屏。"""
+    成功把译文压进钉图窗，接口失败则还原钉图并退出截屏。"""
 
     @classmethod
     def setUpClass(cls):
@@ -349,8 +337,8 @@ class TranslatePinDelegationTest(unittest.TestCase):
         page = type('FakePage', (), {'closed': False,
                                      'close': lambda self: setattr(self, 'closed', True)})
         self.overlay._make_page = lambda: page()
-        self._login_state = True
-        self.overlay._check_login = lambda page, cb: cb(self._login_state)
+        self._page_ready = True
+        self.overlay._prepare_page = lambda page, cb: cb(self._page_ready)
         self.pin = MagicMock()
         pin_patch = patch('pinshot.pin', return_value=self.pin)
         pin_patch.start()
@@ -407,14 +395,10 @@ class TranslatePinDelegationTest(unittest.TestCase):
         self.assertIsInstance(layer, QImage)
         self.assertTrue(self._overlay_destroyed())
 
-    def test_not_logged_in_restores_pin_and_shows_guide(self):
-        from unittest.mock import patch as _patch
-        self._login_state = False
-        with _patch('translate_guide.show_login_guide') as guide:
-            self._translate()
-        guide.assert_called_once()
-        self.pin.set_translate_busy.assert_any_call(False)
-        self.assertFalse(self.pin.finish_translate.called)
+    def test_page_prepare_failure_still_translates_pin(self):
+        self._page_ready = None
+        self._translate()
+        self.assertTrue(self._wait_finish())
         self.assertTrue(self._overlay_destroyed())
 
     def test_error_restores_pin_and_closes_overlay(self):

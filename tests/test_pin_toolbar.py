@@ -649,7 +649,7 @@ class PinTranslateBusyTest(unittest.TestCase):
              patch.object(ShotOverlay, '_ocr_recognize',
                           lambda self, png, cancel: list(regions)), \
              patch.object(ShotOverlay, '_make_page', lambda self: page()), \
-             patch.object(ShotOverlay, '_check_login',
+             patch.object(ShotOverlay, '_prepare_page',
                           lambda self, page, cb: cb(True)), \
              patch.object(ShotOverlay, '_make_translator', lambda self: _FakeTr()):
             win._translate_clicked()

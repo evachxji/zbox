@@ -38,7 +38,7 @@ A Windows desktop organizer: desktop boxes + a floating panel (calendar / todo /
    - **Todo**: checklist, due reminders, undoable delete
    - **Transfer**: LAN transfer of files and folders
 3. **Screenshot**: region capture, window pick, annotations, OCR translation
-4. **Video downloader**: paste a URL, multiple resolutions, resumable
+4. **Video downloader**: paste a URL, multiple resolutions, resumable, with component update progress
 
 **Languages**: the PC app and Android app support **Simplified Chinese and English**; the installer can pick the language too.
 
