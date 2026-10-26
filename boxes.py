@@ -593,14 +593,18 @@ class BoxList(QListWidget):
         self._guide = None   # 拖拽落点反馈：('line'/'folder'/'open', 行号)，paintEvent 画引导线/高亮
         self._lnk_dir_cache = {}   # .lnk → 目标目录解析缓存（拖拽悬停每帧都问；refresh 清空）
         self._icon_items = {}      # path → (item, 图标尺寸)：后台图标取回后回填到对应行
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         # 滚轮平滑滚动（对齐资源管理器手感，见 wheelEvent）：动画驱动滚动条
         self._wheel_target = 0
         self._wheel_anim = QVariantAnimation(self)
         self._wheel_anim.setDuration(200)
         self._wheel_anim.setEasingCurve(QEasingCurve.OutCubic)
         sb = self.verticalScrollBar()
-        self._wheel_anim.valueChanged.connect(sb.setValue)
+        self._wheel_sb = sb
+        self._wheel_anim.valueChanged.connect(self._set_wheel_value)
         sb.sliderPressed.connect(self._wheel_anim.stop)   # 拖滚动条时动画让位，别抢
+        self.horizontalScrollBar().sliderPressed.connect(self._wheel_anim.stop)
 
     def set_view(self, key):
         """按列表 / 按图标查看。图标视图 = 32px 图标 + 固定网格 + 名称两行折行；
@@ -646,10 +650,24 @@ class BoxList(QListWidget):
         if rec is not None and rec[1] == size:
             rec[0].setIcon(icon)
 
+    def set_scrollbars_visible(self, visible):
+        policy = Qt.ScrollBarAsNeeded if visible else Qt.ScrollBarAlwaysOff
+        self.setHorizontalScrollBarPolicy(policy)
+        self.setVerticalScrollBarPolicy(policy)
+
+    def _set_wheel_value(self, value):
+        self._wheel_sb.setValue(value)
+
     def wheelEvent(self, e):
         """滚轮平滑滚动（对齐资源管理器手感）：Qt 默认每 notch 瞬跳 3 行，视觉上
-        一卡一卡；改成 200ms 缓出动画驱动滚动条。触摸板（pixelDelta）直接跟手不走动画。"""
-        sb = self.verticalScrollBar()
+        一卡一卡；改成 200ms 缓出动画驱动滚动条。触摸板（pixelDelta）直接跟手不走动画。
+        Shift + 滚轮在横向可滚时横滚，否则保持纵向滚动。"""
+        horizontal = (bool(e.modifiers() & Qt.ShiftModifier)
+                      and self.horizontalScrollBar().maximum() > 0)
+        sb = self.horizontalScrollBar() if horizontal else self.verticalScrollBar()
+        if sb is not self._wheel_sb:
+            self._wheel_anim.stop()
+            self._wheel_sb = sb
         pd = e.pixelDelta()
         if not pd.isNull():
             self._wheel_anim.stop()
@@ -658,12 +676,15 @@ class BoxList(QListWidget):
             return
         dy = e.angleDelta().y()
         if not dy:
-            super(BoxList, self).wheelEvent(e)   # 横向滚动等交给默认实现
+            super(BoxList, self).wheelEvent(e)   # 原生横向滚动等交给默认实现
             return
-        if self.viewMode() == QListWidget.IconMode:
+        lines = QApplication.styleHints().wheelScrollLines() or 3
+        if horizontal:
+            px = ((self.gridSize().width() or ui.sc(84))
+                  if self.viewMode() == QListWidget.IconMode else ui.sc(24) * lines)
+        elif self.viewMode() == QListWidget.IconMode:
             px = self.gridSize().height() or ui.sc(72)   # 一 notch ≈ 一格高
         else:
-            lines = QApplication.styleHints().wheelScrollLines() or 3
             row = self.sizeHintForRow(0) if self.count() else ui.sc(28)
             px = row * lines   # 一 notch = 系统滚动行数 × 行高
         start = sb.value()
@@ -2371,6 +2392,7 @@ class BoxWindow(QWidget):
         return super(BoxWindow, self).eventFilter(obj, e)
 
     def enterEvent(self, e):
+        self.list.set_scrollbars_visible(True)
         self.unsetCursor()   # 从窗外划入时复位，不残留上次的缩放箭头
         self._peek_timer.stop()
         if self.rec.get('collapsed') and not self._hover_peek:
@@ -2378,6 +2400,7 @@ class BoxWindow(QWidget):
         super(BoxWindow, self).enterEvent(e)
 
     def leaveEvent(self, e):
+        self.list.set_scrollbars_visible(False)
         self.unsetCursor()
         if self._hover_peek:
             self._peek_timer.start()   # 延迟一拍判定：瞬移出窗/弹菜单的误收由 _peek_tick 挡
