@@ -2516,7 +2516,8 @@ class BoxWindow(QWidget):
 
     def _clamp_to_screen(self):
         """保证至少标题栏露在屏幕内（面板同款思路，见 FloatingPanel._clamp_to_screen）。"""
-        ag = QApplication.primaryScreen().availableGeometry()
+        screen = QApplication.screenAt(self.geometry().center()) or QApplication.primaryScreen()
+        ag = screen.availableGeometry()
         x = min(max(self.x(), ag.left() - self.width() + 80), ag.right() - 80)
         y = min(max(self.y(), ag.top()), ag.bottom() - 40)
         if (x, y) != (self.x(), self.y()):

@@ -1,11 +1,16 @@
 # -*- coding: utf-8 -*-
 """桌面卡片移动、缩放吸附的几何回归测试。"""
+import os
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
+
+os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 from PySide6.QtCore import QRect
+from PySide6.QtWidgets import QApplication, QWidget
 
-from boxes import BoxManager
+from boxes import BoxManager, BoxWindow
 from snapping import (EDGE_BOTTOM, EDGE_LEFT, EDGE_RIGHT, EDGE_TOP,
                       guide_segments, snap_move, snap_resize)
 
@@ -154,6 +159,23 @@ class CardSnapTest(unittest.TestCase):
         self.assertEqual(held_sticky[0].coordinate, 302)
         self.assertEqual(released.right() + 1, 315)
         self.assertIsNone(released_sticky[0])
+
+    def test_clamp_keeps_box_on_secondary_screen(self):
+        qapp = QApplication.instance() or QApplication([])
+        box = QWidget()
+        self.addCleanup(box.deleteLater)
+        box.resize(320, 240)
+        box.move(2200, 120)
+        primary = SimpleNamespace(
+            availableGeometry=lambda: QRect(0, 0, 1920, 1040))
+        secondary = SimpleNamespace(
+            availableGeometry=lambda: QRect(1920, 0, 1920, 1040))
+
+        with patch.object(QApplication, 'primaryScreen', return_value=primary), \
+                patch.object(QApplication, 'screenAt', return_value=secondary):
+            BoxWindow._clamp_to_screen(box)
+
+        self.assertEqual(box.pos().toTuple(), (2200, 120))
 
     def test_shared_targets_exclude_source_and_include_panel(self):
         first = SimpleNamespace(
