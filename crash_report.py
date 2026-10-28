@@ -147,7 +147,7 @@ def write_minidump(path, exception_pointers=None):
             pointers = ctypes.cast(exception_pointers, ctypes.POINTER(EXCEPTION_POINTERS))
             info = MINIDUMP_EXCEPTION_INFORMATION(
                 ThreadId=kernel32.GetCurrentThreadId(),
-                ExceptionPointers=pointers, ClientPointers=False)
+                ExceptionPointers=pointers, ClientPointers=True)
             info_ref = ctypes.byref(info)
         dump = ctypes.windll.dbghelp.MiniDumpWriteDump
         dump.restype = wintypes.BOOL
@@ -157,7 +157,13 @@ def write_minidump(path, exception_pointers=None):
         ok = dump(process, pid, wintypes.HANDLE(msvcrt.get_osfhandle(output.fileno())),
                   0x00000000, info_ref, None, None)
         if not ok:
-            raise ctypes.WinError(ctypes.get_last_error())
+            error = ctypes.WinError(ctypes.get_last_error())
+    if not ok:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        raise error
 
 
 def report_python_exception(exc_type, exc_value, tb, data_dir, launch=True,
@@ -217,10 +223,17 @@ def install_native_handler(data_dir, native_log, native_offset):
             with open(os.path.join(report_dir, 'native.json'), 'w', encoding='utf-8') as f:
                 json.dump(info, f)
             dump_error = ''
+            dump_path = os.path.join(report_dir, 'zbox-crash.dmp')
             try:
-                write_minidump(os.path.join(report_dir, 'zbox-crash.dmp'), exception_pointers)
+                write_minidump(dump_path, exception_pointers)
             except Exception as exc:
+                # DbgHelp 在部分 Python 原生回调里无法接受异常上下文；保留失败原因，
+                # 立即在同一现场重试无上下文 MiniDumpNormal，避免只留下 0 字节文件。
                 dump_error = str(exc)
+                try:
+                    write_minidump(dump_path)
+                except Exception as fallback_exc:
+                    dump_error += '\nFallback: ' + str(fallback_exc)
             with open(os.path.join(report_dir, 'dump_error.txt'), 'w', encoding='utf-8') as f:
                 f.write(dump_error)
             try:

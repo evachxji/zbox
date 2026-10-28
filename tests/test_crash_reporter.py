@@ -48,6 +48,9 @@ class CrashReporterTest(unittest.TestCase):
         self.assertIn('/issues/new?', url)
         self.assertNotIn('Traceback', url)
 
+    def test_path_uses_info_text_theme_role(self):
+        self.assertEqual(self.dialog.path_label.objectName(), 'infoText')
+
 
 class CrashMainIntegrationTest(unittest.TestCase):
     def test_reporter_dispatch_precedes_panel_import_and_ipc(self):

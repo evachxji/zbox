@@ -130,5 +130,51 @@ class CrashReportTest(unittest.TestCase):
                 with open(os.path.join(report_dir, 'dump_error.txt'), encoding='utf-8') as f:
                     self.assertIn('dump failed', f.read())
 
+    def test_in_process_exception_context_is_marked_as_client_pointers(self):
+        record, pointers = self._native_pointers()
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(crash_report.ctypes.windll.dbghelp,
+                             'MiniDumpWriteDump', return_value=True) as dump:
+            crash_report.write_minidump(os.path.join(tmp, 'crash.dmp'), ctypes.byref(pointers))
+        info = ctypes.cast(dump.call_args[0][4], ctypes.POINTER(
+            crash_report.MINIDUMP_EXCEPTION_INFORMATION)).contents
+        self.assertTrue(info.ClientPointers)
+
+    def test_failed_minidump_does_not_leave_partial_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'crash.dmp')
+            with patch.object(crash_report.ctypes.windll.dbghelp,
+                              'MiniDumpWriteDump', return_value=False), \
+                    patch.object(crash_report.ctypes, 'get_last_error', return_value=5):
+                with self.assertRaises(OSError):
+                    crash_report.write_minidump(path)
+            self.assertFalse(os.path.exists(path))
+
+    def test_native_filter_falls_back_to_dump_without_context(self):
+        record, pointers = self._native_pointers()
+        calls = []
+
+        def fake_dump(path, exception_pointers=None):
+            calls.append(exception_pointers)
+            if exception_pointers is not None:
+                raise OSError('context failed')
+            with open(path, 'wb') as f:
+                f.write(b'MDMP fallback')
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, 'native.log'), 'a', encoding='utf-8') as native_log, \
+                    patch.object(crash_report, '_set_filter', return_value=None), \
+                    patch.object(crash_report, 'write_minidump', side_effect=fake_dump), \
+                    patch.object(crash_report, 'launch_reporter') as launch:
+                crash_report.install_native_handler(tmp, native_log, 0)
+                self.assertEqual(crash_report._native_callback(ctypes.byref(pointers)), 1)
+                report_dir = launch.call_args[0][0]
+                self.assertEqual(len(calls), 2)
+                self.assertIsNone(calls[-1])
+                with open(os.path.join(report_dir, 'zbox-crash.dmp'), 'rb') as f:
+                    self.assertEqual(f.read(4), b'MDMP')
+                with open(os.path.join(report_dir, 'dump_error.txt'), encoding='utf-8') as f:
+                    self.assertIn('context failed', f.read())
+
 if __name__ == '__main__':
     unittest.main()

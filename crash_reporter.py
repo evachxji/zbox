@@ -163,6 +163,8 @@ class CrashDialog(QDialog):
         lay.addWidget(saved)
         path_row = QHBoxLayout()
         path = QLabel(report_dir)
+        self.path_label = path
+        path.setObjectName('infoText')
         path.setWordWrap(True)
         path.setTextInteractionFlags(Qt.TextSelectableByMouse)
         path.setStyleSheet('QLabel { font: %dpx Consolas; }' % sc(10))
@@ -274,4 +276,3 @@ def main(argv):
 
 if __name__ == '__main__':
     sys.exit(main(sys.argv[1:]))
-
