@@ -582,4 +582,16 @@ CATALOG = {
     'data.廿八': '廿八',
     'data.廿九': '廿九',
     'data.三十': '三十',
+    # 崩溃报告
+    'crash.window': 'Zbox',
+    'crash.title': '程序已崩溃',
+    'crash.message': '抱歉给你带来不便。诊断文件已保存，提交日志可以帮助我们定位并修复问题。',
+    'crash.saved_at': '诊断文件保存在',
+    'crash.open_dir': '打开日志目录',
+    'crash.issue': '去 GitHub 提交 Issue',
+    'crash.log_ready': '文本日志：已生成',
+    'crash.log_missing': '文本日志：生成失败',
+    'crash.dump_ready': '崩溃转储：已生成',
+    'crash.dump_missing': '崩溃转储：生成失败',
+    'crash.privacy': '文本日志已脱敏；.dmp 可能包含进程内存，公开提交前请自行确认。',
 }

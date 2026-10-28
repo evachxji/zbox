@@ -607,4 +607,16 @@ CATALOG = {
     'data.廿八': 'Day 28',
     'data.廿九': 'Day 29',
     'data.三十': 'Day 30',
+    # Crash reporter
+    'crash.window': 'Zbox',
+    'crash.title': 'Zbox has crashed',
+    'crash.message': 'Sorry for the inconvenience. Diagnostic files were saved. Submitting them helps us find and fix the problem.',
+    'crash.saved_at': 'Diagnostic files saved to',
+    'crash.open_dir': 'Open log folder',
+    'crash.issue': 'Report on GitHub',
+    'crash.log_ready': 'Text log: created',
+    'crash.log_missing': 'Text log: failed',
+    'crash.dump_ready': 'Crash dump: created',
+    'crash.dump_missing': 'Crash dump: failed',
+    'crash.privacy': 'The text log is sanitized. A .dmp may contain process memory; review it before posting publicly.',
 }
