@@ -49,5 +49,21 @@ class CrashReporterTest(unittest.TestCase):
         self.assertNotIn('Traceback', url)
 
 
+class CrashMainIntegrationTest(unittest.TestCase):
+    def test_reporter_dispatch_precedes_panel_import_and_ipc(self):
+        from pathlib import Path
+        source = (Path(crash_reporter.BASE_DIR) / 'main.pyw').read_text(encoding='utf-8-sig')
+        dispatch = source.index("if sys.argv[1:2] == ['--crash-reporter']:")
+        self.assertLess(dispatch, source.index('import app as ui'))
+        self.assertLess(dispatch, source.index('def notify_existing'))
+
+    def test_python_hook_reports_then_exits(self):
+        import main
+        with patch.object(main.crash_report, 'report_python_exception') as report, \
+                patch.object(main.os, '_exit') as exit_process:
+            main._crash_excepthook(ValueError, ValueError('bad'), None)
+        report.assert_called_once()
+        exit_process.assert_called_once_with(1)
+
 if __name__ == '__main__':
     unittest.main()

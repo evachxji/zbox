@@ -28,6 +28,12 @@ if sys.argv[1:2] == ['--ocr-helper']:
 os.environ['QT_ENABLE_HIGHDPI_SCALING'] = '0'
 
 
+# 崩溃报告是独立轻量进程：必须在面板、单实例 IPC 和后台服务之前分派。
+if sys.argv[1:2] == ['--crash-reporter']:
+    import crash_reporter
+    sys.exit(crash_reporter.main(sys.argv[2:]))
+
+
 from PySide6.QtCore import (Qt, QTimer, QThread, QUrl, Signal, QCoreApplication,
                               QTranslator, QLibraryInfo)
 from PySide6.QtGui import QDesktopServices
@@ -37,6 +43,7 @@ from PySide6.QtWidgets import QApplication, QFileDialog
 import app as ui
 import boxes as bx
 import calendar_data as cd
+import crash_report
 import i18n
 import installer
 import screenshot as shotmod
@@ -197,23 +204,24 @@ def notify_existing(msg=b'toggle'):
     return False
 
 
-def _debug_excepthook(t, v, tb):
-    """临时调试：pythonw 下槽函数异常无控制台可见，落盘到 debug_due.log。定位后移除。"""
+def _crash_excepthook(exc_type, exc_value, tb):
+    """保存 Python 崩溃现场并交独立报告进程，绝不返回损坏的事件循环。"""
     try:
-        import traceback
-        p = os.path.join(sysutil.appdata_dir(), 'debug_due.log')
-        with open(p, 'a', encoding='utf-8') as f:
-            f.write(''.join(traceback.format_exception(t, v, tb)))
+        crash_report.report_python_exception(
+            exc_type, exc_value, tb, sysutil.appdata_dir(),
+            native_log=_crash_log[0].name if _crash_log[0] else '',
+            native_offset=_native_log_offset[0])
     except Exception:
         pass
-
+    os._exit(1)
 
 # faulthandler 的输出文件句柄要活到进程结束，放模块级
 _crash_log = [None]
+_native_log_offset = [0]
 
 
 def main():
-    sys.excepthook = _debug_excepthook
+    sys.excepthook = _crash_excepthook
     shot_dir = os.environ.get('ZBOX_SHOT')
     if shot_dir:
         # 截图自检与正在运行的用户实例完全隔离：改用独立 IPC 名（既不连接、也不删除
@@ -230,6 +238,9 @@ def main():
         _crash_log[0] = open(os.path.join(sysutil.appdata_dir(), 'crash_native.log'),
                              'a', encoding='utf-8')
         faulthandler.enable(_crash_log[0])
+        _native_log_offset[0] = _crash_log[0].tell()
+        crash_report.install_native_handler(
+            sysutil.appdata_dir(), _crash_log[0], _native_log_offset[0])
     except Exception:
         pass
     # Qt 默认把 GUI 线程的 COM 初始化为 MTA：原生壳对话框（IFileOpenDialog 等）在 MTA 下
@@ -521,7 +532,3 @@ def _import_holidays(hstore, panel, on_download):
 
 if __name__ == '__main__':
     sys.exit(main())
-
-
-
-
