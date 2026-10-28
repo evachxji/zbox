@@ -12,7 +12,8 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 UI_FILES = ('app.py', 'main.pyw', 'transfer_ui.py', 'video_ui.py',
-            'boxes.py', 'screenshot.py', 'pinshot.py', 'sysutil.py', 'installer.py')
+            'boxes.py', 'screenshot.py', 'pinshot.py', 'sysutil.py', 'installer.py',
+            'crash_reporter.py')
 
 # 数据不是文案：解析字符与底层异常匹配关键词。
 ALLOWED = {
