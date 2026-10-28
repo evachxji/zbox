@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 """崩溃诊断报告核心测试。"""
+import ctypes
+import json
 import os
 import tempfile
 import unittest
@@ -61,6 +63,72 @@ class CrashReportTest(unittest.TestCase):
         self.assertIn('memory', query['body'][0])
         self.assertNotIn('Traceback', url)
 
+    def test_write_real_minidump(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'zbox-crash.dmp')
+            crash_report.write_minidump(path)
+            with open(path, 'rb') as f:
+                self.assertEqual(f.read(4), b'MDMP')
+            self.assertGreater(os.path.getsize(path), 1024)
+
+    def test_python_exception_writes_raw_trace_and_dump(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                raise ValueError('bad value')
+            except ValueError:
+                import sys
+                report_dir = crash_report.report_python_exception(
+                    *sys.exc_info(), data_dir=tmp, launch=False)
+            with open(os.path.join(report_dir, 'python.txt'), encoding='utf-8') as f:
+                self.assertIn('ValueError: bad value', f.read())
+            with open(os.path.join(report_dir, 'zbox-crash.dmp'), 'rb') as f:
+                self.assertEqual(f.read(4), b'MDMP')
+
+    def test_reporter_command_uses_current_executable_and_early_mode(self):
+        with patch.object(crash_report.sys, 'argv', ['main.pyw']), \
+                patch.object(crash_report.sys, 'executable', r'C:\Python\pythonw.exe'), \
+                patch.object(crash_report, 'BASE_DIR', r'D:\zbox', create=True):
+            cmd = crash_report.reporter_command(r'C:\report', 'native.log', 12)
+        self.assertEqual(cmd[1:3], [r'D:\zbox\main.pyw', '--crash-reporter'])
+        self.assertIn('--native-offset', cmd)
+    def _native_pointers(self):
+        record = crash_report.EXCEPTION_RECORD(
+            ExceptionCode=0xC0000005, ExceptionAddress=0x12345678)
+        pointers = crash_report.EXCEPTION_POINTERS(
+            ExceptionRecord=ctypes.pointer(record), ContextRecord=None)
+        return record, pointers
+
+    def test_native_filter_writes_exception_and_launches_reporter(self):
+        record, pointers = self._native_pointers()
+        with tempfile.TemporaryDirectory() as tmp:
+            native_path = os.path.join(tmp, 'crash_native.log')
+            with open(native_path, 'a', encoding='utf-8') as native_log, \
+                    patch.object(crash_report, '_set_filter', return_value=None), \
+                    patch.object(crash_report, 'write_minidump') as dump, \
+                    patch.object(crash_report, 'launch_reporter') as launch:
+                crash_report.install_native_handler(tmp, native_log, 0)
+                result = crash_report._native_callback(ctypes.byref(pointers))
+                report_dir = launch.call_args[0][0]
+                self.assertEqual(result, 1)
+                dump.assert_called_once()
+                with open(os.path.join(report_dir, 'native.json'), encoding='utf-8') as f:
+                    info = json.load(f)
+                self.assertEqual(info['code'], '0xC0000005')
+                self.assertEqual(info['address'], '0x12345678')
+
+    def test_native_filter_still_launches_when_dump_fails(self):
+        record, pointers = self._native_pointers()
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, 'native.log'), 'a', encoding='utf-8') as native_log, \
+                    patch.object(crash_report, '_set_filter', return_value=None), \
+                    patch.object(crash_report, 'write_minidump', side_effect=OSError('dump failed')), \
+                    patch.object(crash_report, 'launch_reporter') as launch:
+                crash_report.install_native_handler(tmp, native_log, 0)
+                self.assertEqual(crash_report._native_callback(ctypes.byref(pointers)), 1)
+                launch.assert_called_once()
+                report_dir = launch.call_args[0][0]
+                with open(os.path.join(report_dir, 'dump_error.txt'), encoding='utf-8') as f:
+                    self.assertIn('dump failed', f.read())
 
 if __name__ == '__main__':
     unittest.main()
