@@ -1827,6 +1827,11 @@ def find_desktop_defview():
             return dv
 
 
+def _has_desktop_owner(hwnd, dv):
+    # SetParent 与直接写 owner 在 Win32 查询 API 上的表现不同，两种挂带形态都认。
+    return _u32.GetParent(hwnd) == dv or _u32.GetAncestor(hwnd, _GA_PARENT) == dv
+
+
 def pin_to_desktop(win):
     """把窗口的属主设为桌面图标窗（SHELLDLL_DefView）：加入「桌面带」，
     Win+D / 显示桌面会跳过桌面带（Win11 24H2 上顶层窗口一律被收，桌面带成员豁免——
@@ -1839,13 +1844,10 @@ def pin_to_desktop(win):
         if not hwnd or not dv:
             return False
         # WS_POPUP 挂带后 GetParent 仍可能返回 0，GA_PARENT 才能拿到实际桌面父窗
-        if _u32.GetAncestor(hwnd, _GA_PARENT) != dv:
-            vis = bool(_u32.IsWindowVisible(hwnd))
-            _u32.SetParent(hwnd, dv)
-            if vis:
-                _u32.ShowWindow(hwnd, 8)   # SW_SHOWNA：SetParent 挂带会丢 WS_VISIBLE，
-                                           # Qt 仍认为可见不重绘（boxes._repin 同款坑）
-        return _u32.GetAncestor(hwnd, _GA_PARENT) == dv
+        if not _has_desktop_owner(hwnd, dv):
+            # WS_POPUP 的「父窗」实为 owner；直接写 owner，避免 SetParent 的隐藏-重现。
+            _set_wnd_long_ptr(hwnd, _GWLP_HWNDPARENT, dv)
+        return _has_desktop_owner(hwnd, dv)
     except Exception:
         return False
 
@@ -1853,7 +1855,7 @@ def pin_to_desktop(win):
 def unpin_from_desktop(win):
     """脱离桌面带，恢复为普通顶层窗口（拖拽期间临时用：普通窗口不会被桌面整理的表层反压）。"""
     try:
-        _u32.SetParent(int(win.winId()), None)
+        _set_wnd_long_ptr(int(win.winId()), _GWLP_HWNDPARENT, None)
     except Exception:
         pass
 
@@ -3368,11 +3370,11 @@ class FloatingPanel(QWidget):
         dv = find_desktop_defview()
         if not dv:
             return
-        if _u32.GetAncestor(hwnd, _GA_PARENT) != dv:
+        if not _has_desktop_owner(hwnd, dv):
             self._desk_pinned = pin_to_desktop(self)
         # 顶部栏窗同属桌面带：它是无属主的普通顶层窗口，不挂带的话悬停弹出时会
         # 盖住压在面板之上的应用窗口（面板被部分遮挡时尤其明显）
-        if _u32.GetAncestor(int(self.titlebar.winId()), _GA_PARENT) != dv:
+        if not _has_desktop_owner(int(self.titlebar.winId()), dv):
             pin_to_desktop(self.titlebar)
 
     def _desktop_mode_tick(self):

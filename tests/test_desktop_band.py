@@ -23,6 +23,7 @@ class _FakeUser32:
         self.children = {self.PROGMAN: [], self.WORKERW: []}
         self.children[self.parent[self.DEFVIEW]].append(self.DEFVIEW)
         self.set_parent_calls = []
+        self.owner = {}
 
     def FindWindowW(self, cls, _title):
         return self.PROGMAN if cls == 'Progman' else 0
@@ -40,7 +41,7 @@ class _FakeUser32:
         # 与真实 WS_POPUP 窗口一致：SetParent 后 GetParent 仍返回 0，
         # 必须走 GetAncestor(GA_PARENT) 才能拿到桌面父窗。
         if hwnd in (self.PANEL, self.TITLEBAR):
-            return 0
+            return self.owner.get(hwnd, 0)
         return self.parent.get(hwnd, 0)
 
     def GetAncestor(self, hwnd, kind):
@@ -55,6 +56,12 @@ class _FakeUser32:
         self.parent[hwnd] = parent
         self.children.setdefault(parent, []).append(hwnd)
         return self.parent.get(hwnd, 0)
+
+    def SetOwner(self, hwnd, _kind, parent):
+        # 与真实 WS_POPUP 一致：直接写 owner 后 GetParent 可见，
+        # 但 GetAncestor(GA_PARENT) 仍返回桌面，不会像 SetParent 一样建立父窗关系。
+        self.set_parent_calls.append((hwnd, parent))
+        self.owner[hwnd] = parent
 
     def IsWindowVisible(self, _hwnd):
         return True
@@ -74,17 +81,28 @@ class _Win:
 class DesktopBandTest(unittest.TestCase):
     def test_workerw_defview_is_used_and_repin_is_idempotent(self):
         fake = _FakeUser32(workerw=True)
-        with patch.object(ui, '_u32', fake):
+        with patch.object(ui, '_u32', fake), \
+                patch.object(ui, '_set_wnd_long_ptr', fake.SetOwner):
             self.assertTrue(ui.pin_to_desktop(_Win(fake.PANEL)))
             self.assertTrue(ui.pin_to_desktop(_Win(fake.PANEL)))
-        self.assertEqual(fake.parent[fake.PANEL], fake.DEFVIEW)
+        self.assertEqual(fake.owner[fake.PANEL], fake.DEFVIEW)
         self.assertEqual(fake.set_parent_calls, [(fake.PANEL, fake.DEFVIEW)])
 
     def test_progman_defview_remains_supported(self):
         fake = _FakeUser32(workerw=False)
-        with patch.object(ui, '_u32', fake):
+        with patch.object(ui, '_u32', fake), \
+                patch.object(ui, '_set_wnd_long_ptr', fake.SetOwner):
             self.assertTrue(ui.pin_to_desktop(_Win(fake.PANEL)))
-        self.assertEqual(fake.parent[fake.PANEL], fake.DEFVIEW)
+        self.assertEqual(fake.owner[fake.PANEL], fake.DEFVIEW)
+
+    def test_unpin_changes_owner_without_toggling_visibility(self):
+        fake = Mock()
+        with patch.object(ui, '_u32', fake), \
+                patch.object(ui, '_set_wnd_long_ptr', fake.SetOwner) as set_owner:
+            ui.unpin_from_desktop(_Win(400))
+        set_owner.assert_called_once_with(400, ui._GWLP_HWNDPARENT, None)
+        fake.SetParent.assert_not_called()
+        fake.ShowWindow.assert_not_called()
 
     def test_panel_watchdog_accepts_workerw_parent(self):
         fake = _FakeUser32(workerw=True)
