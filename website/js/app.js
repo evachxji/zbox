@@ -20,8 +20,8 @@
   }
 
   /* ---------- 下载地址（单一配置点，可修改） ---------- */
-  var WINDOWS_DOWNLOAD_URL = "https://dl.wzyjc.cn/dl/zbox-Setup-v0.5-x64.exe";
-  var MOBILE_DOWNLOAD_URL = "https://dl.wzyjc.cn/dl/zbox-Android-v0.5.apk";
+  var WINDOWS_DOWNLOAD_URL = "https://dl.wzyjc.cn/dl/zbox-Setup-v0.5.1-x64.exe";
+  var MOBILE_DOWNLOAD_URL = "https://dl.wzyjc.cn/dl/zbox-Android-v0.5.1.apk";
   var HARMONY_DOWNLOAD_URL = "https://appgallery.huawei.com/app/detail?id=com.zbox.transfer";
   var GITHUB_URL = "https://github.com/evachxji/zbox";
 
@@ -358,7 +358,7 @@
   tl.to("#desk-main", { scale: 1, duration: .65, ease: "power2.inOut" }, 9.45);
   tl.to("#stage-main .grid:not(#g3)", { autoAlpha: 1, duration: .5 }, 9.55);
   capIn(tl, "#cap-yours", 9.9);
-  capOut(tl, "#cap-yours", 10.55);
+  capOut(tl, "#cap-yours", 10.5.15);
 
   /* ============================================================
      第六幕：双击显隐
