@@ -2645,7 +2645,9 @@ class ShotOverlay(QWidget):
             self._tl8n_hint('shot.translate.no_text')
             self._update_tl8n_button()
             return
-        paras = translation_core.cluster_paragraphs(regions)
+        # 行级翻译与渲染：每条译文严格对应原 OCR 行，避免长段漏翻/换行后错位。
+        paras = [translation_core.Paragraph(r.bbox, [r])
+                 for r in translation_core.reading_order(regions)]
         source = translation_core.detect_lang('\n'.join(r.text for r in regions))
         target = translation_core.target_language(i18n.get_language())
         if not translation_core.should_translate(source, target):

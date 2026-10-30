@@ -258,6 +258,14 @@ def parse_stream_response(raw, expected_count):
     if not isinstance(body, str):
         raise DoubaoReplyError('invalid stream body')
 
+    # 鉴权/限流错误可能直接返回普通 JSON，而不是 SSE event:err（插件 QT 分支同款）。
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict) and payload.get('code') not in (None, 0, '0'):
+        _raise_api_error(payload.get('code'))
+
     translations = [None] * expected_count
     body = body.replace('\r\n', '\n').replace('\r', '\n')
     for block in body.split('\n\n'):
@@ -334,9 +342,23 @@ class DoubaoSession(object):
             self._on_error(err)
 
     def _succeed(self, texts):
-        if self._alive():
-            self._finished = True
+        if not self._alive():
+            return
+        self._finished = True
+        get_cookies = getattr(self._page, 'get_cookies', None)
+        if get_cookies is None:
             self._on_done(texts)
+            return
+
+        def refreshed(cookies):
+            # 插件始终使用浏览器实时 Cookie；zbox 每次成功后也刷新本地快照，
+            # 避免服务端轮换会话后仍反复恢复登录时的旧 Cookie。
+            if cookies:
+                _save_cookie_jar(cookies)
+            if not self._cancelled:
+                self._on_done(texts)
+
+        get_cookies(_DOUBAO_COOKIE_URLS, refreshed)
 
     def translate(self, texts, target_lang, on_done, on_error, preloaded=False):
         """页面预加载时跳过导航，随后直接发送流式翻译请求。"""
@@ -421,6 +443,9 @@ def make_page(parent=None):
 
         def run_js(self, script, cb):
             edge_page.run_js(script, lambda v: dispatcher.post(cb, v))
+
+        def get_cookies(self, urls, cb):
+            edge_page.get_cookies(urls, lambda cs: dispatcher.post(cb, cs))
 
         def close(self):
             edge_page.close()

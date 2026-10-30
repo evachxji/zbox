@@ -139,10 +139,10 @@ class TranslateFlowTest(unittest.TestCase):
         self.assertNotEqual(before.constBits().tobytes(),
                             after.constBits().tobytes())
 
-    def test_translator_received_paragraph_texts(self):
+    def test_translator_received_individual_line_texts(self):
         self._translate()
         session = _FakeTranslator.instances[0]
-        self.assertEqual(session.texts, ['hello\nworld'])
+        self.assertEqual(session.texts, ['hello', 'world'])
 
     def test_toggle_hides_layer_and_restores(self):
         before = self.overlay.grab().toImage()

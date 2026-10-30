@@ -62,6 +62,12 @@ class StreamingApiTest(unittest.TestCase):
         self.assertIn('/alice/user/launch', js)
         self.assertNotIn('/alice/profile/self', js)
 
+    def test_plain_json_auth_error_is_reported_as_login_required(self):
+        raw = json.dumps({'status': 200, 'body': json.dumps({
+            'code': 710022013, 'message': 'tourist reach limited'})})
+        with self.assertRaises(dw.DoubaoLoginRequired):
+            dw.parse_stream_response(raw, 1)
+
     def test_parses_cometix_sse_items_by_index(self):
         payload = json.dumps({'code': 0, 'data': {'items': [
             {'index': 1, 'res': '世界'}, {'index': 0, 'res': '你好'}]}})
@@ -106,6 +112,23 @@ class SessionFlowTest(unittest.TestCase):
         out = self._run(page, preloaded=True)
         self.assertEqual(out.get('done'), ['你好'])
         self.assertEqual(page.loaded, [])
+
+    def test_success_refreshes_live_cookies_before_done(self):
+        page = FakePage(translations=[self._stream([{'index': 0, 'res': '你好'}])])
+        cookies = [{'name': 'sessionid', 'value': 'new', 'domain': '.doubao.com'}]
+        requested = []
+        def get_cookies(urls, cb):
+            requested.append(urls)
+            cb(cookies)
+        page.get_cookies = get_cookies
+        events = []
+        session = dw.DoubaoSession(page)
+        with patch.object(dw, '_save_cookie_jar') as save:
+            session.translate(['Hello'], 'zh', lambda texts: events.append(texts),
+                              lambda err: events.append(err))
+        self.assertEqual(requested, [dw._DOUBAO_COOKIE_URLS])
+        save.assert_called_once_with(cookies)
+        self.assertEqual(events, [['你好']])
 
     def test_network_load_failure(self):
         page = FakePage(load_ok=False)

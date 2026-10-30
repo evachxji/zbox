@@ -576,8 +576,8 @@ class PinTranslateBusyTest(unittest.TestCase):
         self.addCleanup(win.close)
         return win
 
-    def test_busy_paints_marquee_border(self):
-        """busy 态：沿窗口边框跑淡蓝色跑马灯，画面本体不模糊不遮挡。"""
+    def test_busy_paints_scan_line_and_status_pill(self):
+        """A 方案：顶部扫描线 + 底部状态胶囊，图片中心保持原样。"""
         win = self._pin()
         before = win.grab().toImage()
         win.set_translate_busy(True)
@@ -587,14 +587,15 @@ class PinTranslateBusyTest(unittest.TestCase):
         after = win.grab().toImage()
         self.assertNotEqual(before.constBits().tobytes(),
                             after.constBits().tobytes())
-        # 画面本体不动：中心像素保持原色
         c = win.rect().center()
         self.assertEqual(before.pixelColor(c), after.pixelColor(c))
-        # 边缘出现淡蓝光带：左边框逐像素找蓝色调
-        h = win.height()
+        # 顶部有蓝色扫描线。
         self.assertTrue(any(
-            after.pixelColor(2, y).blue() > after.pixelColor(2, y).red() + 20
-            for y in range(2, h - 2)), '边框应有淡蓝色跑马灯')
+            after.pixelColor(x, 2).blue() > after.pixelColor(x, 2).red() + 20
+            for x in range(2, win.width() - 2)), '顶部应有扫描亮线')
+        # 底部图片内部出现状态胶囊；旧边框跑马灯不会覆盖这一区域。
+        x, y = win.width() // 2, win.height() - 28
+        self.assertNotEqual(before.pixelColor(x, y), after.pixelColor(x, y))
 
     def test_busy_stop_without_result_keeps_original(self):
         win = self._pin()
@@ -668,6 +669,41 @@ class PinTranslateBusyTest(unittest.TestCase):
             self.assertIsNotNone(win._tl8n_pair)
             self.assertFalse(win._tl8n_busy)
             self.assertIsNone(win._editor)
+
+    def _translated_pin_showing_original(self):
+        win = self._pin()
+        layer = QImage(win._img.size(), QImage.Format_ARGB32)
+        layer.fill(QColor('#ff0000'))
+        win.finish_translate(layer)
+        win._translate_clicked()   # 切回原文预览；输出仍应选译文
+        return win
+
+    def test_confirm_copies_translation_even_when_original_previewed(self):
+        win = self._translated_pin_showing_original()
+        translated = win._tl8n_pair[1]
+        win._copy_image()
+        copied = QApplication.clipboard().image()
+        self.assertEqual(copied.constBits().tobytes(), translated.constBits().tobytes())
+
+    def test_save_writes_translation_even_when_original_previewed(self):
+        import tempfile
+        from unittest.mock import patch
+        win = self._translated_pin_showing_original()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'translated.png')
+            with patch('pinshot.QFileDialog.getSaveFileName', return_value=(path, 'PNG')):
+                win._save_image()
+            saved = QImage(path)
+        self.assertEqual(saved.constBits().tobytes(),
+                         win._tl8n_pair[1].constBits().tobytes())
+
+    def test_double_click_copies_translation_and_closes(self):
+        win = self._translated_pin_showing_original()
+        translated = win._tl8n_pair[1]
+        QTest.mouseDClick(win, Qt.LeftButton, pos=win.rect().center())
+        copied = QApplication.clipboard().image()
+        self.assertEqual(copied.constBits().tobytes(), translated.constBits().tobytes())
+        self.assertFalse(win.isVisible())
 
     def test_edit_image_clears_translation_pair(self):
         win = self._pin()

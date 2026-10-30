@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """钉图：把截图钉在桌面上的无边框贴图窗（Snipaste F3 / QQ 钉在桌面同款）。
-点击/拖拽显示截图工具条、拖拽移动、滚轮等比缩放、双击关闭；置顶 Tool 窗——故意不挂桌面带（挂带会被应用窗口压住，
+点击/拖拽显示截图工具条、拖拽移动、滚轮等比缩放、双击复制并关闭；置顶 Tool 窗——故意不挂桌面带（挂带会被应用窗口压住，
 贴图的意义就是浮在最上面随时对照）；不持久化，进程退出即消失。"""
 import math
 from datetime import datetime
@@ -37,13 +37,12 @@ class PinWindow(QWidget):
         self._toolbar_btns = {}
         self._editor = None
         self._closing = False
-        self._tl8n_busy = False     # 翻译中：沿边框跑淡蓝色跑马灯
+        self._tl8n_busy = False     # 翻译中：顶部扫描线 + 底部状态胶囊
         self._tl8n_pair = None      # (原图, 译文图)：工具条翻译键切换
         self._mq_phase = 0.0
         self._mq_timer = QTimer(self)
-        self._mq_timer.setInterval(50)           # 与 GlowCard 同节奏（约 2.5s 一圈）
+        self._mq_timer.setInterval(50)           # 20fps 驱动扫描线与旋转指示
         self._mq_timer.timeout.connect(self._mq_tick)
-        self._mq_poly = None        # 边框折线缓存：(尺寸键, 线段表, 周长)
         self._filter_installed = False
         app = QApplication.instance()
         if app is not None:
@@ -55,7 +54,7 @@ class PinWindow(QWidget):
             _pins.remove(self)
 
     def set_translate_busy(self, on):
-        """翻译进行中：沿窗口边框跑淡蓝色跑马灯（画面本体不动）。"""
+        """翻译进行中：顶部扫描线 + 底部状态提示（图片中心不动）。"""
         if on:
             if self._tl8n_busy:
                 return
@@ -70,49 +69,45 @@ class PinWindow(QWidget):
         self._mq_phase = (self._mq_phase + 0.025) % 1.0
         self.update()
 
-    _MQ_PENS = None   # 60 档淡蓝 QPen 类级缓存：亮度沿周长余弦起伏成追跑光带
+    def _paint_translate_busy(self, p):
+        """A 方案：顶部往返扫描，底部居中显示旋转指示和“正在翻译”。"""
+        accent = QColor('#6ea8fe')
+        phase = self._mq_phase
+        scan_w = max(36.0, self.width() * 0.38)
+        progress = (1.0 - math.cos(2 * math.pi * phase)) / 2.0
+        scan_x = (self.width() - scan_w) * progress
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(110, 168, 254, 45))
+        p.drawRect(QRectF(scan_x - 2, 0, scan_w + 4, 5))
+        p.setBrush(accent)
+        p.drawRect(QRectF(scan_x, 0, scan_w, 3))
 
-    @classmethod
-    def _marquee_pens(cls):
-        if cls._MQ_PENS is None:
-            cls._MQ_PENS = [QPen(QColor.fromHsv(214, 165,  # 对齐视频卡呼吸灯的淡蓝色相
-                                                int(90 + 165 * (0.5 + 0.5 * math.cos(
-                                                    2 * math.pi * i / 60.0)))),
-                                 3, Qt.SolidLine, Qt.RoundCap)
-                            for i in range(60)]
-        return cls._MQ_PENS
+        font = p.font()
+        font.setPixelSize(12)
+        font.setBold(True)
+        p.setFont(font)
+        fm = p.fontMetrics()
+        text = fm.elidedText(t('shot.translate.translating'), Qt.ElideRight,
+                             max(20, self.width() - 80))
+        text_w = fm.horizontalAdvance(text)
+        pill_w = min(self.width() - 16.0, 12 + 12 + 7 + text_w + 12)
+        pill_h = 30.0
+        pill_x = (self.width() - pill_w) / 2.0
+        pill_y = max(6.0, self.height() - pill_h - 12.0)
+        pill = QRectF(pill_x, pill_y, pill_w, pill_h)
+        p.setPen(QPen(QColor(110, 168, 254, 150), 1))
+        p.setBrush(QColor(20, 27, 38, 235))
+        p.drawRoundedRect(pill, pill_h / 2.0, pill_h / 2.0)
 
-    def _marquee_segments(self):
-        """窗口边框的折线段 + 各段起点累计周长（尺寸不变时缓存）。"""
-        key = (self.width(), self.height())
-        if self._mq_poly is None or self._mq_poly[0] != key:
-            r = QRectF(self.rect()).adjusted(2, 2, -3, -3)
-            pts = [r.topLeft(), r.topRight(), r.bottomRight(), r.bottomLeft(),
-                   r.topLeft()]
-            segs = []
-            acc = 0.0
-            for i in range(4):
-                a, b = pts[i], pts[i + 1]
-                seg_len = math.hypot(b.x() - a.x(), b.y() - a.y())
-                n = max(1, int(seg_len / 6))   # 6px 一段，光带才能沿边连续流动
-                for k in range(n):
-                    t0, t1 = k / n, (k + 1) / n
-                    segs.append((acc + seg_len * t0,
-                                 a + (b - a) * t0, a + (b - a) * t1))
-                acc += seg_len
-            self._mq_poly = (key, segs, acc)
-        return self._mq_poly[1], self._mq_poly[2]
-
-    def _paint_marquee(self, p):
-        """沿边框逐段取色：「累计周长位置 - 相位」映射到淡蓝亮度档，相位推进即追跑。"""
-        segs, total = self._marquee_segments()
-        if not total:
-            return
-        pens = self._marquee_pens()
-        for start, a, b in segs:
-            frac = ((start / total) - self._mq_phase) % 1.0
-            p.setPen(pens[int(frac * 60) % 60])
-            p.drawLine(a, b)
+        spinner = QRectF(pill_x + 12, pill_y + 9, 12, 12)
+        p.setPen(QPen(QColor(110, 168, 254, 70), 2, Qt.SolidLine, Qt.RoundCap))
+        p.setBrush(Qt.NoBrush)
+        p.drawArc(spinner, 0, 360 * 16)
+        p.setPen(QPen(accent, 2, Qt.SolidLine, Qt.RoundCap))
+        p.drawArc(spinner, int(phase * 360 * 16), 100 * 16)
+        p.setPen(QColor('#ffffff'))
+        p.drawText(QRectF(pill_x + 31, pill_y, text_w + 2, pill_h),
+                   Qt.AlignLeft | Qt.AlignVCenter | Qt.TextSingleLine, text)
 
     def finish_translate(self, layer):
         """翻译成功：译文图层压到图上（保留原图，工具条翻译键可切回原文）。"""
@@ -144,7 +139,7 @@ class PinWindow(QWidget):
         p.drawImage(self.rect(), self._img)
         if self._tl8n_busy:
             p.setRenderHint(QPainter.Antialiasing)
-            self._paint_marquee(p)
+            self._paint_translate_busy(p)
         p.setPen(QPen(self._border, 1))
         p.drawRect(self.rect().adjusted(0, 0, -1, -1))
         p.end()
@@ -175,7 +170,8 @@ class PinWindow(QWidget):
 
     def mouseDoubleClickEvent(self, e):
         if e.button() == Qt.LeftButton:
-            self.close()   # 双击关闭（QQ 同款）
+            self._copy_image()   # 双击 = 复制当前输出图并关闭（QQ 同款）
+            self.close()
         else:
             super(PinWindow, self).mouseDoubleClickEvent(e)
 
@@ -294,8 +290,12 @@ class PinWindow(QWidget):
             self.show()
             self.raise_()
 
+    def _output_image(self):
+        # 原文预览只影响显示；完成/复制/保存优先输出已生成的译文图。
+        return self._tl8n_pair[1] if self._tl8n_pair is not None else self._img
+
     def _copy_image(self):
-        QApplication.clipboard().setImage(self._img)
+        QApplication.clipboard().setImage(self._output_image())
         self._hide_toolbar()
 
     def _save_image(self):
@@ -303,7 +303,7 @@ class PinWindow(QWidget):
         path, _f = QFileDialog.getSaveFileName(
             self, t('shot.save_title'), name, t('shot.save_filter'))
         if path:
-            self._img.save(path)
+            self._output_image().save(path)
             self._hide_toolbar()
 
     def hideEvent(self, e):
